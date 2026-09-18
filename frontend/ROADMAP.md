@@ -1064,9 +1064,8 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   by hash, every tunable constant in the mixed files value-locked (new constants forbidden), inline drive logic region-locked
   between `// 🔒 NAV-LOCK begin/end` comments. A failing gate is a question for Jeff; `--relock` only with his quoted words
   (`RULES.md` §4). It runs in every OTA and cut ritual.
-- **HELD behind the lock:** the parked-heading fix from Codex r5b (branch `fix/parked-heading-r5b`, `d62ee832`) — a stop with
-  CarPlay/AA still attached froze the approach heading so a slow turn after it was never retired. Needs Jeff's yes → merge →
-  `--relock` → OTA.
+- **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
+  real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
 - **Next session (Jeff's agenda, HANDOFF §4):** (a) debug + optimization — telemetry volume first (~15k rows/day at ~10 testers
   on a swapping Nano), then heat/rAF, startup; (b) strip what is unused — `npx knip` / `npx ts-prune`, nothing inside a locked
   module without his say-so; (c) build-80 prep — RevenueCat, Resend hardening, Supabase Pro + Small + cap off and

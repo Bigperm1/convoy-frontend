@@ -1066,6 +1066,14 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **HELD FOR THE NEXT OTA (2026-09-18 — committed + pushed, NOT published; needs Jeff's go):**
+  (1) the in-app update check in `src/UpdateReadyPill.tsx` — Olaf's phone kept one process alive 15 h and never
+  downloaded OTA-AZ; it now checks on mount / foreground / every 30 min while on screen (Codex r4 APPROVE, `a852f5d5`…`08a7096c`);
+  (2) auto-boat removed (`6a168f64`); (3) the route line's notchy start (Jeff: *"the car is smooth but the route line when
+  its dissappearing in front of the car is notchy"*) — near/far split, `3dddf057` → `d1eae56d`: sim 0 Ave 54 km/h frames
+  jumping >2 px 206 → 0; Codex r1–r5 findings each fixed with a gate (`tools/sim-qc/ribbon_near_test.mts` N7–N10);
+  **Codex r6 NOT run — Codex usage limit until 2026-09-19 10:38.** The glow's start is now a two-step fade (butt caps)
+  instead of a round tip — Jeff to OK the look. CarPlay/AA share the code; the car screen is field-verify only.
 - **Next session (Jeff's agenda, HANDOFF §4):** (a) debug + optimization — telemetry volume first (~15k rows/day at ~10 testers
   on a swapping Nano), then heat/rAF, startup; (b) strip what is unused — `npx knip` / `npx ts-prune`, nothing inside a locked
   module without his say-so; (c) build-80 prep — RevenueCat, Resend hardening, Supabase Pro + Small + cap off and

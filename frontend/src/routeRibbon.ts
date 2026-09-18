@@ -49,7 +49,6 @@ import { metersPerDp } from "./routeTrim";
 // The cut ANCHOR lives in src/ribbonAnchor.ts (dependency-free, so tools/sim-qc/ribbon_anchor_test.mts
 // runs it under plain Node); re-exported here so every existing caller keeps its import.
 export { alongMOnPartition, anchorCutM, type CutAnchorHint, type CutAnchor, type AnchorPartition } from "./ribbonAnchor";
-import { alongMOnPartition } from "./ribbonAnchor";
 import { colorFor, type CongestionLevel } from "./mapboxDirections";
 
 /** [lng, lat] — GeoJSON order, the order the sources already use. */
@@ -312,21 +311,26 @@ export function ribbonSeamM(cutM: number, fadeM: number): number {
  * a zoom-in the seam is held well ahead of its target (z13 → z17 at pitch 60: 2040 m vs 1104 m), a reset put the
  * new near core's end at 1152 m while the OLD far piece, still on screen, started at 2040 m — 888 m of line gone
  * until the far source landed. So the seam is carried: on the same road (identical vertices) it simply continues;
- * on a different line it goes where `carrySeamM` says — the old seam, or the fork where the new line leaves the
- * old one, whichever comes first — so the road both lines share stays drawn whichever source lands first.
+ * on a different line `carrySeamM` finds how far the new line runs along the old one — to the old seam, or to the
+ * fork where it leaves — so the road both lines share stays drawn whichever source lands first.
  */
-export type RibbonSeamState = { key: RibbonPartition; seam: number; overlapM: number } | null;
+export type RibbonSeamState = { key: RibbonPartition; seam: number; overlapM: number; cut: number } | null;
 export function nextRibbonSeam(prev: RibbonSeamState, p: RibbonPartition, cutQ: number, fadeM: number): { seam: number; state: RibbonSeamState } {
   const target = ribbonSeamM(cutQ, fadeM);
   const overlapM = ribbonSeamStepM(fadeM);
+  let from: { seam: number; overlapM: number } | null = prev;
   if (prev && prev.key !== p && !samePath(prev.key, p)) {
-    const carried = carrySeamM(prev.key, prev.seam, p, cutQ);
-    const seam = carried ?? target;
-    return { seam, state: { key: p, seam, overlapM } };
+    const c = carrySeamM(prev.key, prev.cut, prev.seam, p, cutQ);
+    if (!c) return { seam: target, state: { key: p, seam: target, overlapM, cut: cutQ } };
+    // The shared road reaches the old seam: walk from there exactly as on the old line — the old near core, still on
+    // screen, runs one old overlap past it. It forks before: the old near piece draws the shared road up to the fork
+    // either way, so the new seam only has to reach the fork — and at least its target, so the fade is never cut short.
+    if (!c.reached) { const seam = Math.max(target, c.m); return { seam, state: { key: p, seam, overlapM, cut: cutQ } }; }
+    from = { seam: c.m, overlapM: prev.overlapM };
   }
-  if (!prev) return { seam: target, state: { key: p, seam: target, overlapM } };
-  const seam = Math.max(prev.seam, Math.min(target, prev.seam + prev.overlapM));
-  return { seam, state: { key: p, seam, overlapM } };
+  if (!from) return { seam: target, state: { key: p, seam: target, overlapM, cut: cutQ } };
+  const seam = Math.max(from.seam, Math.min(target, from.seam + from.overlapM));
+  return { seam, state: { key: p, seam, overlapM, cut: cutQ } };
 }
 
 /** The same vertices in the same order — a traffic/colour rebuild of the line that is on screen. */
@@ -340,35 +344,63 @@ function samePath(a: RibbonPartition, b: RibbonPartition): boolean {
 }
 
 /**
- * Where the seam goes on a NEW line (Codex review r4). Walk the new line forward from its cut while it still runs
- * along the old one, and stop at the first of: the point where the OLD far piece starts (the old seam), or the FORK
- * where the new line leaves the old one. Holding the seam there keeps the shared road drawn in either landing
- * order — the new near core runs past that point (it overlaps by a step) to meet the old far piece or reach the
- * fork, and the new far piece starts at a point the old near piece still covers. The new line's own branch past a
- * fork shows when its source lands; it is new either way. null = nothing is shared ahead of the cut (a different
- * road, or a U-turn): the caller starts from the target.
+ * The metre on `p`, within ±spanM of `expectM`, where `p` passes within `tolM` of a point — the pass NEAREST the
+ * expected metre, not the first in metre order (Codex review r5: a route that drives the same road twice has two
+ * passes at the same spot, and the first one is the wrong one once the car is on the second).
  */
-export function carrySeamM(prev: RibbonPartition, prevSeamM: number, p: RibbonPartition, fromM: number, tolM = 5): number | null {
+function passNear(p: RibbonPartition, pt: LngLat, expectM: number, spanM: number, tolM: number): number | null {
+  const n = p.coords.length;
+  if (n < 2) return null;
+  const k = Math.PI / 180, cosLat = Math.cos(pt[1] * k);
+  const X = (ln: number) => (ln - pt[0]) * k * cosLat * R, Y = (la: number) => (la - pt[1]) * k * R;
+  const lo = expectM - spanM, hi = expectM + spanM;
+  let a = 1, b = n - 1;
+  while (a < b) { const mid = (a + b) >> 1; if (p.cum[mid] < lo) a = mid + 1; else b = mid; }
+  let best: number | null = null, bestErr = Infinity;
+  let px = X(p.coords[a - 1][0]), py = Y(p.coords[a - 1][1]);
+  for (let i = a; i < n; i++) {
+    const s0 = p.cum[i - 1], s1 = p.cum[i];
+    if (s0 > hi) break;
+    const cx = X(p.coords[i][0]), cy = Y(p.coords[i][1]);
+    const dx = cx - px, dy = cy - py, len2 = dx * dx + dy * dy;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, -(px * dx + py * dy) / len2)) : 0;
+    const qx = px + t * dx, qy = py + t * dy;
+    if (qx * qx + qy * qy <= tolM * tolM) {
+      const m = s0 + t * (s1 - s0);
+      if (m >= lo && m <= hi && Math.abs(m - expectM) < bestErr) { bestErr = Math.abs(m - expectM); best = m; }
+    }
+    px = cx; py = cy;
+  }
+  return best;
+}
+
+/**
+ * How far a NEW line runs along the OLD one (Codex review r4/r5). The new line's cut is matched to the old line on
+ * the pass nearest the old line's own committed cut — the pass the car is on — then walked forward in 10 m samples,
+ * each matched near where the previous one landed plus the distance walked, until it reaches the old seam
+ * (`reached`) or leaves the old line (the fork: off it by more than `tolM`, or back along it, a U-turn).
+ * null = nothing is shared ahead of the cut: a different road, or a U-turn.
+ */
+export function carrySeamM(
+  prev: RibbonPartition, prevCutM: number, prevSeamM: number, p: RibbonPartition, fromM: number, tolM = 5,
+): { m: number; reached: boolean } | null {
   const SAMPLE_M = 10, MAX_SAMPLES = 2000;
   const start = Math.max(0, Math.min(p.totalM, fromM));
-  const a = pointAt(p, start);
-  const first = alongMOnPartition(prev, a[1], a[0], null);
-  if (!first || first.distM > tolM || first.m >= prevSeamM) return null;
-  let lastM = start, oldM = first.m;
+  const first = Number.isFinite(prevCutM) ? passNear(prev, pointAt(p, start), prevCutM, 600, tolM) : null;
+  if (first == null || first >= prevSeamM) return null;
+  let lastM = start, oldM = first;
   for (let k = 1; k <= MAX_SAMPLES; k++) {
     const m = Math.min(p.totalM, start + k * SAMPLE_M);
-    const pt = pointAt(p, m);
-    const q = alongMOnPartition(prev, pt[1], pt[0], oldM, 250);
-    // Off the old line, or back along it (a U-turn): the lines have parted.
-    if (!q || q.distM > tolM || q.m < oldM - 1) return lastM > start ? lastM : null;
-    if (q.m >= prevSeamM) {
-      const t = (prevSeamM - oldM) / Math.max(1e-6, q.m - oldM);
-      return lastM + Math.max(0, Math.min(1, t)) * (m - lastM);
+    const q = passNear(prev, pointAt(p, m), oldM + (m - lastM), 50, tolM);
+    if (q == null || q < oldM - 1) return lastM > start ? { m: lastM, reached: false } : null;
+    if (q >= prevSeamM) {
+      const t = (prevSeamM - oldM) / Math.max(1e-6, q - oldM);
+      return { m: lastM + Math.max(0, Math.min(1, t)) * (m - lastM), reached: true };
     }
-    lastM = m; oldM = q.m;
-    if (m >= p.totalM) return lastM;
+    lastM = m; oldM = q;
+    if (m >= p.totalM) return { m: lastM, reached: false };
   }
-  return lastM;
+  return { m: lastM, reached: false };
 }
 
 /**

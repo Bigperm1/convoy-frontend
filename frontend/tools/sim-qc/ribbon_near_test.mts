@@ -348,8 +348,65 @@ for (const [label, fade, lead, stepM] of [["z14 highway", 150, 100, 8], ["z16.5 
     const tB = tick(17, 0);
     const s4 = nextRibbonSeam(stA, far, tB.cutQ, tB.fade).seam, s5 = nextRibbonSeam(stA, back, tB.cutQ, tB.fade).seam;
     const tgt = ribbonSeamM(tB.cutQ, tB.fade);
-    ok("N10 different road / U-turn: start from the target", s4 === tgt && s5 === tgt && carrySeamM(P, seamA, far, tB.cutQ) === null && carrySeamM(P, seamA, back, tB.cutQ) === null,
+    ok("N10 different road / U-turn: start from the target", s4 === tgt && s5 === tgt && carrySeamM(P, stA.cut, seamA, far, tB.cutQ) === null && carrySeamM(P, stA.cut, seamA, back, tB.cutQ) === null,
       `different road ${s4.toFixed(0)} m, U-turn ${s5.toFixed(0)} m, target ${tgt.toFixed(0)} m`);
+  }
+
+  // S3b — a fork INSIDE the fade (30 m past the car): the seam goes to its target, never back to the fork, so the
+  // fade is not cut short; the few metres of shared road are still drawn in both orders.
+  {
+    const shared = resample(P, carA, carA + 30, 3);
+    const f = shared[shared.length - 1];
+    const branch = Array.from({ length: 100 }, (_, i) => [f[0], f[1] - (i + 1) * 0.00018] as [number, number]);
+    const B = buildRibbonPartition([...shared, ...branch], null, "#2DEC86")!;
+    const tB = tick(17, 0);
+    const seam = nextRibbonSeam(stA, B, tB.cutQ, tB.fade).seam;
+    const nf = longestGap(B, tB.cutQ + 2, 28, [{ p: B, lo: tB.cutQ, hi: Math.min(B.totalM, seam + ov) }, oldFar]);
+    const ff = longestGap(B, tB.cutQ + 2, 28, [oldNear, { p: B, lo: seam, hi: B.totalM }]);
+    ok("N10 fork inside the fade: fade kept, shared road drawn", seam >= tB.cutQ + tB.fade && nf === 0 && ff === 0,
+      `seam ${seam.toFixed(0)} m vs cut + fade ${(tB.cutQ + tB.fade).toFixed(0)} m (fork 30 m); shared road uncovered near-first ${nf} m, far-first ${ff} m`);
+  }
+
+  // S6 — Codex r5: a route that drives the SAME road twice (600 m east, back, then east again past it). The car is on
+  // the second pass; a reroute continues east on that road. The new cut must be matched to the pass the car is on —
+  // not the first pass, whose turn-back looks like a fork. Two loops: back along a parallel road 40 m north, and a
+  // U-turn back along the same road. Negative control: the r4 carry (first pass in metre order).
+  {
+    const E = (x: number, y: number) => [-122.5 + x / 73033, 49.0 + y / 111320] as [number, number];
+    const run = (xs: [number, number][]) => { const o: [number, number][] = []; for (let i = 0; i < xs.length - 1; i++) { const [a0, b0] = [xs[i], xs[i + 1]]; const L = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]), n = Math.max(1, Math.round(L / 10)); for (let j = 0; j < n; j++) o.push(E(a0[0] + (b0[0] - a0[0]) * j / n, a0[1] + (b0[1] - a0[1]) * j / n)); } o.push(E(...xs[xs.length - 1])); return o; };
+    const r4Carry = (prev: any, prevSeamM: number, p: any, fromM: number) => {   // the r4 code, for the control
+      const a = ptAt(p, fromM), first = alongMOnPartition(prev, a[1], a[0], null);
+      if (!first || first.distM > 5 || first.m >= prevSeamM) return null;
+      let lastM = fromM, oldM = first.m;
+      for (let k = 1; k <= 2000; k++) {
+        const m = Math.min(p.totalM, fromM + k * 10), pt = ptAt(p, m), q = alongMOnPartition(prev, pt[1], pt[0], oldM, 250);
+        if (!q || q.distM > 5 || q.m < oldM - 1) return lastM > fromM ? lastM : null;
+        if (q.m >= prevSeamM) return lastM + Math.max(0, Math.min(1, (prevSeamM - oldM) / Math.max(1e-6, q.m - oldM))) * (m - lastM);
+        lastM = m; oldM = q.m; if (m >= p.totalM) return lastM;
+      }
+      return lastM;
+    };
+    for (const [label, loop] of [["parallel-road loop", [[600, 0], [600, 40], [0, 40], [0, 0]]], ["U-turn loop", [[600, 0], [0, 0]]]] as const) {
+      const A = buildRibbonPartition(run([[0, 0], ...(loop as any), [3000, 0]]), null, "#2DEC86")!;
+      const loopM = (loop as any).reduce((acc: any, pt: any) => ({ m: acc.m + Math.hypot(pt[0] - acc.x, pt[1] - acc.y), x: pt[0], y: pt[1] }), { m: 0, x: 0, y: 0 }).m;
+      const car = loopM + 100;                                   // second pass, 100 m east of the start
+      let st: any = null;
+      const a13 = tick(13, car); for (let k = 0; k < 3; k++) st = nextRibbonSeam(st, A, a13.cutQ, a13.fade).state;
+      const a17 = tick(17, car); st = nextRibbonSeam(st, A, a17.cutQ, a17.fade).state;
+      const sA = st.seam, ovA = ribbonSeamStepM(a17.fade);
+      const B = buildRibbonPartition(run([[100, 0], [2500, 0]]).map((c) => [c[0], c[1]] as [number, number]), null, "#2DEC86")!;
+      const tB = tick(17, 0);
+      const good = nextRibbonSeam(st, B, tB.cutQ, tB.fade).seam;
+      const bad = r4Carry(A, sA, B, tB.cutQ) ?? ribbonSeamM(tB.cutQ, tB.fade);
+      const aNear: Piece = { p: A, lo: a17.cutQ, hi: sA + ovA }, aFar: Piece = { p: A, lo: sA, hi: A.totalM };
+      const from = tB.cutQ + tB.fade + 10, to = B.totalM - 5;
+      const nf = (s: number) => longestGap(B, from, to, [{ p: B, lo: tB.cutQ, hi: Math.min(B.totalM, s + ov) }, aFar]);
+      const ff = (s: number) => longestGap(B, from, to, [aNear, { p: B, lo: s, hi: B.totalM }]);
+      const g = { nf: nf(good), ff: ff(good) }, b = nf(bad);
+      ok(`N10 road driven twice (${label}): matched to the car's pass, no gap either order`, g.nf === 0 && g.ff === 0 && Math.abs(good - (sA - car)) < 15,
+        `seam on the new line ${good.toFixed(0)} m (old seam ${(sA - car).toFixed(0)} m past the car); uncovered near-first ${g.nf} m, far-first ${g.ff} m`);
+      ok(`N10 NEG control (r4 carry on the first pass, ${label})`, b > 0, `seam ${bad.toFixed(0)} m → near-first ${b} m undrawn`);
+    }
   }
 }
 

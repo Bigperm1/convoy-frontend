@@ -137,6 +137,14 @@ out.push(`F 7km/h=no 3km/h=yes 0=yes unknown=yes cap=${SPOT_WRITE_MAX_SPEED_MS}m
   // G4 — moving again after a park replaces the heading and re-arms the creep rule.
   const g4 = drive([{ m: 0, spd: 4, course: 90, gate: true }, { m: 4, spd: 0, course: null, gate: true }, { m: 4, spd: 5, course: 270, gate: true }]);
   assert.equal(g4.obs?.deg, 270); assert.equal(g4.frozen, false); out.push(`G4 driving off again → new heading 270, unfrozen`);
+  // G5 — Codex r5b (2026-09-17): head unit ATTACHED, approach north, a temporary stop (a yield, selecting reverse), then a
+  //      12 m turn at 1 m/s and the real park. The stop must not freeze the approach heading while the car is attached —
+  //      the creep rule retires it. The same fixes phone-only (not attached) keep today's behaviour: the stop decides it.
+  const g5fixes = [{ m: 0, spd: 6, course: 0 }, { m: 6, spd: 6, course: 0 }, { m: 8, spd: 0.1, course: null }, { m: 8, spd: 0, course: null },
+    ...Array.from({ length: 12 }, (_, i) => ({ m: 9 + i, spd: 1, course: 90 })), { m: 21, spd: 0, course: null }];
+  const driveAttached = (attached: boolean) => { let t = HEADING_TRACK_EMPTY; let at = NOW; for (const f of g5fixes) { at += 1000; t = headingTrackStep(t, { lat: 49.2 + step(f.m), lng: -123.1, spd: f.spd, course: f.course, at }, true, attached); } return t; };
+  assert.equal(driveAttached(true).obs, null); assert.equal(driveAttached(false).obs?.deg, 0);
+  out.push(`G5 attached: stop → 12 m slow turn → park retires the approach heading; phone-only keeps it (frozen at the stop)`);
 }
 
 console.log(out.join(" | "));

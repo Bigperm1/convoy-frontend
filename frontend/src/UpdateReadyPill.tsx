@@ -6,6 +6,10 @@
 // 2026-07-11 incidents: every OTA "vanished", and Settings → Check for Updates
 // answered "You're up to date" because checkForUpdateAsync compares the server
 // against what's DOWNLOADED on disk, not what's RUNNING.
+// ⚠ 2026-09-18: not true of the installed expo-updates 29.0.18 on iOS — its check compares
+// against the LAUNCHED update (node_modules/expo-updates/ios/EXUpdates/Procedures/
+// CheckForUpdateProcedure.swift, shouldLoadNewUpdate(… withLaunchedUpdate:)); a stored
+// update is only refused if it FAILED to launch. The July note predates that.
 //
 // This pill watches expo-updates' live state (useUpdates). The moment a newer
 // update finishes downloading (isUpdatePending), it appears under the search bar:
@@ -21,7 +25,7 @@
 // open all night, then a CarPlay drive — still on OTA-AY 12 h after OTA-AZ shipped.
 // So while the pill is mounted and NOT hidden (no turn-by-turn, no head unit) we ask:
 // when the app comes to the foreground and every UPDATE_CHECK_EVERY_MS while it stays
-// up. expo-updates' own doc says not to check "in a frequent loop" — hence the
+// on screen. expo-updates' own doc says not to check "in a frequent loop" — hence the
 // throttle. A found update is downloaded; isUpdatePending then shows the pill as before.
 import React, { useEffect, useRef } from "react";
 import { AppState, Platform, Text, TouchableOpacity, StyleSheet } from "react-native";
@@ -32,6 +36,11 @@ const UPDATE_CHECK_EVERY_MS = 30 * 60_000;
 
 let lastCheckAt = 0;
 let checking = false;
+// What is already downloaded and waiting for the pill tap (Codex review r2, 2026-09-18,
+// verified in CheckForUpdateProcedure.swift): the check compares against the LAUNCHED
+// update, so until the tap every tick would see the same update as "available" and fetch +
+// log it again. Remember it and skip.
+let pendingTarget: string | null = null;
 
 // `mayFetch` is re-asked AFTER the server answers (Codex review 2026-09-18): a check that
 // starts while parked must not begin a download if a drive or a head unit started while
@@ -48,12 +57,15 @@ async function checkAndFetch(why: string, mayFetch: () => boolean): Promise<void
     // A server ROLLBACK directive answers isAvailable=false + isRollBackToEmbedded=true;
     // fetchUpdateAsync is what processes it, so it must be fetched too (Codex review).
     if (!res.isAvailable && !res.isRollBackToEmbedded) return;
+    const target = res.isRollBackToEmbedded ? "rollback" : String((res.manifest as any)?.id ?? "?");
+    if (target === pendingTarget) return; // already downloaded — the pill is showing it
     if (!mayFetch()) {
       lastCheckAt = 0; // look again as soon as the drive ends
       logEvent(`ota-check why=${why} avail=1 deferred=drive`);
       return;
     }
     const got = await Updates.fetchUpdateAsync();
+    if (got.isNew || got.isRollBackToEmbedded) pendingTarget = target;
     logEvent(`ota-check why=${why} avail=1 rollback=${res.isRollBackToEmbedded ? 1 : 0} fetched=${got.isNew || got.isRollBackToEmbedded ? 1 : 0}`);
   } catch (e: any) {
     logEvent(`ota-check why=${why} err=${String(e?.message ?? e).slice(0, 80)}`);
@@ -69,14 +81,20 @@ export default function UpdateReadyPill({ hidden }: { hidden?: boolean }) {
   hiddenRef.current = hidden;
   useEffect(() => {
     if (Platform.OS === "web") return;
-    const run = (why: string) => { if (!hiddenRef.current) void checkAndFetch(why, () => !hiddenRef.current); };
+    // Only while the app is on screen: a process kept alive in the background (location,
+    // CarPlay) must not poll; the foreground event checks the moment the driver comes back.
+    const run = (why: string) => {
+      if (!hiddenRef.current && AppState.currentState === "active") void checkAndFetch(why, () => !hiddenRef.current);
+    };
     run("mount");
     const sub = AppState.addEventListener("change", (s) => { if (s === "active") run("foreground"); });
     const id = setInterval(() => run("timer"), UPDATE_CHECK_EVERY_MS);
     return () => { sub.remove(); clearInterval(id); };
   }, []);
   // A drive that just ended (hidden → shown) is a natural moment to look.
-  useEffect(() => { if (!hidden) void checkAndFetch("unhidden", () => !hiddenRef.current); }, [hidden]);
+  useEffect(() => {
+    if (!hidden && AppState.currentState === "active") void checkAndFetch("unhidden", () => !hiddenRef.current);
+  }, [hidden]);
   if (Platform.OS === "web" || !isUpdatePending || hidden) return null;
   return (
     <TouchableOpacity

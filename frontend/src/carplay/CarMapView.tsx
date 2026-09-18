@@ -83,7 +83,8 @@ import {
 import { nearestRoadLine, roadHeadingOff, roadProjUsable, type LatLng as RoadLatLng } from '../roadSnap';
 import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, leadShiftedByLift, selfLiftScreenPt, clampCutToRoute, noseLeadDp } from '../routeTrim';
 import { selfLiftDrawnM, noteSelfLiftNav, subscribeSelfLiftDrawn, noteMapIdle } from '../selfLift';
-import { buildRibbonPartition, buildRibbonFeatures, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
+import RibbonNear, { type DrawSinkRef } from '../RibbonNear';
+import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, ribbonSeamM, anchorCutM, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat, type CutAnchorHint } from '../routeRibbon';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 
 // Single active route only → it lives at index 0; the alts layer filters it out
@@ -1163,6 +1164,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // car at a highway chase pitch.
   const camPitchRef = useRef<number | null>(null);
   const carDrawPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  // Per-frame drawn pose → <RibbonNear> (2026-09-18), the phone's ribbonNearSinkRef twin.
+  const carRibbonNearSinkRef: DrawSinkRef = useRef(null);
   const carTrimLogAt = useRef(0);
   // Along-route ease state for the route trim (see routeTrimEndFrac below).
   const fixEaseRef = useRef<{ key: string | null; prev: number; cur: number; at: number; gap: number } | null>(null);
@@ -2045,12 +2048,21 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // fade or the partition changes; every other tick hits this memo and native sees
   // the same object, so ShapeSource's PureComponent compare short-circuits it.
   // 🔒 NAV-LOCK begin car-ribbon-features-rebuild — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
+  // NEAR / FAR SPLIT (2026-09-18) — the phone's twin (ConvoyMapbox.tsx, src/routeRibbon.ts): with a live
+  // cut this source is [seam, destination], rebuilt only when the seam moves; <RibbonNear> below draws
+  // the fade-in up to the seam every frame from the drawn car.
+  const carRibbonSeamQ = ribbonCutQ != null ? ribbonSeamM(ribbonCutQ, ribbonFadeQ) : null;
+  const _carFarCutKey = carRibbonSeamQ == null ? ribbonCutQ : null;
+  const _carFarFadeKey = carRibbonSeamQ == null ? ribbonFadeQ : null;
   const routeFC: any = useMemo(() => ({
     type: 'FeatureCollection',
     features: hasRoute
-      ? buildRibbonFeatures(ribbonPartition, { cutM: ribbonCutQ, fadeM: ribbonFadeQ, index: SELECTED_INDEX })
+      ? (carRibbonSeamQ != null
+          ? buildRibbonFarFeatures(ribbonPartition, { startM: carRibbonSeamQ, index: SELECTED_INDEX })
+          : buildRibbonFeatures(ribbonPartition, { cutM: _carFarCutKey, fadeM: _carFarFadeKey ?? ribbonFadeQ, index: SELECTED_INDEX }))
       : [],
-  }), [hasRoute, ribbonPartition, ribbonCutQ, ribbonFadeQ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [hasRoute, ribbonPartition, carRibbonSeamQ, _carFarCutKey, _carFarFadeKey]);
   // 🔒 NAV-LOCK end car-ribbon-features-rebuild
 
   // ===== Live congestion gradient (mirror of the phone) =====
@@ -2330,6 +2342,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           liveZoomRef={carLiveZoomRef}
           refreshRef={selfRefreshRef}
           drawPosOutRef={carDrawPosRef}
+          drawSinkRef={carRibbonNearSinkRef}
           // PHONE PARITY (2026-07-30). Without this the dead-band expression in
           // SelfCarModel reads `(speedMs ?? 99) < SELF_CREEP_MS` = false FOREVER, so the
           // car surface was permanently on the tight 2.5 m moving band and never got the
@@ -2442,7 +2455,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             filter={['==', ['get', 'kind'], RIBBON_CASING] as any}
             // 24/8 → 20/7 and the core 12 → 10 (2026-09-16, Jeff: "just a tad skinnier") — the same three numbers as
             // ConvoyMapbox.tsx route-sel-casing / route-sel-core (CarPlay must match the phone).
-            style={{ lineColor: carRouteColor, lineWidth: 20, lineBlur: 7, lineOpacity: 0.55, lineCap: 'round', lineJoin: 'round', lineEmissiveStrength: 1 }}
+            // lineCap 'butt' + per-piece alpha (2026-09-18): this far piece starts where the per-frame near
+            // piece ends; a round cap on the translucent glow would overlap there and bead (phone: same).
+            style={{ lineColor: carRouteColor, lineWidth: 20, lineBlur: 7, lineOpacity: ['*', 0.55, ['coalesce', ['get', 'alpha'], 1]] as any, lineCap: 'butt', lineJoin: 'round', lineEmissiveStrength: 1 }}
           />
           <LineLayer
             id="car-route-sel-core"
@@ -2456,6 +2471,22 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           />
         </ShapeSource>
         // 🔒 NAV-LOCK end car-jsx-nav-ribbon-layers
+      ) : null}
+      {/* The per-frame near piece [cut, seam] (2026-09-18) — mounted with the nav route source above and
+          after it in the same commit, so its layers are created after the far casing + core. */}
+      {!previewMulti && hasRoute ? (
+        <RibbonNear
+          id="car-ribbon-near"
+          partition={ribbonPartition}
+          cutM={ribbonCutM}
+          leadM={trimLeadM}
+          fadeM={ribbonFadeQ}
+          seamM={carRibbonSeamQ}
+          fallbackM={ribbonPartition ? fracDrawn * ribbonPartition.totalM : 0}
+          index={SELECTED_INDEX}
+          edgeColor={carRouteColor}
+          sinkRef={carRibbonNearSinkRef}
+        />
       ) : null}
 
       {/* PREVIEW-only congestion source. The NAV congestion core now lives inside the

@@ -301,3 +301,24 @@ sat 14.8 m away on the line. Field receipts for the same numbers: `pose-fix` row
 fields on `corner-trace` / `draw-cmp` / `snap-mode`.
 - `node --experimental-strip-types tools/sim-qc/pose_field_replay.mts` — prints the FIELD replay behind `pose_estimator_test.mts` section Z: Jeff's 2026-09-16 90° traffic-light corners (18:27, 17:59, King Rd 18:30) and the 09:02 roundabout, his own 1 Hz rows driven through `src/poseEstimator.ts` on the app's own Mapbox polylines (`data/0916_corner90.json`, longitudes shifted +0.37° — home-area coordinates never enter the public repo). Section Z holds the nose-un-turn clamp (`POSE_ROAD_RATCHET_BEND_DEG`): first turning fix 46 → 38° (18:27) and 39 → 29° (17:59), no un-turn in the second before the corner, roundabout rows bit-identical to the pre-clamp estimator. Field receipts: `pose-fix … crs= est= road=` rows at 25–40 km/h corners.
 - `node --experimental-strip-types tools/sim-qc/draw_deadband_test.mts` — SelfCarModel's ACCEPTANCE DEAD-BAND, i.e. what the marker does on screen (2026-09-15, Jeff: "IT STUDDERED"). The band is compared against the DRAWN pose, so while moving 2.5 m is a TIME: measured on the ported effect+step chain, the drawn car was still for 41–42 % of display frames at 20–25 km/h (p50 pause 167–183 ms, worst 383 ms) and caught up in 2.5 m steps. `SELF_DEADBAND_SPEED_SCALED` makes the MOVING band `clamp(speed × SELF_DEADBAND_T_S, SELF_DEADBAND_MIN_M, SELF_DEADBAND_M)` while targets arrive at render cadence (the pose estimator during guidance, never the 1 Hz raw-fix feed). Gates: parked scatter, the sub-creep crawl, 60/100 km/h cruise and free drive identical; crawl jitter (lateral reversals) and along-track lag not worse; pause p90 at 20–28 km/h at least halved (measured 267 → 67, 217 → 50, 167 → 0 ms); a negative control that fails with the scaling off.
+
+## Route-line smoothness (video, sub-pixel) — 2026-09-18
+
+Jeff: *"the car is smooth but the route line when its dissappearing in front of the car is notchy"*. Film a straight,
+UNDIVIDED road (a divided highway lets the waypoint route and the app's route take different carriageways → off-route
+→ reroutes every few seconds; that invalidated the first Trans-Canada runs). 0 Avenue works:
+
+```bash
+python3 tools/sim-qc/route_wps.py 49.00240,-122.56000 49.00240,-122.66000 1 > /tmp/wps0.txt
+python3 tools/sim-qc/inject_place.py <UDID> qc0 49.00240 -122.66000      # app terminated
+tools/sim-qc/drive.sh <UDID> park 49.00240,-122.56000                      # then Search → qc0 → Start
+tools/sim-qc/drive.sh <UDID> go /tmp/wps0.txt 15 &  sleep 14
+xcrun simctl io <UDID> recordVideo --codec=h264 --force /tmp/drive.mov &  (sleep 25; kill -INT $!)
+python3 tools/sim-qc/ribbon_shift.py /tmp/drive.mov    # per-frame shift of the fade profile vs the nose
+```
+
+`ribbon_shift.py` cross-correlates the green profile above the nose frame to frame (sub-pixel): a smooth line moves ~0
+per frame; the old single-source ribbon drifted with the ground and snapped back when its quantised cut moved.
+Measured 2026-09-18 (old → near/far split): 54 km/h frames moving >2 px **206 → 0**, max 5.8 → 1.1 px; 97 km/h
+**107 → 5**, max 4.2 → 2.1 px. `ribbon_gap.py` (a threshold edge) is noisier — the glow's fade steps flip it by a
+whole fade piece — use it for the gap's LEVEL, not its jitter. Numeric gate: `ribbon_near_test.mts`.

@@ -1,6 +1,6 @@
 {
   "approvedBy": "Jeff",
-  "approvedAt": "2026-09-17",
+  "approvedAt": "2026-09-18",
   "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
   "approvals": [
     {
@@ -36,6 +36,20 @@
         "src/ConvoyMapbox.tsx#mbx-self-marker-kind-nav region 64f2341e4a19 → c2bec087ae64",
         "src/ConvoyMapbox.tsx#mbx-selfcar-road-snap-draw region 1de1aa2c73c4 → 9e57ed4603c8"
       ]
+    },
+    {
+      "at": "2026-09-18",
+      "quote": "Jeff, 2026-09-18: \"can you fix the route line jitters when near the car? the car is smooth but the route line when its dissappearing in front of the car is notchy any way to smooth it out?\"",
+      "changes": [
+        "src/routeRibbon.ts: code e1f44c8276ec → 311225c8db35",
+        "src/ConvoyMapbox.tsx#mbx-pushcam-glide-noselead region 4cad0c2fe04f → 264d5880cca4",
+        "src/ConvoyMapbox.tsx#mbx-ribbon-cut-anchor region bb47b16dd039 → d229d7a1eea7",
+        "src/ConvoyMapbox.tsx#mbx-jsx-route-layers region 01783b903435 → 6be936e2cc6f",
+        "src/ConvoyMapbox.tsx#mbx-jsx-selfcar-model region 284477783272 → 552c4b626f35",
+        "src/carplay/CarMapView.tsx#car-ribbon-features-rebuild region daf6eb499a1c → 62cad29f4a72",
+        "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region dec6b5c6ab0c → 817f57360ceb",
+        "src/carplay/CarMapView.tsx#car-jsx-nav-ribbon-layers region 6b7917b54db4 → db7ab9a97374"
+      ]
     }
   ],
   "files": {
@@ -56,7 +70,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/routeRibbon.ts": {
-      "hash": "sha256:e1f44c8276ec497f4d9e5e21dbdbbe8c7a09c668527ccc9587b9c6072e2d5455",
+      "hash": "sha256:311225c8db3514863f63ce45b3b85f316507ee0b85a2694f3fca211baa6fd3a2",
       "why": "pure drive-engine module: code-locked"
     },
     "src/ribbonAnchor.ts": {
@@ -274,7 +288,7 @@
         "mbx-selfcar-lift-query": "sha256:0c50093772499faaca34681f6c7df2260574d629df4a02e171ae0734f4444d72",
         "mbx-selfcar-angdelta": "sha256:f3fac890a6555edce00adc3a152151946b51026b2e09fd4db41192df8be99761",
         "mbx-cam-glide-pending": "sha256:43084c4689333780235fe668b28b2b439c60b879a304d09dd05414e33e1c37d6",
-        "mbx-pushcam-glide-noselead": "sha256:4cad0c2fe04fc36e45937db4f60a2c4246378a492e1a23557f221e52f50e8910",
+        "mbx-pushcam-glide-noselead": "sha256:264d5880cca475749bf41e2c1d72309a0cd244662cde742afb2fe2404c43e9fa",
         "mbx-pushcam-setcamera": "sha256:d1b136789e761bb69be9188a4e7a1514f8a40aed92eb445ed0021980aa75c6bd",
         "mbx-selfcar-bgtick": "sha256:d09c739f75ab5b31435ce0a291bc4cdb430720cb5d88dcb6dc48052681f95481",
         "mbx-car-frame-pump": "sha256:346b94255999305006afb788d45ec9438efbe076c6da75c5b6c5077ae4dc3c4a",
@@ -310,7 +324,7 @@
         "mbx-ribbon-trim-lead-inputs": "sha256:757d5820b3bd57c31358c1edbb4d4de60e53c63b925df6415cc06fc968a69291",
         "mbx-ribbon-fix-ease": "sha256:f65a67b4d7a2ba03aa5c1491bac0e7ed4f3d124ac21e670e6565d45e490b9be0",
         "mbx-ribbon-partition": "sha256:2a53998aaae7193eceb80c070fd3609cbd7016e142d9f9a737130d6bb88ac4ed",
-        "mbx-ribbon-cut-anchor": "sha256:bb47b16dd0391e98c23d3619ad0f4a9c56ad20c17d04d80020ee439204877107",
+        "mbx-ribbon-cut-anchor": "sha256:d229d7a1eea70125c9d99215eed5bc95dead05843b529236e26fe24a40dcbdaa",
         "mbx-selfcar-route-snap-gate": "sha256:440c3fa16919457fe89191d5e9501b8adae25868bf79e80fe1869d33a0caa330",
         "mbx-selfcar-road-snap-draw": "sha256:9e57ed4603c8fe5b891535777970d7604c54e089f853225f1023d7c15448f4e1",
         "mbx-pose-estimator-step": "sha256:c3d8053ebad01bce81374cb5de58c125aa22a4734b500dd23cd54bb96101e3bf",
@@ -321,9 +335,9 @@
         "mbx-preview-congestion-source": "sha256:13873f958a9d9cc096c438a72876aa72a648a620375847422cf5883978f32fee",
         "mbx-camera-changed-gesture-zoom": "sha256:dd1aa863eb8749fe1f86c0bfa435db563b630abed3296cb7460360a6ee6dd780",
         "mbx-jsx-puck-camera": "sha256:c973c27de96dee196645f0dd276efa3df933651bacce4ed8acb9b24f54b49ed0",
-        "mbx-jsx-route-layers": "sha256:01783b9034350acfb636e170c426c96b68ad912d51b841e217f220952e377778",
+        "mbx-jsx-route-layers": "sha256:6be936e2cc6fab47903d0382ca7a7791c3d1c12321088fce2f725ff392e522bb",
         "mbx-jsx-congestion-layers": "sha256:398fab521e8a0194fd6622c93fee0ff31e50108ae0bd841b8d21e360ddb4e829",
-        "mbx-jsx-selfcar-model": "sha256:284477783272fa9937ea05e2f57b9b67d637e7fc0eda85e7bbc344038719619a"
+        "mbx-jsx-selfcar-model": "sha256:552c4b626f351292e01d1e1db2dcb8d7c31341be57fafd6fbc8328e7ef898b17"
       },
       "ignored": [],
       "watchNew": true,
@@ -396,16 +410,16 @@
         "car-selfcar-road-snap-draw": "sha256:e8184ddff66525d8fe6f2be3e266e5a74079901de0b5110ad7c9ab9309712aa5",
         "car-selfcar-pose-step": "sha256:f1c8c7e4f95ab8e04d1403f7e0028c374def994061a5b3f231eabce29db7338e",
         "car-cam-heading-source": "sha256:cd5fdc1705b88b98933e6b60e2bf301debb3ebc721e27a5a994f5c8cee5caf69",
-        "car-ribbon-features-rebuild": "sha256:daf6eb499a1c99244bfb495d3e4707ce36564629b5458a493b3a6b71c1b9db7b",
+        "car-ribbon-features-rebuild": "sha256:62cad29f4a72a9a58073231686af24ad4700d51969d1ff9651b00269276f213a",
         "car-preview-cong-gradient": "sha256:e9b26b8f5901519f9045d0b917bb4f334f24ab291405bbc8b02dd51fb610bb8b",
         "car-preview-routes-fc": "sha256:ff4d6ada7dc6fa3a139f70a880bee7982fa3c8bd87bd0833f4f5ad480bab0a57",
         "car-selfcar-scale-refresh": "sha256:6548b3839dfdeda040362c36e38f7ab8d5a826c64758246dfdc965482aa64ac1",
         "car-cam-style-load-seed": "sha256:5970f89e831afc8791bbb2d0f379d691b6814a55c99cda765f87b00f6f1ec4dd",
         "car-jsx-road-query-layers": "sha256:b60491f8d86c5396ac33dfed1f38da75c1b693405aea52cce3689daaf38ba0ff",
         "car-jsx-camera": "sha256:9f7bf5a288d8f29441df1ecd8519b33db62031ab76180734c8579dd03039adcd",
-        "car-jsx-selfcar-model": "sha256:dec6b5c6ab0c443140e1fe26bdbb640a5f3ff35d158c92c9914476349c69d808",
+        "car-jsx-selfcar-model": "sha256:817f57360cebd301a79795635b0de27dea89ef9ee42e79c9e38a79666a1f6fed",
         "car-jsx-preview-route-layers": "sha256:9b374172cf200330c424feb4e7f274cfe51a6a79f23831c30daa2e21e6d9b7c9",
-        "car-jsx-nav-ribbon-layers": "sha256:6b7917b54db4057f3e94915b1e09b188633831d05e4edc24b3699d7c78c8d527",
+        "car-jsx-nav-ribbon-layers": "sha256:db7ab9a97374f6782263c20a966af1994f3bacb01054c39ed19d2895fbedfd8b",
         "car-jsx-preview-congestion": "sha256:87c2a860ddb0a7f79fd8f03da4a8e4ebbb178dd4265f8bf64a64cf3a5eeae014"
       },
       "ignored": [],

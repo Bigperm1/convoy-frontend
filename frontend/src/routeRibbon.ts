@@ -37,9 +37,11 @@
 // each colour change is expanded into BLEND_STEPS short pieces of interpolated colour
 // across the same 70 m band the gradient used, so the picture is the one the tester
 // photos were tuned against. The soft fade-in ahead of the nose is FADE_STEPS pieces of
-// rising alpha; the translucent glow casing stays ONE feature (overlapping translucent
-// caps would draw as blobs at every seam) and starts mid-fade, where its 8 px blur
-// reads as the same soft edge the old gradient fade produced.
+// rising alpha. The translucent glow starts mid-fade, where its blur reads as the same soft
+// edge the old gradient fade produced. Since 2026-09-18 the ribbon is TWO sources (see NEAR /
+// FAR SPLIT below): the glow is one feature from the seam to the end, plus a short fade-in
+// chain in the per-frame near piece — all BUTT-capped, because overlapping translucent caps
+// would draw as a bead wherever two glow pieces meet.
 //
 // Both surfaces call exactly this, with their own camera zoom, so the phone, CarPlay and
 // Android Auto cannot drift apart again (the four-surfaces rule).
@@ -255,6 +257,104 @@ export function buildRibbonFeatures(
   for (const r of p.runs) {
     if (r.endM <= m) continue;
     push(RIBBON_CORE, sliceCoords(p, Math.max(r.startM, m), r.endM), { color: r.color, alpha: 1 });
+  }
+  return feats;
+}
+
+// ── NEAR / FAR SPLIT (2026-09-18, Jeff: "the car is smooth but the route line when its
+// dissappearing in front of the car is notchy any way to smooth it out?") ─────────────────
+// The whole ribbon is one big source, rebuilt at most at the 12 Hz ticker and only when the
+// quantised cut moves (RIBBON_STEP_DP on a power-of-two metre ladder: 8 m at a z14 highway
+// camera). The car is re-drawn EVERY frame. So the line's start held still while the car
+// glided, then jumped: a sim recording at 97 km/h measured the nose→line gap as a staircase,
+// ~1.4 pt jumps about 3×/s (tools/sim-qc/ribbon_gap.py). Rebuilding the whole route per frame
+// is out (hundreds to thousands of vertices, 10–116 KB per stringify on CarPlay), so the line
+// is split: a short NEAR piece — the fade-in plus some solid line up to a SEAM — rebuilt every
+// frame from the car's drawn pose (src/RibbonNear.tsx), and the FAR piece from the seam to the
+// destination, rebuilt only when the seam moves (every RIBBON_SEAM_* metres, not every 8 m).
+// The pieces meet flush at the seam with BUTT caps on both layers, so the translucent glow can
+// no longer carry round caps: its start fades in over the second half of the fade instead.
+/** The glow's fade-in (alpha of its first pieces), over the second half of the core's fade. */
+const GLOW_RAMP = [0.33, 0.66];
+/** Seam step floor (m) and how many fades it spans: the far piece moves in these steps. */
+export const RIBBON_SEAM_MIN_M = 48;
+export const RIBBON_SEAM_FADE_MULT = 1;
+
+/** Metres between seam positions at this fade — the far piece is rebuilt once per step. */
+export function ribbonSeamStepM(fadeM: number): number {
+  const f = Number.isFinite(fadeM) && fadeM > 0 ? fadeM : 0;
+  return Math.max(RIBBON_SEAM_MIN_M, f * RIBBON_SEAM_FADE_MULT);
+}
+
+/**
+ * Where the far piece starts: at least one full step past the end of the fade, advanced in
+ * whole steps. The margin is what keeps the per-frame cut from ever overtaking the seam
+ * between two far rebuilds (the car covers a few metres per 12 Hz tick; a step is ≥ 48 m).
+ */
+export function ribbonSeamM(cutM: number, fadeM: number): number {
+  const step = ribbonSeamStepM(fadeM);
+  return Math.ceil((cutM + Math.max(0, fadeM) + step) / step) * step;
+}
+
+/**
+ * The NEAR piece: the fade-in and the solid line from `cutM` up to `endM` (the seam), glow
+ * included. Every feature carries `alpha` (the casing layer multiplies its own opacity by it).
+ */
+export function buildRibbonNearFeatures(
+  p: RibbonPartition | null,
+  opts: { cutM: number; fadeM: number; endM: number; index: number },
+): any[] {
+  if (!p) return [];
+  const cut = Math.max(0, Math.min(p.totalM, opts.cutM));
+  const end = Math.max(cut, Math.min(p.totalM, opts.endM));
+  if (end - cut < 0.05) return [];
+  const feats: any[] = [];
+  const push = (kind: string, coords: LngLat[], extra: Record<string, unknown>) => {
+    if (coords.length >= 2) {
+      feats.push({ type: "Feature", properties: { index: opts.index, kind, ...extra }, geometry: { type: "LineString", coordinates: coords } });
+    }
+  };
+  const fade = Math.max(0, Math.min(opts.fadeM, end - cut));
+  // Glow: ramps in over the second half of the fade, then solid to the seam.
+  const g0 = cut + fade * 0.5, g1 = cut + fade;
+  if (g1 - g0 > 0.5) {
+    const w = (g1 - g0) / GLOW_RAMP.length;
+    for (let j = 0; j < GLOW_RAMP.length; j++) push(RIBBON_CASING, sliceCoords(p, g0 + j * w, g0 + (j + 1) * w), { alpha: GLOW_RAMP[j] });
+  }
+  push(RIBBON_CASING, sliceCoords(p, Math.max(g0, g1), end), { alpha: 1 });
+  // Core: the same six-step fade the whole ribbon always had, then the colour runs.
+  let m = cut;
+  if (fade > 0.5) {
+    const w = fade / FADE_ALPHA.length;
+    for (let j = 0; j < FADE_ALPHA.length; j++) {
+      const a = m, b = m + w;
+      push(RIBBON_CORE, sliceCoords(p, a, b), { color: colorAt(p, (a + b) / 2), alpha: FADE_ALPHA[j] });
+      m = b;
+    }
+  }
+  for (const r of p.runs) {
+    if (r.endM <= m) continue;
+    if (r.startM >= end) break;
+    push(RIBBON_CORE, sliceCoords(p, Math.max(r.startM, m), Math.min(r.endM, end)), { color: r.color, alpha: 1 });
+  }
+  return feats;
+}
+
+/** The FAR piece: glow and colour runs from the seam to the destination, all solid. */
+export function buildRibbonFarFeatures(p: RibbonPartition | null, opts: { startM: number; index: number }): any[] {
+  if (!p) return [];
+  const s = Math.max(0, Math.min(p.totalM, opts.startM));
+  if (p.totalM - s < 0.05) return [];
+  const feats: any[] = [];
+  const push = (kind: string, coords: LngLat[], extra: Record<string, unknown>) => {
+    if (coords.length >= 2) {
+      feats.push({ type: "Feature", properties: { index: opts.index, kind, ...extra }, geometry: { type: "LineString", coordinates: coords } });
+    }
+  };
+  push(RIBBON_CASING, sliceCoords(p, s, p.totalM), { alpha: 1 });
+  for (const r of p.runs) {
+    if (r.endM <= s) continue;
+    push(RIBBON_CORE, sliceCoords(p, Math.max(r.startM, s), r.endM), { color: r.color, alpha: 1 });
   }
   return feats;
 }

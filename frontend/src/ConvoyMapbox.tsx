@@ -58,7 +58,8 @@ import { routeTrimLeadM, routeTrimFadeM, routeTrimLeadDp, selfLiftScreenPt, clam
 // it draws, riding the source feature (`trn`) like the size and the heading.
 import { noteSelfLiftNav, reportSelfLiftEvidence, noteSelfLiftQueryFail, selfLiftTargetM, selfLiftDrawnM, setSelfLiftDrawnM, setSelfOffRoadLiftM, selfLiftSkipQuery, clearSelfLiftSurface, subscribeSelfLiftDrawn, logSelfLiftQuery, noteMapIdle, isMapIdle, mapCameraGen } from "./selfLift";
 import { easeLift, roadEvidence, isDrivableRoad, isPropertyRoad, buildingUnder, queryComplete, LIFT_ROAD_NEAR_M, LIFT_PROPERTY_NEAR_M, LIFT_COVERAGE_M, LIFT_QUERY_MS, type RoadEvidence } from "./selfLiftRule";
-import { buildRibbonPartition, buildRibbonFeatures, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
+import RibbonNear, { type DrawSinkRef } from "./RibbonNear";
+import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, ribbonSeamM, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind } from "./driveBcEvents";
 import { NeonPin, hazardPin, hazardPinImage, HAZARD_PIN_KINDS, HAZARD_PIN_DEFAULT, CAMERA_PIN, INCIDENT_PIN, INCIDENT_PIN_KINDS, PLACE_TONE, NEON_TONE, NEON_PIN_H, NEON_PIN_HOLE_ABOVE_TIP } from "./components/NeonPin";
@@ -1197,7 +1198,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1274,6 +1275,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // on). The route-line cut anchors to this (routeRibbon.alongMOnPartition) so the gap in
   // front of the nose is constant by construction, on both surfaces.
   drawPosOutRef?: React.MutableRefObject<{ lat: number; lng: number } | null>;
+  /** Per-frame drawn pose for the near route-line piece (src/RibbonNear.tsx, 2026-09-18) — called
+   *  from pushCam, the same call that moves the car, so the line's start moves in the same frame. */
+  drawSinkRef?: DrawSinkRef;
   /** Fires ONCE, on the first camera push that crosses the bridge — the parent lifts the
    *  warm-mount cover then (see WARM MOUNT COVER). */
   onFirstCam?: () => void;
@@ -1520,6 +1524,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // Drawn pose out-param FIRST — the cut needs it even when the camera is not ours to push.
     // 🔒 NAV-LOCK begin mbx-pushcam-glide-noselead — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     if (drawPosOutRef) drawPosOutRef.current = { lat: la, lng: ln };
+    drawSinkRef?.current?.(la, ln);
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
     // Counted AFTER the bail, so this measures camera pushes that actually cross the
     // bridge — each one is a JSON encode here and a JSON decode in native.
@@ -3319,6 +3324,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // the route trim's pitch compensation reads it, see the routeTrim call site below.
   const camPitchRef = useRef<number | null>(null);
   const drawPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  // Per-frame drawn pose → <RibbonNear> (2026-09-18): the near route-line piece moves in the car's frame.
+  const ribbonNearSinkRef: DrawSinkRef = useRef(null);
   const trimLogAt = useRef(0);
   // Along-route ease state for the route trim: where the line start is coming FROM,
   // where it is going TO, when that leg started and how long it should take. Keyed by
@@ -3802,13 +3809,23 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // which the alt layers select by index/kind) plus the ribbon pieces for the selected
   // route. Every ribbon feature carries the selected index, so the preview alt filter
   // (index != selected) excludes it and a tap on it selects the route it already is.
+  // NEAR / FAR SPLIT (2026-09-18, Jeff: the line's start was "notchy" against a smooth car — see
+  // src/routeRibbon.ts). While a cut is live this source draws only [seam, destination] and is
+  // rebuilt only when the SEAM moves (every ribbonSeamStepM metres, not every 8 m quantum); the
+  // fade-in and the stretch up to the seam are <RibbonNear>, re-drawn every frame from the drawn car.
+  const ribbonSeamQ = ribbonCutQ != null ? ribbonSeamM(ribbonCutQ, ribbonFadeQ) : null;
+  const _farCutKey = ribbonSeamQ == null ? ribbonCutQ : null;
+  const _farFadeKey = ribbonSeamQ == null ? ribbonFadeQ : null;
   const routeDrawFC: any = useMemo(() => ({
     type: "FeatureCollection",
     features: [
       ...routeFC.features,
-      ...buildRibbonFeatures(ribbonPartition, { cutM: ribbonCutQ, fadeM: ribbonFadeQ, index: selectedRouteIndex }),
+      ...(ribbonSeamQ != null
+        ? buildRibbonFarFeatures(ribbonPartition, { startM: ribbonSeamQ, index: selectedRouteIndex })
+        : buildRibbonFeatures(ribbonPartition, { cutM: _farCutKey, fadeM: _farFadeKey ?? ribbonFadeQ, index: selectedRouteIndex })),
     ],
-  }), [routeFC, ribbonPartition, ribbonCutQ, ribbonFadeQ, selectedRouteIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [routeFC, ribbonPartition, ribbonSeamQ, _farCutKey, _farFadeKey, selectedRouteIndex]);
   // 🔒 NAV-LOCK end mbx-ribbon-cut-anchor
 
   // Snapped draw POSITION + heading: glue the car to the line within ~60 m of it —
@@ -4400,7 +4417,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             index rather than unmounting, since ShapeSource children must always
             be elements (never a boolean). */}
         {/* 🔒 NAV-LOCK begin mbx-jsx-route-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts) */}
-        {showRoutes && (
+        {showRoutes && (<>
           <ShapeSource id="convoy-routes" shape={routeDrawFC} onPress={handleRoutePress}>
             {/* Non-selected preview routes (Best / Scenic / AI), dimmed. Each route carries
                 its own `edge` + `color` so ONE data-driven casing+core pair renders all
@@ -4446,7 +4463,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               filter={(showCongestion ? ["==", ["get", "kind"], "__none__"] : ["==", ["get", "kind"], RIBBON_CASING]) as any}
               // 24/8 → 20/7 and the core 12 → 10 (2026-09-16, Jeff: "make the route line just a tad skinnier");
               // CarMapView carries the same three numbers (CarPlay must match the phone).
-              style={{ lineColor: selEdge, lineWidth: 20, lineBlur: 7, lineOpacity: 0.55, lineCap: "round", lineJoin: "round", lineEmissiveStrength: 1 }}
+              // lineCap "butt" + per-piece alpha (2026-09-18): the far piece now starts at a SEAM where the
+              // per-frame near piece (<RibbonNear>) ends — a round cap on this translucent glow would
+              // overlap there and bead. The near piece fades the glow in instead of a round start.
+              style={{ lineColor: selEdge, lineWidth: 20, lineBlur: 7, lineOpacity: ["*", 0.55, ["coalesce", ["get", "alpha"], 1]] as any, lineCap: "butt", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
             <LineLayer
               id="route-sel-core"
@@ -4459,7 +4479,22 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
               style={{ lineColor: ["get", "color"] as any, lineOpacity: ["get", "alpha"] as any, lineWidth: 10, lineCap: "butt", lineJoin: "round", lineEmissiveStrength: 1 }}
             />
           </ShapeSource>
-        )}
+          {/* The per-frame near piece: [cut, seam] (2026-09-18). Mounted with the far source, after it,
+              in the same slot, so both come and go together and draw in the same order. */}
+          <RibbonNear
+            id="convoy-ribbon-near"
+            partition={ribbonPartition}
+            cutM={ribbonCutM}
+            leadM={_trimLeadM}
+            fadeM={ribbonFadeQ}
+            seamM={ribbonSeamQ}
+            fallbackM={ribbonPartition ? _fracDrawn * ribbonPartition.totalM : 0}
+            index={selectedRouteIndex}
+            edgeColor={selEdge}
+            sinkRef={ribbonNearSinkRef}
+            hidden={!!showCongestion}
+          />
+        </>)}
         {/* 🔒 NAV-LOCK end mbx-jsx-route-layers */}
 
         {/* ===== Live traffic-congestion gradient (preview) ===== Mapbox
@@ -4637,6 +4672,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             camZoomOutRef={camZoomRef}
             camPitchOutRef={camPitchRef}
             drawPosOutRef={drawPosRef}
+            drawSinkRef={ribbonNearSinkRef}
             readyRef={lockReadyRef}
           />
         )}

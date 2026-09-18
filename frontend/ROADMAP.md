@@ -1133,8 +1133,11 @@ today (the multi-car garage is NOT built; one car per account today).
   voice, community hazards, green arrow/route/Day map, browsing clubs.
 - **The website is behind the ladder:** three tiers, no prices, Free advertised with "the live 3D map", 3D library car + Garage
   Scan both under "Ultra Premium", gold skin = Ultra Premium. Update it to four tiers — deploy only on Jeff's OK.
-- **Still open:** Ultra's look (Gold is Gold now; `DESIGN.md` / `src/tierTheme.ts` still say Gold = Ultra Premium) · auto-boat
-  (on water every tier becomes the boat; its Garage toggle was removed 2026-08-24).
+- **Ultra's look = DIAMOND** (Jeff, 2026-09-17): a diamond mark on the Ultra member's car, garage and profile; their app skin
+  stays gold (no fourth whole-app skin). Art not designed yet — preview first. `DESIGN.md` carries the note; `src/tierTheme.ts`
+  still maps Gold = Ultra Premium until the build-80 tier work.
+- **Auto-boat REMOVED** (Jeff: "delete" → "Remove auto-boat"), commit `6a168f64`, nav lock relocked with his words —
+  **held for the next OTA** (not published).
 
 ### 💳 Before any money comes in — Jeff, 2026-09-17: *"lets build these soon not right now put them on the list"*
 

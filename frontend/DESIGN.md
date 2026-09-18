@@ -21,6 +21,13 @@ change the values here only with his say-so, and change them *here* — never pe
 > to Silver replacing the green… create a GoldSilver H hairpin logo as the Lock Ultra
 > Premium/Premium Locks."*
 
+> ⚠ **2026-09-17 — the ladder changed; this doc is updated with the build-80 tier work.** Jeff's four rungs:
+> Free (green) · **Silver** (subscription) · **Gold** (subscription — no longer "Ultra Premium") · **Ultra** (one-time add-on
+> that needs Gold). Ultra's look is **DIAMOND** (Jeff: platinum or diamond → Diamond): an icy white-blue mark on the Ultra
+> member's car, garage and profile — the app skin stays **gold** for them, no fourth whole-app skin. Diamond art is not
+> designed yet (preview + Jeff's OK first). Measured why not platinum: ΔE76 5–9 from the silver mid `#C9D2D8`, diamond ~18.
+> The tables below still carry the 2026-08-23 names until that work lands.
+
 ---
 
 ## 1 · The three metals

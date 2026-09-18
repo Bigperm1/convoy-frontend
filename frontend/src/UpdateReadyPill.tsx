@@ -12,13 +12,60 @@
 // "Update ready — tap to install". One tap = reloadAsync() = the new bundle runs
 // NOW, no cold-start dance. Hidden while turn-by-turn nav is active so we never
 // reload mid-drive; it reappears when the drive ends.
-import React from "react";
-import { Platform, Text, TouchableOpacity, StyleSheet } from "react-native";
+//
+// ── IT ALSO CHECKS WHILE RUNNING (2026-09-18) ──────────────────────────────────
+// app.json has updates.checkAutomatically = "ON_LOAD", and nothing else ever asked the
+// server — so a process that never dies never DOWNLOADS a new update, and the pill
+// (which only watches for a finished download) can never appear. Olaf's phone,
+// 2026-09-18: one process alive from 17:13 the evening before, parked with the app
+// open all night, then a CarPlay drive — still on OTA-AY 12 h after OTA-AZ shipped.
+// So while the pill is mounted and NOT hidden (no turn-by-turn, no head unit) we ask:
+// when the app comes to the foreground and every UPDATE_CHECK_EVERY_MS while it stays
+// up. expo-updates' own doc says not to check "in a frequent loop" — hence the
+// throttle. A found update is downloaded; isUpdatePending then shows the pill as before.
+import React, { useEffect, useRef } from "react";
+import { AppState, Platform, Text, TouchableOpacity, StyleSheet } from "react-native";
 import * as Updates from "expo-updates";
+import { logEvent } from "./crashBreadcrumb";
+
+const UPDATE_CHECK_EVERY_MS = 30 * 60_000;
+
+let lastCheckAt = 0;
+let checking = false;
+
+async function checkAndFetch(why: string): Promise<void> {
+  if (Platform.OS === "web" || __DEV__ || !Updates.isEnabled) return;
+  const now = Date.now();
+  if (checking || now - lastCheckAt < UPDATE_CHECK_EVERY_MS) return;
+  lastCheckAt = now;
+  checking = true;
+  try {
+    const res = await Updates.checkForUpdateAsync();
+    if (!res.isAvailable) return;
+    const got = await Updates.fetchUpdateAsync();
+    logEvent(`ota-check why=${why} avail=1 fetched=${got.isNew ? 1 : 0}`);
+  } catch (e: any) {
+    logEvent(`ota-check why=${why} err=${String(e?.message ?? e).slice(0, 80)}`);
+  } finally {
+    checking = false;
+  }
+}
 
 export default function UpdateReadyPill({ hidden }: { hidden?: boolean }) {
   // Hooks must run unconditionally; expo-updates is a no-op shell on web.
   const { isUpdatePending } = Updates.useUpdates();
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const run = (why: string) => { if (!hiddenRef.current) void checkAndFetch(why); };
+    run("mount");
+    const sub = AppState.addEventListener("change", (s) => { if (s === "active") run("foreground"); });
+    const id = setInterval(() => run("timer"), UPDATE_CHECK_EVERY_MS);
+    return () => { sub.remove(); clearInterval(id); };
+  }, []);
+  // A drive that just ended (hidden → shown) is a natural moment to look.
+  useEffect(() => { if (!hidden) void checkAndFetch("unhidden"); }, [hidden]);
   if (Platform.OS === "web" || !isUpdatePending || hidden) return null;
   return (
     <TouchableOpacity

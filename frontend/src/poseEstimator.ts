@@ -804,3 +804,153 @@ export function poseOut(st: PoseState): { lat: number; lng: number; hdg: number;
   if (!st.hasFix || !Number.isFinite(st.lat) || !Number.isFinite(st.lng)) return null;
   return { lat: st.lat, lng: st.lng, hdg: norm360(st.hdg), src: st.src, routeW: st.routeW, yawDps: st.yawDpsLast };
 }
+
+// ── ROUTE FOLLOW (2026-09-18) ──────────────────────────────────────────────────────────────────────
+// Jeff, 2026-09-18: "we are still over shooting corners this needs to fixed now it does not look premium. it is over
+// shooting in the 2d map too. so its not specifically 3d or chase cam".
+// The replay of his own 09-16 corners through this estimator (tools/sim-qc/pose_field_replay.mts) shows why: at the
+// 18:27 left the course read 85° while the estimate still pointed 111°, 12.9 m from the fix and 7.3 m off the line —
+// then it swung to 75°, 9° PAST the new road; 17:59 swung 10° past north; King Rd sat 16.9 m off the line. The
+// estimator dead-reckons along its HEADING, and at a single-vertex corner the road's direction is faded until the
+// course agrees (on purpose — against a nose that flips 90° early at the vertex). So between fixes the car carries
+// straight on past the corner, then swings back. Every surface draws this pose, so 2D and 3D show the same thing.
+// What navigation apps do instead (Mapbox Navigation SDK's snapped location; Google and Apple behave the same): while
+// the car is ON the route, the puck moves ALONG THE LINE and each fix corrects how far along it is. At a corner the
+// puck turns when it reaches the corner — no carry-on, no early flip.
+// THE RULE. Route follow is ACTIVE after RF_ON_FIXES consecutive fixes that project within RF_ON_M of the line near
+// where the puck is and — when the fix carries a course at speed — agree with the line's direction within
+// RF_AGREE_DEG. RF_OFF_FIXES consecutive failures hand back to the estimator (a wrong turn, a detour). While active,
+// the along-line metre advances at the estimator's accepted speed, each fix sets the error to its own projection
+// (carried forward by its age) and the error drains with RF_CORR_TAU_S — never backward: a fix that says the puck is
+// ahead slows it, it does not reverse it. The nose is the line's direction over ±w, w = max(RF_NOSE_MIN_M, speed ×
+// RF_NOSE_S), so a vertex turns the nose across that window instead of at a point. Gate: tools/sim-qc/route_follow_test.mts.
+export type RfLine = { coords: [number, number][]; cum: number[]; totalM: number };   // [lng, lat]; cum[0] = 0
+export type RfState = {
+  key: RfLine; m: number; errM: number; active: boolean; onN: number; offN: number; tAt: number;
+} | null;
+// 25 m: the King Rd corner's fixes sat 14–17 m off the Mapbox line with the car on the road; the estimator's own route
+// pull reaches 40 m (POSE_ROUTE_MAX_M) and the off-route gate trips at ~46–52 m (John's 09-16 rows).
+export const RF_ON_M = 25;
+export const RF_AGREE_DEG = 45;
+export const RF_ON_FIXES = 2;
+export const RF_OFF_FIXES = 2;
+export const RF_CORR_TAU_S = 0.5;
+export const RF_NOSE_MIN_M = 4;
+export const RF_NOSE_S = 0.6;
+export const RF_WIN_M = 60;
+export const RF_MAX_LEAD_M = 30;
+/** A fix on a bend this sharp (the line turns more than this across ±RF_BEND_SPAN_M) cannot say the puck is AHEAD. */
+export const RF_BEND_DEG = 20;
+export const RF_BEND_SPAN_M = 10;
+
+/** The same road, possibly a new object (a traffic refresh rebuilds the line with identical vertices). */
+export function rfSameLine(a: RfLine | null | undefined, b: RfLine | null | undefined): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.coords.length !== b.coords.length || a.totalM !== b.totalM) return false;
+  for (let i = 0; i < a.coords.length; i++) if (a.coords[i][0] !== b.coords[i][0] || a.coords[i][1] !== b.coords[i][1]) return false;
+  return true;
+}
+
+/** Metres along the line for a point, searched within ±spanM of nearM (the whole line when nearM is null). */
+export function rfProject(line: RfLine, lat: number, lng: number, nearM: number | null, spanM = RF_WIN_M): { m: number; distM: number } | null {
+  const n = line.coords.length;
+  if (n < 2) return null;
+  const k = Math.PI / 180, cosLat = Math.cos(lat * k), R = 6371000;
+  const X = (ln: number) => (ln - lng) * k * cosLat * R, Y = (la: number) => (la - lat) * k * R;
+  const lo = nearM == null ? -Infinity : nearM - spanM, hi = nearM == null ? Infinity : nearM + spanM;
+  let start = 1;
+  if (lo > -Infinity) { let a = 1, b = n - 1; while (a < b) { const mid = (a + b) >> 1; if (line.cum[mid] < lo) a = mid + 1; else b = mid; } start = Math.max(1, a); }
+  let best2 = Infinity, bestM = 0;
+  let px = X(line.coords[start - 1][0]), py = Y(line.coords[start - 1][1]);
+  for (let i = start; i < n; i++) {
+    const s0 = line.cum[i - 1], s1 = line.cum[i];
+    if (s0 > hi) break;
+    const cx = X(line.coords[i][0]), cy = Y(line.coords[i][1]);
+    const dx = cx - px, dy = cy - py, l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, -(px * dx + py * dy) / l2)) : 0;
+    const qx = px + t * dx, qy = py + t * dy, d2 = qx * qx + qy * qy;
+    if (d2 < best2) { best2 = d2; bestM = s0 + t * (s1 - s0); }
+    px = cx; py = cy;
+  }
+  if (best2 === Infinity) return null;
+  return { m: Math.max(0, Math.min(line.totalM, bestM)), distM: Math.sqrt(best2) };
+}
+
+/** The point `m` metres along the line. */
+export function rfPoint(line: RfLine, m: number): { lat: number; lng: number } {
+  const n = line.coords.length;
+  const s = Math.max(0, Math.min(line.totalM, m));
+  let a = 1, b = n - 1;
+  while (a < b) { const mid = (a + b) >> 1; if (line.cum[mid] < s) a = mid + 1; else b = mid; }
+  const i = Math.max(1, a);
+  const s0 = line.cum[i - 1], s1 = line.cum[i];
+  const t = s1 > s0 ? (s - s0) / (s1 - s0) : 0;
+  const p = line.coords[i - 1], q = line.coords[i];
+  return { lat: p[1] + (q[1] - p[1]) * t, lng: p[0] + (q[0] - p[0]) * t };
+}
+
+/** The line's direction at `m`: the chord from m − w to m + w (clamped to the line's ends). */
+export function rfBearing(line: RfLine, m: number, w: number): number {
+  let s0 = Math.max(0, m - w), s1 = Math.min(line.totalM, m + w);
+  if (s1 - s0 < 0.5) { s0 = Math.max(0, s1 - 1); s1 = Math.min(line.totalM, s0 + 1); }
+  const p = rfPoint(line, s0), q = rfPoint(line, s1);
+  return bearingDeg(p.lat, p.lng, q.lat, q.lng);
+}
+
+const rfNoseW = (spd: number) => Math.max(RF_NOSE_MIN_M, (Number.isFinite(spd) && spd > 0 ? spd : 0) * RF_NOSE_S);
+
+/** Advance the puck along the line to `nowMs` at `spdMs`, draining the fix error (never backward). */
+export function rfPredict(st: RfState, line: RfLine | null | undefined, nowMs: number, spdMs: number): RfState {
+  if (!st || !line || !rfSameLine(st.key, line)) return st && line ? null : st;
+  const dt = st.tAt > 0 ? Math.max(0, Math.min(1.5, (nowMs - st.tAt) / 1000)) : 0;
+  const adv = Number.isFinite(spdMs) && spdMs >= 0.5 ? spdMs * dt : 0;
+  const k = dt > 0 ? 1 - Math.exp(-dt / RF_CORR_TAU_S) : 0;
+  const want = adv + st.errM * k;
+  const step = Math.max(0, want);
+  const errM = st.errM - (step - adv);
+  const m = Math.max(0, Math.min(line.totalM, st.m + step));
+  return { ...st, key: line, m, errM, tAt: nowMs };
+}
+
+/** Fold a fix in: where it sits on the line, whether it is ON the line, and the correction it asks for. */
+export function rfFix(
+  st: RfState, line: RfLine | null | undefined,
+  f: { lat: number; lng: number; at: number; courseDeg: number | null; speedMs: number | null }, nowMs: number,
+): RfState {
+  if (!line || !Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return null;
+  const same = !!st && rfSameLine(st.key, line);
+  const spd = typeof f.speedMs === "number" && Number.isFinite(f.speedMs) && f.speedMs > 0 ? f.speedMs : 0;
+  const p = same ? rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2) : rfProject(line, f.lat, f.lng, null);
+  if (!p) return same ? { ...st!, key: line, active: false, onN: 0, offN: st!.offN + 1 } : null;
+  let good = p.distM <= RF_ON_M;
+  if (good && f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= 3) {
+    good = Math.abs(wrap180(f.courseDeg - rfBearing(line, p.m, rfNoseW(spd)))) <= RF_AGREE_DEG;
+  }
+  const ageS = Math.max(0, Math.min(2, (nowMs - f.at) / 1000));
+  const target = Math.min(line.totalM, p.m + Math.min(RF_MAX_LEAD_M, spd * ageS));
+  if (!same) return { key: line, m: target, errM: 0, active: false, onN: good ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs };
+  const s = st!;
+  if (good) {
+    const onN = s.onN + 1;
+    // A fix on a BEND projects short of the car: the car cuts the inside of the corner and its projection sticks at the
+    // vertex (17:59 replay: the fix read 4.5 m behind the puck at the vertex, and draining that made the puck crawl out
+    // of the corner at 2.9 m/s for a second). So on a bend a fix may only pull the puck FORWARD; the next fix on the
+    // straight settles any lead.
+    const bend = Math.abs(wrap180(rfBearing(line, p.m + RF_BEND_SPAN_M, 3) - rfBearing(line, p.m - RF_BEND_SPAN_M, 3)));
+    const err = target - s.m;
+    if (s.active) return { ...s, key: line, errM: bend > RF_BEND_DEG && err < 0 ? 0 : err, onN, offN: 0, tAt: s.tAt || nowMs };
+    // Becoming active: start AT the fix's own place on the line (the estimator was drawing until now).
+    if (onN >= RF_ON_FIXES) return { ...s, key: line, m: target, errM: 0, active: true, onN, offN: 0, tAt: nowMs };
+    return { ...s, key: line, m: target, errM: 0, onN, offN: 0, tAt: nowMs };
+  }
+  const offN = s.offN + 1;
+  return { ...s, key: line, active: s.active && offN < RF_OFF_FIXES, onN: 0, offN };
+}
+
+/** The drawn pose while route follow is active, else null (the estimator draws). */
+export function rfPose(st: RfState, line: RfLine | null | undefined, spdMs: number): { lat: number; lng: number; hdg: number } | null {
+  if (!st || !st.active || !line || !rfSameLine(st.key, line)) return null;
+  const p = rfPoint(line, st.m);
+  return { lat: p.lat, lng: p.lng, hdg: rfBearing(line, st.m, rfNoseW(spdMs)) };
+}

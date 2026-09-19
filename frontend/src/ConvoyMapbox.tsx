@@ -34,7 +34,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
-import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM } from "./poseEstimator";
+import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM, rfPredict, rfFix, rfPose, type RfState } from "./poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "./yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
 import { logEvent } from "./crashBreadcrumb";
@@ -2825,6 +2825,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const poseRef = useRef<PoseState>(poseStart());
   const poseFixTsRef = useRef(0);
   const poseSeededRef = useRef(false);
+  // ROUTE FOLLOW (2026-09-18): while on the route the car rides the LINE — src/poseEstimator.ts rf*.
+  const rfRef = useRef<RfState>(null);
   // 🔒 NAV-LOCK begin mbx-pose-yaw-session — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => { void ensureYawSignLoaded(); }, []);
   useEffect(() => {
@@ -3965,11 +3967,24 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     }
     ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM, roadHdg: routeProj.roadHdg, roadHdgAhead: routeProj.roadHdgAhead } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
     poseRef.current = ps;
+    // ROUTE FOLLOW (Jeff, 2026-09-18: "we are still over shooting corners … it is over shooting in the 2d map too"): on the
+    // route the car advances ALONG THE LINE and each fix corrects how far along — it turns when it reaches the corner,
+    // instead of carrying on past it. Off the route (2 fixes > 25 m or against the line) the estimator draws. Same block
+    // in CarMapView. Gate: tools/sim-qc/route_follow_test.mts.
+    let rf = rfPredict(rfRef.current, ribbonPartition, _nowMs, ps.spd);
+    if (_poseFixLanded && user && typeof user.lat === "number" && typeof user.lng === "number") {
+      rf = rfFix(rf, ribbonPartition, { lat: user.lat, lng: user.lng, at: _fixTs, courseDeg: _rawCourse, speedMs: userSpeedMs ?? null }, _nowMs);
+    }
+    rfRef.current = rf;
   } else if (poseRef.current.hasFix) {
     poseRef.current = poseStart();
     poseFixTsRef.current = 0;
+    rfRef.current = null;
   }
-  const est = navigationActive && !selfPinned ? poseOut(poseRef.current) : null;
+  const _est = navigationActive && !selfPinned ? poseOut(poseRef.current) : null;
+  const _rfNow = _est ? rfPose(rfRef.current, ribbonPartition, poseRef.current.spd) : null;
+  // The drawn pose: the route-follow puck while it is active, else the estimator. Receipts print src=rf.
+  const est = _est && _rfNow ? { ..._est, lat: _rfNow.lat, lng: _rfNow.lng, hdg: _rfNow.hdg, src: "rf" as const } : _est;
   // 🔒 NAV-LOCK end mbx-pose-estimator-step
   // 🔒 NAV-LOCK begin mbx-selfcar-draw-position — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const oldSelfDraw = selfPinned

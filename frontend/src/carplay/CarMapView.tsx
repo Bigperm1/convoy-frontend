@@ -20,7 +20,7 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
-import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState } from "../poseEstimator";
+import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, rfPredict, rfFix, rfPose, type RfState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "../poseSeed";
 import { noteFixAccepted } from "../heatProbe";
@@ -981,6 +981,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const poseRef = useRef<PoseState>(poseStart());
   const poseFixTsRef = useRef(0);
   const poseSeededRef = useRef(false);
+  // ROUTE FOLLOW (2026-09-18): while on the route the car rides the LINE — src/poseEstimator.ts rf*.
+  const rfRef = useRef<RfState>(null);
   useEffect(() => { void ensureYawSignLoaded(); }, []);
   useEffect(() => {
     if (!s.navigating) return;
@@ -1968,11 +1970,22 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     }
     ps = poseRoute(ps, routeProj ? { lat: routeProj.lat, lng: routeProj.lng, bearing: routeProj.bearing, distM: routeProj.distM, roadHdg: routeProj.roadHdg, roadHdgAhead: routeProj.roadHdgAhead } : null, ps.src === "gyro" ? Math.abs(ps.yawDpsLast) : null, _dtS);
     poseRef.current = ps;
+    // ROUTE FOLLOW — identical to the phone (ConvoyMapbox): on the route the car rides the LINE and turns when it reaches
+    // the corner (Jeff, 2026-09-18: "we are still over shooting corners"). Gate: tools/sim-qc/route_follow_test.mts.
+    let rf = rfPredict(rfRef.current, ribbonPartition, _nowMs, ps.spd);
+    if (_poseFixLanded) {
+      rf = rfFix(rf, ribbonPartition, { lat, lng, at: _fixTs, courseDeg: typeof s.selfCourse === 'number' ? s.selfCourse : null, speedMs: typeof s.speedMs === 'number' ? s.speedMs : null }, _nowMs);
+    }
+    rfRef.current = rf;
   } else if (poseRef.current.hasFix) {
     poseRef.current = poseStart();   // a drive ended: the next one starts clean
     poseFixTsRef.current = 0;
+    rfRef.current = null;
   }
-  const est = s.navigating ? poseOut(poseRef.current) : null;
+  const _est = s.navigating ? poseOut(poseRef.current) : null;
+  const _rfNow = _est ? rfPose(rfRef.current, ribbonPartition, poseRef.current.spd) : null;
+  // The drawn pose: the route-follow puck while it is active, else the estimator. Receipts print src=rf.
+  const est = _est && _rfNow ? { ..._est, lat: _rfNow.lat, lng: _rfNow.lng, hdg: _rfNow.hdg, src: "rf" as const } : _est;
   const drawLat = est ? est.lat : oldDrawLat;
   const drawLng = est ? est.lng : oldDrawLng;
   // NOSE COURSE CLAMP — identical to the phone (src/cornerBlend.ts cornerNose). The 2026-09-04

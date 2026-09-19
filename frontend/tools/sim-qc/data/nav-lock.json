@@ -98,11 +98,21 @@
         "src/maneuverSpeech.ts: code 217da7fe0e9b → 9c18150b4e6c",
         "src/mapboxDirections.ts: code c485b777673b → d64c5995678d"
       ]
+    },
+    {
+      "at": "2026-09-18",
+      "quote": "Jeff, 2026-09-18: \"we are still over shooting corners this needs to fixed now it does not look premium. it is over shooting in the 2d map too. so its not specifically 3d or chase cam\" (route follow: on the route the drawn car rides the line — src/poseEstimator.ts rf*, both surfaces)",
+      "changes": [
+        "src/poseEstimator.ts: code d1818c421200 → c0433c779b0a",
+        "src/ConvoyMapbox.tsx#mbx-pose-estimator-step region c3d8053ebad0 → 8014f4f63cbe",
+        "src/carplay/CarMapView.tsx#car-held-heading-pose-yaw region 858b05a11236 → e620dcf95093",
+        "src/carplay/CarMapView.tsx#car-selfcar-pose-step region f1c8c7e4f95a → 20f1cb80de5d"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:d1818c4212003ff33abd5fca31278d61d5d3b6780c967e52c40f4adba312b734",
+      "hash": "sha256:c0433c779b0aedbcc9c95a0ad3983bb610c05b6babd83051dc0dff844dcbccac",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {
@@ -375,7 +385,7 @@
         "mbx-ribbon-cut-anchor": "sha256:08fbbd8dfef1f6a507def7bf585c70e1f8683a5dbd4b4d8b8bbb794f051b48b8",
         "mbx-selfcar-route-snap-gate": "sha256:440c3fa16919457fe89191d5e9501b8adae25868bf79e80fe1869d33a0caa330",
         "mbx-selfcar-road-snap-draw": "sha256:9e57ed4603c8fe5b891535777970d7604c54e089f853225f1023d7c15448f4e1",
-        "mbx-pose-estimator-step": "sha256:c3d8053ebad01bce81374cb5de58c125aa22a4734b500dd23cd54bb96101e3bf",
+        "mbx-pose-estimator-step": "sha256:8014f4f63cbeecf57039448323a84f95df373c36bed2fad4154389ef6c273dfe",
         "mbx-selfcar-draw-position": "sha256:f7bfa1fc0f0bc75c1185396344b3c4c14d68ecaccf0202a1bcd47bec3ee8f4ff",
         "mbx-selfcar-heading-lock": "sha256:34d5be939f3bfbb475b444a14aba4f00878cdecc3b7a7dbc79bc947da7e408a6",
         "mbx-show-routes-gate": "sha256:82c6201f89d2bfdc57ab21a3ef3afbabaed4a9c6f41503ea7f70823183bc5546",
@@ -439,7 +449,7 @@
         "car-follow-zoom-target": "sha256:4a71f58841aba996cb6df4a90de808c34176b3db9712b947fdadaf02ea83651a",
         "car-follow-pitch-target": "sha256:30c259cfe80d30d5fcfa80d3ca05d950e2bd95222eccdb95e5af81b82037da2f",
         "car-selfcar-size-pt": "sha256:13e42d55fa0b5b3d5fd3abf032c58aa2830ad953ddb888482f0d355bec817e28",
-        "car-held-heading-pose-yaw": "sha256:858b05a11236c230f054390753e15d40a0177c32cd1a20d9a64f1ecadc5afb0a",
+        "car-held-heading-pose-yaw": "sha256:e620dcf9509337dfff45b615990d54e524d021f36228abfebeb9600dd9b70ef6",
         "car-cam-initial-seed": "sha256:a199230bdfdbd4f56cec056c12dd3d037d14779e346cfdc0af38304023557a38",
         "car-cam-northup-lockready": "sha256:84e49b91f3a7605778ad410aae100a5843f905726d8f5e1d5469708d2b24ebe0",
         "car-roadsnap-query-loop": "sha256:ccc2b23fc5954ffa2faf8a12d20484f3a2cbe84f88de9ac4719df9c41c82d75b",
@@ -456,7 +466,7 @@
         "car-ribbon-cut-ease-anchor": "sha256:71598fb7f8b84bd766f386091d273b43294e7982815de188508be83678e979b9",
         "car-selfcar-route-snap-gate": "sha256:39c73de0f3e95d0dac66911abbff265b4d89f02002ccb7990338e2dd28643c65",
         "car-selfcar-road-snap-draw": "sha256:e8184ddff66525d8fe6f2be3e266e5a74079901de0b5110ad7c9ab9309712aa5",
-        "car-selfcar-pose-step": "sha256:f1c8c7e4f95ab8e04d1403f7e0028c374def994061a5b3f231eabce29db7338e",
+        "car-selfcar-pose-step": "sha256:20f1cb80de5df158d2ebce1ca0e4a205ccd9eb02859f45bb61210478e796e52e",
         "car-cam-heading-source": "sha256:cd5fdc1705b88b98933e6b60e2bf301debb3ebc721e27a5a994f5c8cee5caf69",
         "car-ribbon-features-rebuild": "sha256:ce50d0ba922c78108f1ff449511824b07d69c2251a81d0794681db94668de779",
         "car-preview-cong-gradient": "sha256:e9b26b8f5901519f9045d0b917bb4f334f24ab291405bbc8b02dd51fb610bb8b",

@@ -44,13 +44,16 @@ const EPS = 1e-9;
 // The PRE-FIX function, frozen here verbatim (commit 667fc42b, src/ConvoyMapbox.tsx chaseZoom) so
 // the gate can print the "was" column and prove each scenario really exercised the defect. It is
 // NOT the code under test. It reuses the unchanged speed curve and constants.
-function preFixChaseZoom(kmh: number, distToManeuverM?: number, curStepLenM?: number) {
+// The corner zoom it ran at was 18.5 — frozen here, because CORNER_ZOOM itself moved to 17 on Jeff's word (2026-09-18,
+// "zoom 17"). `cz` lets C3 compare today's function against the same SHAPE at today's corner zoom.
+const PRE_FIX_CORNER_ZOOM = 18.5;
+function preFixChaseZoom(kmh: number, distToManeuverM?: number, curStepLenM?: number, cz: number = PRE_FIX_CORNER_ZOOM) {
   const lerp = (a: number, b: number, t: number) => { const k = Math.max(0, Math.min(1, t)); return a + (b - a) * k; };
   const base = chaseZoomForSpeed(kmh);
   if (typeof distToManeuverM !== "number" || !Number.isFinite(distToManeuverM) || distToManeuverM <= 0) return base;
-  if (typeof curStepLenM === "number" && Number.isFinite(curStepLenM) && curStepLenM > 0 && curStepLenM <= CORNER_CHAIN_M) return CORNER_ZOOM;
+  if (typeof curStepLenM === "number" && Number.isFinite(curStepLenM) && curStepLenM > 0 && curStepLenM <= CORNER_CHAIN_M) return cz;
   const t = (CORNER_FAR_M - distToManeuverM) / (CORNER_FAR_M - CORNER_NEAR_M);
-  return Math.max(base, lerp(base, CORNER_ZOOM, t));
+  return Math.max(base, lerp(base, cz, t));
 }
 
 // ── Ground flow on screen ─────────────────────────────────────────────────────────────────
@@ -88,13 +91,13 @@ console.log("A · 09-14 Abbotsford exit (h6sjel-844376)");
     worstWas = Math.min(worstWas, preFixChaseZoom(99, d, RAMP_0914_M));
   }
   ok("A4 99 km/h anywhere on the 450 m ramp step <= 16.05", worst <= 16.05, `max z=${f2(worst)} (was ${f2(worstWas)})`);
-  ok("A5 the scenario really was the defect before the fix (was 18.5)", Math.abs(worstWas - CORNER_ZOOM) < EPS, f2(worstWas));
+  ok("A5 the scenario really was the defect before the fix (was 18.5)", Math.abs(worstWas - PRE_FIX_CORNER_ZOOM) < EPS, f2(worstWas));
   ok("A6 ...and still tightens above the 99 km/h speed curve (13.89)", worst > chaseZoomForSpeed(99) + 1,
      `z=${f2(worst)} curve=${f2(chaseZoomForSpeed(99))}`);
 
   // 18:16:20: 43 km/h near the ramp end. The car has slowed, so the corner zoom may return.
   const zA7 = chaseZoom(43, 60, RAMP_0914_M);
-  ok("A7 43 km/h on the ramp step (the car has slowed) >= 18.3", zA7 >= 18.3, `z=${f2(zA7)}`);
+  ok("A7 43 km/h on the ramp step (the car has slowed): the corner zoom is back", zA7 >= CORNER_ZOOM - 0.2, `z=${f2(zA7)} (CORNER_ZOOM ${CORNER_ZOOM})`);
 
   const flow = pxPerS(99, chaseZoom(99, 300, RAMP_0914_M));
   const flowWas = pxPerS(99, preFixChaseZoom(99, 300, RAMP_0914_M));
@@ -115,16 +118,16 @@ console.log("B · 09-11 exit (ogb3m4-967731)");
 // ── C · city corners are unchanged ────────────────────────────────────────────────────────
 console.log("C · city corners unchanged");
 {
-  ok("C1 30 km/h, 70 m to the maneuver on a long step = 18.5", Math.abs(chaseZoom(30, 70, CITY_LONG_STEP_M) - CORNER_ZOOM) < EPS,
+  ok("C1 30 km/h, 70 m to the maneuver on a long step = CORNER_ZOOM", Math.abs(chaseZoom(30, 70, CITY_LONG_STEP_M) - CORNER_ZOOM) < EPS,
      f2(chaseZoom(30, 70, CITY_LONG_STEP_M)));
-  ok("C2 30 km/h on a short step = 18.5", Math.abs(chaseZoom(30, 150, 200) - CORNER_ZOOM) < EPS, f2(chaseZoom(30, 150, 200)));
+  ok("C2 30 km/h on a short step = CORNER_ZOOM", Math.abs(chaseZoom(30, 150, 200) - CORNER_ZOOM) < EPS, f2(chaseZoom(30, 150, 200)));
   // At <= 45 km/h the ceiling IS CORNER_ZOOM, so the new function must be bit-identical to the
   // old one for every distance and step length. This is the "city corners keep zooming in" rule.
   let diffs = 0, worstDiff = 0;
   const dists = [undefined, -5, 0, 0.5, 1, 10, 50, 69, 70, 71, 100, 175, 279, 280, 281, 400, 1000, 1e5];
   const steps = [undefined, -1, 0, 1, 50, 200, 450, 549, 550, 551, 1000, 2000, HIGHWAY_STEP_0914_M];
   for (let v = 0; v <= 45; v += 0.5) for (const d of dists) for (const L of steps) {
-    const a = chaseZoom(v, d, L), b = preFixChaseZoom(v, d, L);
+    const a = chaseZoom(v, d, L), b = preFixChaseZoom(v, d, L, CORNER_ZOOM);
     if (a !== b) { diffs++; worstDiff = Math.max(worstDiff, Math.abs(a - b)); }
   }
   ok("C3 at every speed <= 45 km/h the result is bit-identical to the pre-fix function", diffs === 0,
@@ -204,7 +207,7 @@ console.log("F · decelerating 110 -> 40 km/h over 20 s along a 450 m ramp");
   ok("F2 max |dz/dt| <= 0.6 levels/s", maxRate <= 0.6, `${maxRate.toFixed(3)} levels/s`);
   ok("F3 zoom never falls while the car slows (no reversal)", reversals === 0, `${reversals} reversals`);
   ok("F4 starts capped (<= 16.05 at 110 km/h)", zStart <= 16.05, f2(zStart));
-  ok("F5 ends with the corner zoom back (40 km/h)", zEnd >= 18.3, f2(zEnd));
+  ok("F5 ends with the corner zoom back (40 km/h)", zEnd >= CORNER_ZOOM - 0.2, f2(zEnd));
 }
 
 // ── G · the 09-03 exit-gore yo-yo cannot come back ────────────────────────────────────────
@@ -239,12 +242,12 @@ console.log("H · the middle band and the city band");
 {
   // 60 km/h corner on a long step, 70 m out: the ceiling bites (17.67), so this corner IS changed.
   const z60 = chaseZoom(60, 70, CITY_LONG_STEP_M);
-  ok("H1 60 km/h corner: capped at the ceiling (17.67), changed from 18.5", Math.abs(z60 - cornerZoomCeiling(60)) < EPS && preFixChaseZoom(60, 70, CITY_LONG_STEP_M) === CORNER_ZOOM,
+  ok("H1 60 km/h corner: capped at the ceiling (16.67), changed from 18.5", Math.abs(z60 - cornerZoomCeiling(60)) < EPS && preFixChaseZoom(60, 70, CITY_LONG_STEP_M) === PRE_FIX_CORNER_ZOOM,
      `z=${f2(z60)} was ${f2(preFixChaseZoom(60, 70, CITY_LONG_STEP_M))}`);
-  // Middle band gain: 52-67 km/h buys only 1.3-2.3x, not the highway 5.7x.
+  // Middle band gain against the original 18.5 (with CORNER_ZOOM 17 since 2026-09-18): 52 km/h ~3.1x, 67 km/h ~4.0x, highway 5.7x.
   const ratio = (v: number) => 2 ** (preFixChaseZoom(v, 300, RAMP_0914_M) - chaseZoom(v, 300, RAMP_0914_M));
-  ok("H2 52 km/h ramp: correction scale 1.2-1.4x smaller", ratio(52) >= 1.2 && ratio(52) <= 1.4, `${ratio(52).toFixed(2)}x`);
-  ok("H3 67 km/h ramp: correction scale 2.1-2.5x smaller", ratio(67) >= 2.1 && ratio(67) <= 2.5, `${ratio(67).toFixed(2)}x`);
+  ok("H2 52 km/h ramp: correction scale 3.0-3.3x smaller", ratio(52) >= 3.0 && ratio(52) <= 3.3, `${ratio(52).toFixed(2)}x`);
+  ok("H3 67 km/h ramp: correction scale 3.8-4.1x smaller", ratio(67) >= 3.8 && ratio(67) <= 4.1, `${ratio(67).toFixed(2)}x`);
   ok("H4 >= 90 km/h ramp: 5.7x smaller", Math.abs(ratio(99) - 2 ** 2.5) < 1e-6, `${ratio(99).toFixed(2)}x`);
 }
 

@@ -17,6 +17,10 @@ export const SILENT_MANEUVERS = new Set([
   // heard them on. The composed arrival line is now the ONLY thing spoken at arrival; the
   // "arrive|*" verbs stay in the table because the on-screen banner still uses them.
   "arrive",
+  // "new name" is MAPBOX's spelling of a road-name change (the two above are older tokens), so a road that just
+  // changes name at an intersection was being announced — with a slight bend, Mapbox's own text for it is
+  // "Bear right onto …" (John, 2026-09-17: "keeps on mentioning slight left/ right at bear right at king george").
+  "new name",
 ]);
 // Decide whether a maneuver is worth speaking. A known non-actionable maneuver
 // is silenced. For an empty/unknown maneuver we fall back to the instruction
@@ -38,6 +42,11 @@ export function isSpokenManeuver(maneuver?: string, html?: string): boolean {
   // on exactly the roundabouts that need it most. Found by tools/sim-qc/arrival_speech_test.mts
   // while gating the arrival change; pre-existing since 5ce2fb7, not part of that change.
   if (modifier === "straight" && type !== "roundabout" && type !== "rotary") return false;
+  // A SLIGHT turn is a bend, not a turn (Jeff, 2026-09-18: "silence slight turn"). Only the plain TURN type: a
+  // fork ("Keep right"), a ramp, a merge, a U-turn and a roundabout are real decisions and still speak, whatever
+  // their modifier. The banner still shows the arrow.
+  if (type === "turn" && (modifier === "slight left" || modifier === "slight right")) return false;
+  if (/^turn[_-]slight[_-](left|right)$/.test(type)) return false;   // legacy tokens (TURN_SLIGHT_RIGHT, turn-slight-right)
   if (type && SILENT_MANEUVERS.has(type)) return false;
   if (m && !SILENT_MANEUVERS.has(m)) return true;
   const h = (html || "").toLowerCase();

@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform, AppState } from "react-native";
 import { api, TTS_FETCH_TIMEOUT_MS, TTS_FETCH_TIMEOUT_LONG_MS } from "./api";
-import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
+import { fetchMapboxRoutes, fetchMapboxRouteVia, refreshMapboxRoute, arrivesOnFarSide, curbVerdict, type MapboxRoute, type MapboxRouteStep, type CongestionLevel } from "./mapboxDirections";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { anchorStepIndex } from "./navAnchor";
 import {
@@ -368,8 +368,6 @@ export async function fetchRoutes(
 // 20 s / 10% keeps every measured win with a 20x margin and rejects anything a driver
 // would notice. If a genuinely useful curb route ever costs more than 20 s, the honest
 // answer is to OFFER it, not to take it silently.
-const CURB_MAX_EXTRA_S = 20;
-const CURB_MAX_EXTRA_FRAC = 0.10;
 // ── AND A DISTANCE AXIS (2026-07-31) ───────────────────────────────────────
 // Time alone is not a sufficient budget: my own measurements include a curb route that
 // cost +492 m for +1 s. Under a seconds-only rule that is a "free" win that silently
@@ -378,8 +376,9 @@ const CURB_MAX_EXTRA_FRAC = 0.10;
 // one dies twice over: BOTH conditions must hold to reject, so
 //   highway-adjacent  +492 m on a 14199 m route -> 492 > 250 but < 15% -> KEPT
 //   Broadway          +917 m on a 2702 m route  -> 917 > 250 and > 15%  -> REJECTED
-const CURB_MAX_EXTRA_M = 250;
-const CURB_MAX_EXTRA_DIST_FRAC = 0.15;
+// ⚠ 2026-09-18 (Jeff: "your call on 1"): the numbers above now live in src/mapboxDirections.ts (curbVerdict), each
+// budget rejects ON ITS OWN, and a curb route that adds a U-turn is never taken — see the note there. The "BOTH
+// conditions" rule above let John's +2,243 m through on 09-16 (12.7 % of his trip).
 async function preferCurbArrival(
   origin: LatLng,
   destination: LatLng,
@@ -402,16 +401,13 @@ async function preferCurbArrival(
     );
     const alt = curb[0];
     if (!alt || !alt.polyline || arrivesOnFarSide(alt)) return routes;  // no better
-    const extra = alt.duration_s - best.duration_s;
-    const extraM = alt.distance_m - best.distance_m;
-    const tooSlow = extra > CURB_MAX_EXTRA_S || extra > best.duration_s * CURB_MAX_EXTRA_FRAC;
-    const tooFar = extraM > CURB_MAX_EXTRA_M && extraM > best.distance_m * CURB_MAX_EXTRA_DIST_FRAC;
+    const v = curbVerdict(best, alt);
     // RECEIPT. Whether this fired, and at what cost, has so far been inferred from
     // photographs — twice, with two different conclusions. One row per decision ends that.
     try {
-      logEvent(`curb ${tooSlow || tooFar ? 'rejected' : 'TAKEN'} extra_s=${Math.round(extra)} extra_m=${Math.round(extraM)} base_s=${Math.round(best.duration_s)} base_m=${Math.round(best.distance_m)}`);
+      logEvent(`curb ${v.take ? 'TAKEN' : 'rejected'} extra_s=${Math.round(v.extraS)} extra_m=${Math.round(v.extraM)} base_s=${Math.round(best.duration_s)} base_m=${Math.round(best.distance_m)} uturn=${v.addsUturn ? 1 : 0}`);
     } catch {}
-    if (tooSlow || tooFar) return routes;
+    if (!v.take) return routes;
     // Replace only the PRIMARY line. The alternatives stay as they were, so the driver
     // can still pick a different route entirely and nothing else about the fan-out moves.
     return [alt, ...routes.slice(1)];

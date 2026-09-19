@@ -54,7 +54,10 @@ export const CHASE_ZOOM_STOPS: [number, number][] = [
   [180, CHASE_ZOOM_FAST],    // 12.8  widest — anchor
 ];
 
-export const CORNER_ZOOM = 18.5;
+// 18.5 → 17 (Jeff, 2026-09-18: "zoom 17"). John's 09-16 CarPlay drive (Ni GR): "it keeps on zooming in alot to a point
+// i cant see the turn coming up … missed two lefts" — cam-apply req z=18.50 and ten CarPlay zoom-out taps. The speed
+// ceiling below now runs 17 at <= 45 km/h down to 16 at >= 90 km/h; prior art tops out at 16–16.35.
+export const CORNER_ZOOM = 17;
 export const CORNER_FAR_M = 280;
 export const CORNER_NEAR_M = 70;
 // ── CHAINED MANEUVERS (Jeff, 2026-09-03: "the exit off the highway was glitching") ──

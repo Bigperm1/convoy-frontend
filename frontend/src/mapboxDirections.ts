@@ -332,6 +332,41 @@ export function arrivesOnFarSide(r: Pick<MapboxRoute, "arriveSide" | "drivingSid
   return r.arriveSide !== r.drivingSide;
 }
 
+// ── ARRIVE ON THE DRIVER'S SIDE: THE VERDICT (moved here 2026-09-18 so tools/sim-qc/curb_rule_test.mts can drive it;
+// the history and calibration of these numbers is the "ARRIVE ON THE DRIVER'S SIDE" block in src/nav.ts) ──────────────
+// 2026-09-18 — Jeff: "your call on 1". John's 09-16 receipts (Ni GR, build 78): `curb TAKEN extra_s=18 extra_m=2243` (a
+// 2.2 km detour to save one road crossing — the distance rule needed BOTH > 250 m AND > 15 %, and 2,243 m was 12.7 %), and
+// three reroutes in 20 s that TOOK a curb route turning him back the way he came ("makes a u turn instead"). So:
+//   - a curb route that ADDS A U-TURN is never taken — arriving on your side is not worth turning around for;
+//   - each budget rejects on its own: > 20 s, > 10 % of the trip, or > 250 m extra.
+export const CURB_MAX_EXTRA_S = 20;
+export const CURB_MAX_EXTRA_FRAC = 0.10;
+export const CURB_MAX_EXTRA_M = 250;
+
+/** How many U-turns a route asks the driver for (Mapbox marks them with the maneuver modifier "uturn"). */
+export function countUturns(r: { steps?: MapboxRouteStep[] } | null | undefined): number {
+  let n = 0;
+  for (const st of r?.steps ?? []) {
+    const m = st?.maneuver;
+    if (m && ((m.modifier ?? "").toLowerCase() === "uturn" || (m.type ?? "").toLowerCase() === "uturn")) n++;
+  }
+  return n;
+}
+
+export type CurbVerdict = { take: boolean; extraS: number; extraM: number; addsUturn: boolean };
+/** Take the curb-side route instead of `best`? Only when it adds no U-turn and stays inside every budget. */
+export function curbVerdict(
+  best: Pick<MapboxRoute, "duration_s" | "distance_m" | "steps">,
+  alt: Pick<MapboxRoute, "duration_s" | "distance_m" | "steps">,
+): CurbVerdict {
+  const extraS = alt.duration_s - best.duration_s;
+  const extraM = alt.distance_m - best.distance_m;
+  const addsUturn = countUturns(alt) > countUturns(best);
+  const tooSlow = extraS > CURB_MAX_EXTRA_S || extraS > best.duration_s * CURB_MAX_EXTRA_FRAC;
+  const tooFar = extraM > CURB_MAX_EXTRA_M;
+  return { take: !(tooSlow || tooFar || addsUturn), extraS, extraM, addsUturn };
+}
+
 // Fetch up to `alternatives` driving-traffic routes from origin->dest with steps,
 // congestion, and a traffic/free-flow duration split. Returns [] on any failure
 // (caller decides fallback). One leg (no waypoints) so annotations cover the whole

@@ -88,6 +88,16 @@
       "changes": [
         "src/routeRibbon.ts: code adc31728128f → 4cc261ae59a5"
       ]
+    },
+    {
+      "at": "2026-09-18",
+      "quote": "Jeff, 2026-09-18: \"your call on 1 / zoom 17 / silence slight turn\" (curb arrival: never adds a U-turn, each budget rejects alone; CORNER_ZOOM 18.5 -> 17; slight turns and Mapbox 'new name' silenced)",
+      "changes": [
+        "src/chaseZoom.ts: code 7c043db61f3c → 31984b768508",
+        "src/nav.ts: code b5f88bd619a5 → 7e23fac2e198",
+        "src/maneuverSpeech.ts: code 217da7fe0e9b → 9c18150b4e6c",
+        "src/mapboxDirections.ts: code c485b777673b → d64c5995678d"
+      ]
     }
   ],
   "files": {
@@ -96,7 +106,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {
-      "hash": "sha256:7c043db61f3cf506f960afa30d10e8058f61618ba893105ba5b630e0b948f887",
+      "hash": "sha256:31984b7685082e85a595e4c0c2fe01865c9962aa82c77890af48af9cdff25f35",
       "why": "pure drive-engine module: code-locked"
     },
     "src/camGlide.ts": {
@@ -184,7 +194,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/nav.ts": {
-      "hash": "sha256:b5f88bd619a504697727f3b2f14aadb6e78e806193deda9c0b76f4efff441ade",
+      "hash": "sha256:7e23fac2e1983e858e17ee4f5937ae208696bd0d593b52b829295b39838116c8",
       "why": "pure drive-engine module: code-locked"
     },
     "src/navNotification.ts": {
@@ -208,7 +218,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/maneuverSpeech.ts": {
-      "hash": "sha256:217da7fe0e9b9af1acc9a2bf7ab14e14426f750cc2f58b43dffdb3aed45fbda0",
+      "hash": "sha256:9c18150b4e6c2dd62fa78387ec749b27162e7bba6f74ca6eddc85b7ae69fc541",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chasePitch.ts": {
@@ -220,7 +230,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/mapboxDirections.ts": {
-      "hash": "sha256:c485b777673bef8ddd02196fe34d194657f0af89f605d0a7490c9fb924c52176",
+      "hash": "sha256:d64c5995678d4edac72834b122560b1103024d75a370b13524a4878cfd1c91c8",
       "why": "pure drive-engine module: code-locked"
     },
     "src/ConvoyMapbox.tsx": {

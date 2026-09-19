@@ -57,6 +57,15 @@ ok("B10 roundabout|straight speaks", isSpokenManeuver("roundabout|straight", "Ta
 ok("B11 rotary|straight speaks", isSpokenManeuver("rotary|straight", "Take the 2nd exit"));
 // NEGATIVE CONTROLS — the exemption must be roundabouts ONLY, not a hole in the filler rule.
 ok("B12 turn|straight stays silent", !isSpokenManeuver("turn|straight", "Continue onto Main St"));
+// SLIGHT TURNS AND ROAD-NAME CHANGES ARE SILENT (Jeff, 2026-09-18: "silence slight turn"; John 09-17: "keeps on mentioning
+// slight left/ right at bear right at king george"). Mapbox spells a road-name change "new name" — its own text for a slight
+// one is "Bear right onto …". Real decisions still speak whatever their modifier.
+for (const key of ["turn|slight right", "turn|slight left", "TURN_SLIGHT_RIGHT", "turn-slight-left", "new name|slight right", "new name|straight", "new name|slight left"]) {
+  ok(`S ${key} is silent`, !isSpokenManeuver(key, "Bear right onto King George Blvd"));
+}
+for (const key of ["turn|right", "turn|left", "turn|sharp right", "fork|slight right", "fork|slight left", "merge|slight left", "off ramp|slight right", "on ramp|slight left", "roundabout|slight right", "turn|uturn", "end of road|right"]) {
+  ok(`S ${key} still speaks`, isSpokenManeuver(key, "Keep right onto the ramp"));
+}
 ok("B13 merge|straight stays silent", !isSpokenManeuver("merge|straight", "Continue onto Hwy 1"));
 ok("B14 continue|straight stays silent", !isSpokenManeuver("continue|straight", "Continue on Main St"));
 

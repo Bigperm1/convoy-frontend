@@ -47,6 +47,9 @@ export function isSpokenManeuver(maneuver?: string, html?: string): boolean {
   // their modifier. The banner still shows the arrow.
   if (type === "turn" && (modifier === "slight left" || modifier === "slight right")) return false;
   if (/^turn[_-]slight[_-](left|right)$/.test(type)) return false;   // legacy tokens (TURN_SLIGHT_RIGHT, turn-slight-right)
+  // A U-TURN ALWAYS SPEAKS (Jeff, 2026-09-18: "ship now everything", on "want it spoken?"). Mapbox encodes some U-turns as
+  // continue|uturn, and the SILENT type rule below dropped them — the banner said "Make a U-turn" and Nova said nothing.
+  if (modifier === "uturn" || type === "uturn") return true;
   if (type && SILENT_MANEUVERS.has(type)) return false;
   if (m && !SILENT_MANEUVERS.has(m)) return true;
   const h = (html || "").toLowerCase();

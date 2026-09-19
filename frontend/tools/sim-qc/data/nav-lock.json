@@ -108,6 +108,13 @@
         "src/carplay/CarMapView.tsx#car-held-heading-pose-yaw region 858b05a11236 → e620dcf95093",
         "src/carplay/CarMapView.tsx#car-selfcar-pose-step region f1c8c7e4f95a → 20f1cb80de5d"
       ]
+    },
+    {
+      "at": "2026-09-18",
+      "quote": "Jeff, 2026-09-18: \"ship now everything\" (answering \"want it spoken?\" — U-turns always speak, continue|uturn included)",
+      "changes": [
+        "src/maneuverSpeech.ts: code 9c18150b4e6c → 2a63574d0c6b"
+      ]
     }
   ],
   "files": {
@@ -228,7 +235,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/maneuverSpeech.ts": {
-      "hash": "sha256:9c18150b4e6c2dd62fa78387ec749b27162e7bba6f74ca6eddc85b7ae69fc541",
+      "hash": "sha256:2a63574d0c6baf28369e5dce591b232667ce26ff8dc8b50f1ca4b941f9e6f263",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chasePitch.ts": {

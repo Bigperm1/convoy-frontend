@@ -326,5 +326,21 @@ console.log("I · the GPS goes quiet at speed: the car holds after POSE_DR_MAX_F
   ok("I1 at most POSE_DR_MAX_FIX_AGE_S of travel past the last fix (≤ 30 m at 10 m/s)", ahead <= 30, `${ahead.toFixed(1)} m (pre-fix 3f844877: 148.3 m, measured)`);
 }
 
+console.log("J · a 30 s GPS gap while driving on (a tunnel): route follow finds the car again (Codex 2026-09-19)");
+{
+  // Codex (medium, REPRODUCED): 2 km straight line, vertices every 10 m; on at 100/110 m at 10 m/s, then no fixes for 30 s
+  // while the car drives on. The hold (I) parks the puck ~135 m; fixes at 410 m, 420 m … searched only a window around the
+  // stale puck, never found the car, and route follow stayed OFF for the rest of the drive.
+  const long = lineOf(Array.from({ length: 201 }, (_, i) => mE(i * 10, 0)));
+  const all = drive((s) => ({ x: s, y: 0, crs: 90 }), 10, 70);
+  const fixes = all.filter((f) => f.t <= 11 || f.t >= 41);
+  const { frames } = replay(long, fixes, true);
+  const back = frames.find((f) => f.t >= 41 && f.rf && Math.abs(rfProject(long, f.lat, f.lng, null)!.m - 10 * f.t) <= 15);
+  const late = frames.filter((f) => f.t >= 46);
+  const worst = Math.max(...late.map((f) => Math.abs(rfProject(long, f.lat, f.lng, null)!.m - 10 * f.t)));
+  ok("J1 route follow is back on within 3 fixes of the GPS returning", !!back && back.t <= 44, back ? `on again at ${back.t.toFixed(1)} s (GPS back at 41 s)` : "never");
+  ok("J2 and the car is drawn where it is after that (≤ 15 m along)", late.every((f) => f.rf) && worst <= 15, `${late.filter((f) => f.rf).length}/${late.length} frames on the line, worst ${worst.toFixed(1)} m`);
+}
+
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);
 if (fails) process.exit(1);

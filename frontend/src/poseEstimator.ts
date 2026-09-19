@@ -899,6 +899,29 @@ export function rfProject(line: RfLine, lat: number, lng: number, nearM: number 
   return { m: Math.max(0, Math.min(line.totalM, bestM)), distM: Math.sqrt(best2) };
 }
 
+/** The WHOLE line, preferring segments that run the way the car is going (course within RF_AGREE_DEG) — the reacquire
+ *  search (Codex 2026-09-19). Falls back to the plain nearest point when no segment agrees or no course is known. */
+export function rfProjectAgreeing(line: RfLine, lat: number, lng: number, courseDeg: number | null): { m: number; distM: number } | null {
+  const any = rfProject(line, lat, lng, null);
+  if (courseDeg == null || !Number.isFinite(courseDeg) || !any) return any;
+  const n = line.coords.length;
+  const k = Math.PI / 180, cosLat = Math.cos(lat * k), R = 6371000;
+  const X = (ln: number) => (ln - lng) * k * cosLat * R, Y = (la: number) => (la - lat) * k * R;
+  let best2 = Infinity, bestM = 0;
+  let px = X(line.coords[0][0]), py = Y(line.coords[0][1]);
+  for (let i = 1; i < n; i++) {
+    const cx = X(line.coords[i][0]), cy = Y(line.coords[i][1]);
+    const dx = cx - px, dy = cy - py, l2 = dx * dx + dy * dy;
+    if (l2 > 0 && Math.abs(wrap180(courseDeg - (Math.atan2(dx, dy) * 180) / Math.PI)) <= RF_AGREE_DEG) {
+      const t = Math.max(0, Math.min(1, -(px * dx + py * dy) / l2));
+      const qx = px + t * dx, qy = py + t * dy, d2 = qx * qx + qy * qy;
+      if (d2 < best2) { best2 = d2; bestM = line.cum[i - 1] + t * (line.cum[i] - line.cum[i - 1]); }
+    }
+    px = cx; py = cy;
+  }
+  return best2 === Infinity ? any : { m: Math.max(0, Math.min(line.totalM, bestM)), distM: Math.sqrt(best2) };
+}
+
 /** The point `m` metres along the line. */
 export function rfPoint(line: RfLine, m: number): { lat: number; lng: number } {
   const n = line.coords.length;
@@ -947,7 +970,15 @@ export function rfFix(
   if (!line || !Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return null;
   const same = !!st && rfSameLine(st.key, line);
   const spd = typeof f.speedMs === "number" && Number.isFinite(f.speedMs) && f.speedMs > 0 ? f.speedMs : 0;
-  const p = same ? rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2) : rfProject(line, f.lat, f.lng, null);
+  // REACQUIRE (Codex 2026-09-19, reproduced): a puck that is not following, or whose last fix is older than
+  // POSE_DR_MAX_FIX_AGE_S (the hold parked it — a tunnel, a stall), may no longer have the car inside its window: 30 s at
+  // 10 m/s put the car 275 m past a puck parked at 135 m, every fix projected to the window's end, and route follow stayed
+  // off for the rest of the drive. Those search the WHOLE line (preferring the car's direction), and a stale gap re-earns
+  // switching on (RF_ON_FIXES agreeing fixes) from wherever the car is now (route_follow_test J).
+  const gapped = same && !(st!.fixAt > 0 && f.at - st!.fixAt <= POSE_DR_MAX_FIX_AGE_S * 1000);
+  const wide = !same || gapped || !st!.active;
+  const crs = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS ? f.courseDeg : null;
+  const p = wide ? rfProjectAgreeing(line, f.lat, f.lng, crs) : rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2);
   if (!p) return same ? { ...st!, key: line, active: false, onN: 0, offN: st!.offN + 1, fixAt: f.at } : null;
   // `agree`: true/false when the fix can say which way the car is going (moving, with a course), null when it cannot.
   const agree = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS
@@ -956,7 +987,7 @@ export function rfFix(
   const good = p.distM <= RF_ON_M && agree !== false;
   const ageS = Math.max(0, Math.min(2, (nowMs - f.at) / 1000));
   const target = Math.min(line.totalM, p.m + Math.min(RF_MAX_LEAD_M, spd * ageS));
-  if (!same) return { key: line, m: target, errM: 0, active: false, onN: good && agree === true ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs, fixAt: f.at };
+  if (!same || gapped) return { key: line, m: target, errM: 0, active: false, onN: good && agree === true ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs, fixAt: f.at };
   const s = { ...st!, fixAt: f.at };
   if (good) {
     // Not following yet: a fix that cannot say which way the car is going neither counts toward switching on nor against

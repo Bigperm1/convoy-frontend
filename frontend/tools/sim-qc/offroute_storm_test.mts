@@ -732,7 +732,7 @@ const underpass = (rows: Array<[number, number, number, number, boolean]>): Tick
   }
   for (const [d, side, v, step, off] of rows) {
     pos += v; along += step;
-    t.push({ pos, d, side, alongM: along, speedMs: v, headingOff: off, headingKnown: true, courseOff: off, dManeuverM: 300 });
+    t.push({ pos, d, side, alongM: along, speedMs: v, headingOff: off, headingKnown: true, courseOff: off, accM: 10, dManeuverM: 300 });   // acc: pose-fix acc=10
   }
   return t;
 };
@@ -786,6 +786,16 @@ const Yn4 = run(onRoad(30, () => ({ courseOff: true, headingOff: true, speedMs: 
 const yAfterSwap: Tick[] = [];
 for (let i = 0; i < 5; i++) yAfterSwap.push({ pos: 15 * i, d: i % 2 ? 6 : 9, side: i % 2 ? -1 : 1, alongM: 15 * i, speedMs: 15, headingOff: true, headingKnown: true, courseOff: true, dManeuverM: 2000 });
 const Yn5 = run(yAfterSwap, { sessionReset: true });
+// Codex 2026-09-19 (high, REPRODUCED): one noisy fix. A straight road the car IS following, the travel arm satisfied,
+// maneuvers 500 m away: 10 m LEFT with the course along the road, then one second later 6 m RIGHT with the course 60° off,
+// both at 30 m accuracy — inside the fix's own uncertainty. The first version tripped `crossed` on this.
+const yNoisy: Tick[] = [];
+for (let i = 0; i < 40; i++) yNoisy.push({ pos: 10 * i, d: 3, side: 1, alongM: 10 * i, speedMs: 10, headingOff: false, headingKnown: true, courseOff: false, accM: 10, dManeuverM: 500 });
+yNoisy.push({ pos: 400, d: 10, side: 1, alongM: 400, speedMs: 10, headingOff: false, headingKnown: true, courseOff: false, accM: 30, dManeuverM: 500 });
+yNoisy.push({ pos: 410, d: 6, side: -1, alongM: 410, speedMs: 10, headingOff: true, headingKnown: true, courseOff: true, accM: 30, dManeuverM: 500 });
+for (let i = 1; i <= 10; i++) yNoisy.push({ pos: 410 + 10 * i, d: 3, side: 1, alongM: 410 + 10 * i, speedMs: 10, headingOff: false, headingKnown: true, courseOff: false, accM: 10, dManeuverM: 500 });
+const Yn6 = run(yNoisy);
+check(Yn6.trips.length === 0, `Y ONE noisy fix (10 m left → 6 m right at 30 m accuracy, one course 60° off) produced ${Yn6.trips.length} reroutes (want 0 — Codex 2026-09-19)`);
 check(Yn1.trips.length === 0, `Y GPS flipping sides on a road the car is following produced ${Yn1.trips.length} reroutes (want 0: the course runs along the line)`);
 check(Yn1guard.trips.length >= 1, `Y the same flip with the course ${">"}55° off produced ${Yn1guard.trips.length} reroutes (want ≥ 1 — proves the course guard is what holds the one above)`);
 check(Yn2.trips.length === 0, `Y a crossing-shaped trace AT a maneuver produced ${Yn2.trips.length} reroutes (want 0: ${HDG_FAST_MANEUVER_CLEAR_M} m guard)`);
@@ -795,7 +805,7 @@ check(Yn5.trips.length === 0 && Yn5.holds.includes("trend"), `Y a crossing 75 m 
 
 console.log(
   `Y Jeff's underpass: 09-19 field ${y19Trip / 1000}s → ${fmt(Y19x)} (+${y19Gain}s) · 09-18 field ${y18Trip / 1000}s → ${fmt(Y18x)} (+${y18Gain}s) (want ≥ +3 s, one reroute) | ` +
-  `must-not-trip: flip=${Yn1.trips.length} maneuver=${Yn2.trips.length} hairpin=${Yn3.trips.length} crawl=${Yn4.trips.length} just-swapped=${Yn5.trips.length} (want 0s) · guard proof=${Yn1guard.trips.length} (want ≥1)`,
+  `must-not-trip: flip=${Yn1.trips.length} maneuver=${Yn2.trips.length} hairpin=${Yn3.trips.length} crawl=${Yn4.trips.length} just-swapped=${Yn5.trips.length} one-noisy-fix=${Yn6.trips.length} (want 0s) · guard proof=${Yn1guard.trips.length} (want ≥1)`,
 );
 console.log(
   `A lot storm: today=${Atoday.trips.length} [${fmt(Atoday)}] → gated=${A.trips.length} [${fmt(A)}] ` +

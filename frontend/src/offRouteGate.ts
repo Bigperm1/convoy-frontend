@@ -212,6 +212,11 @@ export const HDG_FAST_GROWTH_M = 8;
 // passes side 0 at a vertex, where "left/right" is not defined). No side/along (every caller before 09-19, and the
 // replays that do not model them) = inert. Replay: tools/sim-qc/offroute_storm_test.mts scenario Y (09-18 and 09-19
 // measured: 3.0 s sooner both days) and its five must-not-trip cases.
+// Codex adversarial review 2026-09-19 (high, reproduced): ONE noisy fix — 10 m left with the course along the road, then
+// 6 m right with the course 60° off, both at 30 m accuracy — tripped this on a road the car was following. Hardened two
+// ways: the course must be off the line on TWO consecutive fixes (a single bad course cannot), and each side must be
+// clear of that fix's own accuracy (before > max(CROSS_MIN_BEFORE_M, acc), after > max(CROSS_MIN_AFTER_M, acc / 2)).
+// Jeff's ramp still trips on the same tick (course off for :58.2 and :59.2; acc 10 m; 12.5 m before, 9.9 m after).
 export const CROSS_MIN_BEFORE_M = 8;
 export const CROSS_MIN_AFTER_M = 5;
 export const CROSS_WINDOW_MS = 8000;
@@ -333,6 +338,8 @@ export type OffRouteGateState = {
   hdgOffD: number[];                                // the last HDG_FAST_TICKS qualifying dRoute values (rolling growth test)
   /** The last tick that was > CROSS_MIN_BEFORE_M off the line on a KNOWN side (crossing fast path, 2026-09-19). */
   crossOff: { side: number; alongM: number; t: number } | null;
+  /** The previous tick had a KNOWN course off the line (the crossing path needs two in a row — Codex 2026-09-19). */
+  prevCourseOff: boolean;
 };
 
 export type OffRouteTickInput = {
@@ -395,7 +402,7 @@ export type OffRouteDecision = {
 
 export const newOffRouteGateState = (now = 0): OffRouteGateState => ({
   streak: 0, hist: [], swapAt: now, travelSinceSwapM: 0, lastFix: null, lastFastAt: 0,
-  lastTripAt: 0, onThisRoute: false, hdgOffTicks: 0, hdgOffD: [], crossOff: null,
+  lastTripAt: 0, onThisRoute: false, hdgOffTicks: 0, hdgOffD: [], crossOff: null, prevCourseOff: false,
 });
 
 /**
@@ -431,6 +438,7 @@ export function resetOffRouteGate(st: OffRouteGateState, now: number): void {
   st.hdgOffTicks = 0;
   st.hdgOffD.length = 0;
   st.crossOff = null;       // a side of the OLD line says nothing about the new one
+  st.prevCourseOff = false;
 }
 
 const haversineM = (aLat: number, aLng: number, bLat: number, bLng: number): number => {
@@ -555,17 +563,20 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   // side can never be compared with itself.
   const side = t.side === 1 || t.side === -1 ? t.side : 0;
   const along = typeof t.alongM === "number" && Number.isFinite(t.alongM) ? t.alongM : null;
+  const acc = typeof t.accM === "number" && Number.isFinite(t.accM) && t.accM > 0 ? t.accM : 0;
+  const courseOffNow = t.headingKnown === true && t.courseOff === true;
   const prevOff = st.crossOff;
   const crossed =
     side !== 0 && along !== null && prevOff !== null &&
     t.now - prevOff.t <= CROSS_WINDOW_MS &&
     side !== prevOff.side &&
-    t.dRoute > CROSS_MIN_AFTER_M &&
+    t.dRoute > Math.max(CROSS_MIN_AFTER_M, acc / 2) &&
     Math.abs(along - prevOff.alongM) <= CROSS_SAME_PLACE_M &&
-    t.headingKnown === true && t.courseOff === true &&
+    courseOffNow && st.prevCourseOff &&
     spd !== null && spd >= HDG_FAST_MIN_SPEED_MS &&
     maneuverClear && st.onThisRoute;
-  if (side !== 0 && along !== null && t.dRoute > CROSS_MIN_BEFORE_M) st.crossOff = { side, alongM: along, t: t.now };
+  if (side !== 0 && along !== null && t.dRoute > Math.max(CROSS_MIN_BEFORE_M, acc)) st.crossOff = { side, alongM: along, t: t.now };
+  st.prevCourseOff = courseOffNow;
 
   // ── divergence trend — catches the slow parallel-street departure long before the
   // 80 m threshold does. See the DIVERGE_* block for why a trend beats a distance.

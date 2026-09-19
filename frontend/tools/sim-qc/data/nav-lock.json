@@ -131,11 +131,19 @@
       "changes": [
         "src/poseEstimator.ts: code f4194597f77a → c974337e803f"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"The is a bug, the reroute should hae been quicker\" + \"Before you do that look at my drive\" — Codex r1 (same day, reproduced both): the crossing path now needs two course-off fixes in a row and sides clear of the fix accuracy (one noisy fix tripped it); route follow reacquires over the whole line after a stale gap or while not following (a 30 s gap lost it for the rest of the drive)",
+      "changes": [
+        "src/poseEstimator.ts: code c974337e803f → 99d5567ddb49",
+        "src/offRouteGate.ts: code cedba524b93b → d7b12c647374"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:c974337e803f70945416d40a08acba55bd525d54bf6160ed32d99d1c7f510add",
+      "hash": "sha256:99d5567ddb4984f662668f17da2c94aabe10d98d7d4a842fb91c45815ac65825",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {
@@ -163,7 +171,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/offRouteGate.ts": {
-      "hash": "sha256:cedba524b93bb7e2497d1f2c57389b919e3e0cb98c6d084ecbf7b6ed28ccebba",
+      "hash": "sha256:d7b12c647374cf07a0622b43cca86f94de34d172bfc987a50b959d6e6917cb7d",
       "why": "pure drive-engine module: code-locked"
     },
     "src/cornerBlend.ts": {

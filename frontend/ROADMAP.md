@@ -1066,7 +1066,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
-- **READY, NOT SHIPPED — `3f844877` → HEAD (2026-09-19; Codex r1–r5 each NEEDS-ATTENTION → every finding reproduced as a failing test and fixed: `6d5ddd01`, `14190c2c`, `6f8af858`, `c76ec74f`, the stop settle; r5's missed-turn finding = the OPEN item below; r6 on the stop fix pending; awaits Jeff's OTA go):** the first field drives on
+- **READY, NOT SHIPPED — `3f844877` → HEAD (2026-09-19; Codex r1–r4 findings all reproduced as failing tests and fixed; r5/r6 findings = the two OPEN items below; awaits Jeff's OTA go):**
   OTA-BB (John ×2 CarPlay, Say Phin AA, Jeff CarPlay; memory `field-2026-09-19-first-drives-on-ota-bb`) — route follow ON for 94–98 %
   of corner fixes, no overshoot, zoom max exactly 17, curb U-turn rule working. Fixed: (1) Jeff's underpass off-ramp — the reroute
   came 4.0 s after he crossed under Hwy 1 on 09-15, 09-18 AND 09-19 (why=heading); faster today, so 37 m past the line and too late
@@ -1078,7 +1078,12 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   King Rd (the line cuts that corner ~15 m). Also: `cf71f893` route follow honours the 2.5 s no-fix hold (sim: 82 m ahead of a
   19.5 s-old fix; gate I 148.3 → 25.0 m); `6d5ddd01` Codex r1 — the crossing needs two course-off fixes clear of the GPS accuracy
   (one noisy fix tripped it), and route follow reacquires over the whole line after a gap (a 30 s gap lost it for the drive; gate J).
-  Sim-verified in the real app: `off-route tripped d=6m why=crossed` on a steep crossing (0 Ave, 10:28).
+  Sim-verified in the real app: `off-route tripped d=6m why=crossed` on a steep crossing (0 Ave, 10:28 and again on the final
+  gate code 11:00:29). Codex r2–r4 (`14190c2c`, `6f8af858`, `c76ec74f`): pending near-side record; reacquire bounded to THIS lap,
+  after a U-turn, after a detour that rejoins. **OPEN #2 (Codex r5, pre-existing since OTA-BB):** GPS drifting ahead while
+  STOPPED pulls the car forward and it stays (never-backward); a first fix (`9ab9d701`/`ecb5236b`) created worse failures (Codex
+  r6: a bad stationary fix slid the car back 25 m; a crawl < 2 km/h froze it) and was REVERTED — needs a real stop model
+  (median of stationary fixes + movement-based release); `route_follow_test` O now guards the crawl.
 - **SHIPPED AS OTA-BB `7fad7fad-901b-4e12-b164-fa1460203f80` (2026-09-18 ~23:05 PDT, Jeff: "ship now everything"; KEY_PRESENT=1 both):**
   ROUTE FOLLOW — on the route the car rides the line and turns at the corner (Jeff: *"we are still over shooting corners … it is over
   shooting in the 2d map too"*; his 09-16 corners 7.7–18.7 m off the line → 0.0 m, `tools/sim-qc/route_follow_test.mts`; sim before/after:

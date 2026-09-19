@@ -164,22 +164,13 @@
     },
     {
       "at": "2026-09-19",
-      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — Codex r5 (same day, reproduced): route follow gives no forward catch-up while the car is stopped, and settles once onto where the car stopped (the first stationary fix, either way, <= 2 m/s), ignoring stationary drift after it (GPS drifting 15 m ahead at a light carried the stopped car forward and kept it there)",
-      "changes": [
-        "src/poseEstimator.ts: code 72263cb1dec9 → 489f8bf42aab"
-      ]
-    },
-    {
-      "at": "2026-09-19",
-      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — the stop settle runs before the 2.5 s no-fix hold (a stopped iPhone sends no more fixes; one stationary fix then silence left the settle half done)",
-      "changes": [
-        "src/poseEstimator.ts: code 489f8bf42aab → a326e7145ef8"
-      ]
+      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — REVERT of the stop handling (9ab9d701 + ecb5236b): Codex r6 reproduced that it slid a stopped car back 25 m on one bad stationary fix and froze a crawl under 2 km/h; poseEstimator.ts is back to the Codex-r5-reviewed c76ec74f bytes",
+      "changes": []
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:a326e7145ef87101d53af97763c4df64880419483fa91cd04ec0dbff927b1872",
+      "hash": "sha256:72263cb1dec9cc9e3d0e21699538f769c12ec3b591797a96abde696efe667539",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {

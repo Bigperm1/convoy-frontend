@@ -408,30 +408,21 @@ console.log("M · off the route on a parallel road, then back on it with the SAM
   ok("M2 and stays on it", late.every((f) => f.rf), `${late.filter((f) => f.rf).length}/${late.length} frames on the line`);
 }
 
-console.log("N · stopped at a light while the GPS drifts 15 m ahead: the car does not creep (Codex r5 2026-09-19)");
+console.log("O · crawling in a jam below 2 km/h, and slow fixes reporting speed 0: the car keeps up (Codex r6 2026-09-19)");
 {
-  // Codex r5 (medium, REPRODUCED): drive at 10 m/s, stop at m 200, the GPS reports m 215 for 5 s (speed 0, no course),
-  // then accurate again. The catch-up floor (+2 m/s) moved the STOPPED puck 201 → 211 m, and never-backward kept it there
-  // through t = 50 (the estimator alone returned to 200.3 m). OTA-BB (τ drain, no cap) jumped it forward instead.
-  const fx: FieldFix[] = [];
-  const put = (t: number, x: number, crs: number | null, spd: number) => { const [lng, lat] = mE(x, 0); fx.push({ t, lat, lng, crs, spd }); };
-  for (let t = 0; t <= 20; t++) put(t, 10 * t, 90, 10);          // to m 200
-  for (let t = 21; t <= 24; t++) put(t, 200, null, 0);           // stopped
-  for (let t = 25; t <= 29; t++) put(t, 215, null, 0);           // the GPS drifts 15 m ahead
-  for (let t = 30; t <= 50; t++) put(t, 200, null, 0);           // accurate again
-  const { frames } = replay(straightLine, fx, true);
-  const mAtT = (t0: number) => { const f = frames.filter((f) => f.t >= t0)[0]; return rfProject(straightLine, f.lat, f.lng, null)!.m; };
-  const creep = Math.max(...frames.filter((f) => f.t >= 22 && f.t <= 30).map((f) => rfProject(straightLine, f.lat, f.lng, null)!.m)) - mAtT(22);
-  const end = mAtT(49.5);
-  ok("N1 the stopped car does not creep toward the drifting fixes (≤ 2 m)", creep <= 2, `${creep.toFixed(1)} m`);
-  ok("N2 and sits where it stopped (within 3 m of 200 m)", Math.abs(end - 200) <= 3, `${end.toFixed(1)} m`);
-  // …and on iOS a stopped car sends NO fixes (distanceFilter 2 m — John's 25–34 s gaps at lights): ONE stationary fix, then
-  // silence. The settle must finish anyway (the 2.5 s no-fix hold must not cut it short).
-  const fx2 = fx.filter((f) => f.t <= 21);
-  fx2.push({ ...fx2[fx2.length - 1], t: 45 });
-  const r2 = replay(straightLine, fx2, true).frames;
-  const at44 = rfProject(straightLine, r2.filter((f) => f.t >= 44)[0].lat, r2.filter((f) => f.t >= 44)[0].lng, null)!.m;
-  ok("N3 one stationary fix then silence: still settles where it stopped (within 3 m)", Math.abs(at44 - 200) <= 3, `${at44.toFixed(1)} m`);
+  // Codex r6 (reproduced on the r5 stop lock, since reverted): crawling at 0.4 m/s, and fixes advancing 1 m/s with speed 0
+  // (Android can report 0 at a crawl), froze the puck at 199.8 m while the car reached 215–238 m. Whatever stop handling
+  // comes next must keep this.
+  for (const [label, v, rep] of [["0.4 m/s reported 0.4", 0.4, 0.4], ["1 m/s reported 0", 1, 0]] as const) {
+    const fx: FieldFix[] = [];
+    const put = (t: number, x: number, crs: number | null, spd: number) => { const [lng, lat] = mE(x, 0); fx.push({ t, lat, lng, crs, spd }); };
+    for (let t = 0; t <= 20; t++) put(t, 10 * t, 90, 10);
+    for (let t = 21; t <= 59; t++) put(t, 200 + v * (t - 20), null, rep);
+    const { frames } = replay(straightLine, fx, true);
+    const f = frames.filter((x) => x.t >= 59)[0];
+    const m = rfProject(straightLine, f.lat, f.lng, null)!.m, truth = 200 + v * 39;
+    ok(`O ${label}: the car keeps up with a crawl (within 5 m)`, Math.abs(m - truth) <= 5, `${m.toFixed(1)} m, car at ${truth.toFixed(1)} m`);
+  }
 }
 
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);

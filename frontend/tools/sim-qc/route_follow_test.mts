@@ -408,5 +408,24 @@ console.log("M · off the route on a parallel road, then back on it with the SAM
   ok("M2 and stays on it", late.every((f) => f.rf), `${late.filter((f) => f.rf).length}/${late.length} frames on the line`);
 }
 
+console.log("N · stopped at a light while the GPS drifts 15 m ahead: the car does not creep (Codex r5 2026-09-19)");
+{
+  // Codex r5 (medium, REPRODUCED): drive at 10 m/s, stop at m 200, the GPS reports m 215 for 5 s (speed 0, no course),
+  // then accurate again. The catch-up floor (+2 m/s) moved the STOPPED puck 201 → 211 m, and never-backward kept it there
+  // through t = 50 (the estimator alone returned to 200.3 m). OTA-BB (τ drain, no cap) jumped it forward instead.
+  const fx: FieldFix[] = [];
+  const put = (t: number, x: number, crs: number | null, spd: number) => { const [lng, lat] = mE(x, 0); fx.push({ t, lat, lng, crs, spd }); };
+  for (let t = 0; t <= 20; t++) put(t, 10 * t, 90, 10);          // to m 200
+  for (let t = 21; t <= 24; t++) put(t, 200, null, 0);           // stopped
+  for (let t = 25; t <= 29; t++) put(t, 215, null, 0);           // the GPS drifts 15 m ahead
+  for (let t = 30; t <= 50; t++) put(t, 200, null, 0);           // accurate again
+  const { frames } = replay(straightLine, fx, true);
+  const mAtT = (t0: number) => { const f = frames.filter((f) => f.t >= t0)[0]; return rfProject(straightLine, f.lat, f.lng, null)!.m; };
+  const creep = Math.max(...frames.filter((f) => f.t >= 22 && f.t <= 30).map((f) => rfProject(straightLine, f.lat, f.lng, null)!.m)) - mAtT(22);
+  const end = mAtT(49.5);
+  ok("N1 the stopped car does not creep toward the drifting fixes (≤ 2 m)", creep <= 2, `${creep.toFixed(1)} m`);
+  ok("N2 and sits where it stopped (within 3 m of 200 m)", Math.abs(end - 200) <= 3, `${end.toFixed(1)} m`);
+}
+
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);
 if (fails) process.exit(1);

@@ -832,6 +832,9 @@ export type RfState = {
   /** The fix clock when `m` was last placed by a fix ON the line (≤ RF_ON_M). The reacquire window grows with the time since
    *  (Codex r4: off-line fixes refreshed `fixAt`, so after a detour the window never grew and route follow never came back). */
   anchorAt: number;
+  /** Where the car STOPPED: the first stationary fix's metre (null while moving). The puck settles there once — even
+   *  backward — and ignores stationary drift after it (Codex r5). */
+  stopM?: number | null;
 } | null;
 // 25 m: the King Rd corner's fixes sat 14–17 m off the Mapbox line with the car on the road; the estimator's own route
 // pull reaches 40 m (POSE_ROUTE_MAX_M) and the off-route gate trips at ~46–52 m (John's 09-16 rows).
@@ -973,9 +976,21 @@ export function rfPredict(st: RfState, line: RfLine | null | undefined, nowMs: n
   if (!(st.fixAt > 0 && (nowMs - st.fixAt) / 1000 <= POSE_DR_MAX_FIX_AGE_S)) return { ...st, key: line, tAt: nowMs };
   const adv = Number.isFinite(spdMs) && spdMs >= 0.5 ? spdMs * dt : 0;
   const k = dt > 0 ? 1 - Math.exp(-dt / RF_CORR_TAU_S) : 0;
+  // STOPPED (Codex r5, reproduced): settle onto where the car stopped — the one place never-backward must yield, or the
+  // predict overshoot of the last metres before a stop sits the car past the stop line (John's lights 09-19: 7 m; a hard
+  // stop at 36 km/h: 10 m) — at most RF_CATCHUP_MIN_MS either way. rfFix fixes the target at the FIRST stationary fix,
+  // so GPS drift while stopped cannot drag it.
+  if (adv === 0 && st.stopM != null) {
+    const want = (st.stopM - st.m) * k, lim = RF_CATCHUP_MIN_MS * dt;
+    const step = Math.max(-lim, Math.min(lim, want));
+    return { ...st, key: line, m: Math.max(0, Math.min(line.totalM, st.m + step)), errM: 0, tAt: nowMs };
+  }
   const want = adv + st.errM * k;
-  // Catch-up cap (2026-09-19): never more than RF_CATCHUP_FRAC faster than the car; the rest of the gap carries.
-  const cap = adv + Math.max(RF_CATCHUP_MIN_MS, (Number.isFinite(spdMs) && spdMs > 0 ? spdMs : 0) * RF_CATCHUP_FRAC) * dt;
+  // Catch-up cap (2026-09-19): never more than RF_CATCHUP_FRAC faster than the car; the rest of the gap carries. And NONE
+  // while the car is stopped (Codex r5, reproduced: GPS drifting 15 m ahead for 5 s at a light pulled the stopped puck
+  // forward and never-backward kept it there) — only a moving car's fixes may pull the puck forward.
+  const moving = Number.isFinite(spdMs) && spdMs >= 0.5;
+  const cap = adv + (moving ? Math.max(RF_CATCHUP_MIN_MS, spdMs * RF_CATCHUP_FRAC) : 0) * dt;
   const step = Math.max(0, Math.min(want, cap));
   const errM = st.errM - (step - adv);
   const m = Math.max(0, Math.min(line.totalM, st.m + step));
@@ -1026,7 +1041,9 @@ export function rfFix(
     // straight settles any lead.
     const bend = Math.abs(wrap180(rfBearing(line, p.m + RF_BEND_SPAN_M, 3) - rfBearing(line, p.m - RF_BEND_SPAN_M, 3)));
     const err = target - s.m;
-    if (s.active) return { ...s, key: line, errM: bend > RF_BEND_DEG && err < 0 ? 0 : err, onN, offN: 0, tAt: s.tAt || nowMs };
+    // Stationary: the FIRST stationary fix marks where the car stopped; later stationary fixes are drift and move nothing.
+    if (s.active && spd < 0.5) return { ...s, key: line, stopM: s.stopM ?? p.m, errM: 0, onN, offN: 0, tAt: s.tAt || nowMs };
+    if (s.active) return { ...s, key: line, stopM: null, errM: bend > RF_BEND_DEG && err < 0 ? 0 : err, onN, offN: 0, tAt: s.tAt || nowMs };
     // Becoming active: start AT the fix's own place on the line (the estimator was drawing until now).
     if (onN >= RF_ON_FIXES) return { ...s, key: line, m: target, errM: 0, active: true, onN, offN: 0, tAt: nowMs };
     return { ...s, key: line, m: target, errM: 0, onN, offN: 0, tAt: nowMs };

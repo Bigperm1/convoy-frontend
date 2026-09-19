@@ -161,11 +161,18 @@
       "changes": [
         "src/poseEstimator.ts: code 05103398dfa6 → 72263cb1dec9"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — Codex r5 (same day, reproduced): route follow gives no forward catch-up while the car is stopped, and settles once onto where the car stopped (the first stationary fix, either way, <= 2 m/s), ignoring stationary drift after it (GPS drifting 15 m ahead at a light carried the stopped car forward and kept it there)",
+      "changes": [
+        "src/poseEstimator.ts: code 72263cb1dec9 → 489f8bf42aab"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:72263cb1dec9cc9e3d0e21699538f769c12ec3b591797a96abde696efe667539",
+      "hash": "sha256:489f8bf42aabbffb6a31d224c1a8b043ec9e4e44eb5588f68e5ce411a6b4a09a",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {

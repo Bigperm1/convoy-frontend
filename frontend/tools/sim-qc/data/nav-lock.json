@@ -154,11 +154,18 @@
       "changes": [
         "src/poseEstimator.ts: code 840dfec82c15 → 05103398dfa6"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — Codex r4 (same day, reproduced): the route-follow reacquire window grows with the time since the car was last SEEN on the line (anchorAt), not since the last fix (a detour and rejoin with no reroute never switched route follow on again)",
+      "changes": [
+        "src/poseEstimator.ts: code 05103398dfa6 → 72263cb1dec9"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:05103398dfa634d635a4439232e68b76ff050900f1e94edbbcffc2bc58842bbb",
+      "hash": "sha256:72263cb1dec9cc9e3d0e21699538f769c12ec3b591797a96abde696efe667539",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {

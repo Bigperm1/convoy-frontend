@@ -829,6 +829,9 @@ export type RfState = {
   key: RfLine; m: number; errM: number; active: boolean; onN: number; offN: number; tAt: number;
   /** The last fix's own clock (f.at) — route follow holds, like the estimator, once it is POSE_DR_MAX_FIX_AGE_S old. */
   fixAt: number;
+  /** The fix clock when `m` was last placed by a fix ON the line (≤ RF_ON_M). The reacquire window grows with the time since
+   *  (Codex r4: off-line fixes refreshed `fixAt`, so after a detour the window never grew and route follow never came back). */
+  anchorAt: number;
 } | null;
 // 25 m: the King Rd corner's fixes sat 14–17 m off the Mapbox line with the car on the road; the estimator's own route
 // pull reaches 40 m (POSE_ROUTE_MAX_M) and the off-route gate trips at ~46–52 m (John's 09-16 rows).
@@ -995,7 +998,8 @@ export function rfFix(
   const gapped = same && !(st!.fixAt > 0 && f.at - st!.fixAt <= POSE_DR_MAX_FIX_AGE_S * 1000);
   const wide = !same || gapped || !st!.active;
   const crs = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS ? f.courseDeg : null;
-  const sinceS = same && st!.fixAt > 0 ? Math.max(0, (f.at - st!.fixAt) / 1000) : 0;
+  // How far the car may have gone since the anchor was last SEEN on the line (not since the last fix — Codex r4).
+  const sinceS = same && st!.anchorAt > 0 ? Math.max(0, (f.at - st!.anchorAt) / 1000) : Infinity;
   const p = !wide ? rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2)
     : same ? rfProjectAgreeing(line, f.lat, f.lng, crs, st!.m - Math.max(RF_BACK_M, RF_REACH_MS * sinceS), st!.m + Math.max(RF_REACH_MIN_M, RF_REACH_MS * sinceS))
     : rfProjectAgreeing(line, f.lat, f.lng, crs);
@@ -1007,8 +1011,10 @@ export function rfFix(
   const good = p.distM <= RF_ON_M && agree !== false;
   const ageS = Math.max(0, Math.min(2, (nowMs - f.at) / 1000));
   const target = Math.min(line.totalM, p.m + Math.min(RF_MAX_LEAD_M, spd * ageS));
-  if (!same || gapped) return { key: line, m: target, errM: 0, active: false, onN: good && agree === true ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs, fixAt: f.at };
-  const s = { ...st!, fixAt: f.at };
+  const onLine = p.distM <= RF_ON_M;
+  const anchorAt = onLine ? f.at : same ? st!.anchorAt : 0;
+  if (!same || gapped) return { key: line, m: target, errM: 0, active: false, onN: good && agree === true ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs, fixAt: f.at, anchorAt };
+  const s = { ...st!, fixAt: f.at, anchorAt };
   if (good) {
     // Not following yet: a fix that cannot say which way the car is going neither counts toward switching on nor against
     // it (RF_MOVING_MS — Say Phin's pull-out). Once ON, it holds as before.
@@ -1029,7 +1035,7 @@ export function rfFix(
   const stillOn = s.active && offN < RF_OFF_FIXES;
   // Not following (or letting go now): keep the anchor on the car's own place along the line whenever the car is ON it, even
   // going the other way — the reacquire window is built around it (Codex r3: a U-turn and back must find the car again).
-  const m = !stillOn && p.distM <= RF_ON_M ? p.m : s.m;
+  const m = !stillOn && onLine ? p.m : s.m;
   return { ...s, key: line, m, errM: stillOn ? s.errM : 0, active: stillOn, onN: 0, offN };
 }
 

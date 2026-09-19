@@ -387,5 +387,26 @@ console.log("L · a U-turn on the route and back: route follow switches on again
   ok("L2 and stays on the line with the car", late.every((f) => f.rf), `${late.filter((f) => f.rf).length}/${late.length} frames on the line`);
 }
 
+console.log("M · off the route on a parallel road, then back on it with the SAME route (no reroute landed): route follow returns (Codex r4 2026-09-19)");
+{
+  // Codex r4 (medium, REPRODUCED): 5 km straight line, vertices every 10 m, 1 Hz fixes at 10 m/s: on near m 1010, 50 m
+  // sideways, 400 m parallel, back onto the line at m 1410 — the route unchanged (a reroute that never landed: no signal).
+  // Off-line fixes kept refreshing the fix clock, so the reacquire window stayed 200 m ahead of a stale anchor and route
+  // follow never came back.
+  const five = lineOf(Array.from({ length: 501 }, (_, i) => mE(i * 10, 0)));
+  const fx: FieldFix[] = [];
+  const put = (t: number, x: number, y: number, crs: number) => { const [lng, lat] = mE(x, y); fx.push({ t, lat, lng, crs, spd: 10 }); };
+  for (let t = 0; t <= 11; t++) put(t, 900 + 10 * t, 0, 90);                 // on the line to 1010
+  for (let t = 12; t <= 16; t++) put(t, 1010, -10 * (t - 11), 180);          // 50 m sideways (south)
+  for (let t = 17; t <= 56; t++) put(t, 1010 + 10 * (t - 16), -50, 90);      // 400 m parallel
+  for (let t = 57; t <= 61; t++) put(t, 1410, -50 + 10 * (t - 56), 0);       // back to the line at 1410
+  for (let t = 62; t <= 161; t++) put(t, 1410 + 10 * (t - 61), 0, 90);       // on the line again
+  const { frames } = replay(five, fx, true);
+  const back = frames.find((f) => f.t >= 62 && f.rf && Math.abs(rfProject(five, f.lat, f.lng, null)!.m - (1410 + 10 * (f.t - 61))) <= 15);
+  const late = frames.filter((f) => f.t >= 70);
+  ok("M1 route follow is back on within 4 s of rejoining the line", !!back && back.t <= 66, back ? `on again at ${back.t.toFixed(1)} s (back on the line at 62 s)` : "never");
+  ok("M2 and stays on it", late.every((f) => f.rf), `${late.filter((f) => f.rf).length}/${late.length} frames on the line`);
+}
+
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);
 if (fails) process.exit(1);

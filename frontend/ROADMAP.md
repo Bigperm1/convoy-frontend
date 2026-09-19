@@ -1066,7 +1066,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
-- **READY, NOT SHIPPED — `3f844877` + `cf71f893` + `6d5ddd01` (2026-09-19; Codex r1 NEEDS-ATTENTION → both findings reproduced + fixed in `6d5ddd01`; r2 running; awaits Jeff's OTA go):** the first field drives on
+- **READY, NOT SHIPPED — `3f844877` → `6f8af858` (2026-09-19; Codex r1/r2/r3 each NEEDS-ATTENTION → all 5 findings reproduced as failing tests and fixed: `6d5ddd01`, `14190c2c`, `6f8af858`; r4 on the whole set running; awaits Jeff's OTA go):** the first field drives on
   OTA-BB (John ×2 CarPlay, Say Phin AA, Jeff CarPlay; memory `field-2026-09-19-first-drives-on-ota-bb`) — route follow ON for 94–98 %
   of corner fixes, no overshoot, zoom max exactly 17, curb U-turn rule working. Fixed: (1) Jeff's underpass off-ramp — the reroute
   came 4.0 s after he crossed under Hwy 1 on 09-15, 09-18 AND 09-19 (why=heading); faster today, so 37 m past the line and too late

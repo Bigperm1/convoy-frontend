@@ -827,6 +827,8 @@ export function poseOut(st: PoseState): { lat: number; lng: number; hdg: number;
 export type RfLine = { coords: [number, number][]; cum: number[]; totalM: number };   // [lng, lat]; cum[0] = 0
 export type RfState = {
   key: RfLine; m: number; errM: number; active: boolean; onN: number; offN: number; tAt: number;
+  /** The last fix's own clock (f.at) — route follow holds, like the estimator, once it is POSE_DR_MAX_FIX_AGE_S old. */
+  fixAt: number;
 } | null;
 // 25 m: the King Rd corner's fixes sat 14–17 m off the Mapbox line with the car on the road; the estimator's own route
 // pull reaches 40 m (POSE_ROUTE_MAX_M) and the off-route gate trips at ~46–52 m (John's 09-16 rows).
@@ -857,6 +859,11 @@ export const RF_MOVING_MS = 3;
  *  the turn. The gap now closes over a few seconds; ahead of its fixes nothing changes (it still only slows). */
 export const RF_CATCHUP_FRAC = 0.5;
 export const RF_CATCHUP_MIN_MS = 2;
+// NO FIX, NO MOVEMENT (2026-09-19): route follow had no fix-age bound — rfPredict advanced the puck at the last speed for as
+// long as fixes stayed away. The sim caught it (the location feed stalled 20 s at 36 km/h: `draw-cmp src=rf d=82.4m
+// fixAge=19515`); in the field that is Jeff's 09-12 light again (`draw-cmp d=41.1m spd=16 fixAge=22412` — the ESTIMATOR's
+// version, fixed by POSE_DR_MAX_FIX_AGE_S in OTA-AS). The same rule now holds the puck: past POSE_DR_MAX_FIX_AGE_S since the
+// last fix it neither advances nor drains its error, and waits for the next fix (route_follow_test I).
 
 /** The same road, possibly a new object (a traffic refresh rebuilds the line with identical vertices). */
 export function rfSameLine(a: RfLine | null | undefined, b: RfLine | null | undefined): boolean {
@@ -919,6 +926,8 @@ const rfNoseW = (spd: number) => Math.max(RF_NOSE_MIN_M, (Number.isFinite(spd) &
 export function rfPredict(st: RfState, line: RfLine | null | undefined, nowMs: number, spdMs: number): RfState {
   if (!st || !line || !rfSameLine(st.key, line)) return st && line ? null : st;
   const dt = st.tAt > 0 ? Math.max(0, Math.min(1.5, (nowMs - st.tAt) / 1000)) : 0;
+  // No fix for POSE_DR_MAX_FIX_AGE_S: hold (the estimator's rule — the car may have stopped; the last speed is not evidence).
+  if (!(st.fixAt > 0 && (nowMs - st.fixAt) / 1000 <= POSE_DR_MAX_FIX_AGE_S)) return { ...st, key: line, tAt: nowMs };
   const adv = Number.isFinite(spdMs) && spdMs >= 0.5 ? spdMs * dt : 0;
   const k = dt > 0 ? 1 - Math.exp(-dt / RF_CORR_TAU_S) : 0;
   const want = adv + st.errM * k;
@@ -939,7 +948,7 @@ export function rfFix(
   const same = !!st && rfSameLine(st.key, line);
   const spd = typeof f.speedMs === "number" && Number.isFinite(f.speedMs) && f.speedMs > 0 ? f.speedMs : 0;
   const p = same ? rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2) : rfProject(line, f.lat, f.lng, null);
-  if (!p) return same ? { ...st!, key: line, active: false, onN: 0, offN: st!.offN + 1 } : null;
+  if (!p) return same ? { ...st!, key: line, active: false, onN: 0, offN: st!.offN + 1, fixAt: f.at } : null;
   // `agree`: true/false when the fix can say which way the car is going (moving, with a course), null when it cannot.
   const agree = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS
     ? Math.abs(wrap180(f.courseDeg - rfBearing(line, p.m, rfNoseW(spd)))) <= RF_AGREE_DEG
@@ -947,8 +956,8 @@ export function rfFix(
   const good = p.distM <= RF_ON_M && agree !== false;
   const ageS = Math.max(0, Math.min(2, (nowMs - f.at) / 1000));
   const target = Math.min(line.totalM, p.m + Math.min(RF_MAX_LEAD_M, spd * ageS));
-  if (!same) return { key: line, m: target, errM: 0, active: false, onN: good && agree === true ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs };
-  const s = st!;
+  if (!same) return { key: line, m: target, errM: 0, active: false, onN: good && agree === true ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs, fixAt: f.at };
+  const s = { ...st!, fixAt: f.at };
   if (good) {
     // Not following yet: a fix that cannot say which way the car is going neither counts toward switching on nor against
     // it (RF_MOVING_MS — Say Phin's pull-out). Once ON, it holds as before.

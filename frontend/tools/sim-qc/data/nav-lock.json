@@ -124,11 +124,18 @@
         "src/offRouteGate.ts: code 4e28787d6e8e → cedba524b93b",
         "src/nav.ts: code 7e23fac2e198 → bf6dc1895f38"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" (route follow fixes) — plus route follow now honours the SAME 2.5 s no-fix hold the estimator has had since OTA-AS (his 09-12 light): found by the sim run the same morning (src=rf d=82.4m fixAge=19515), pre-fix 148.3 m -> 25.0 m (route_follow_test I)",
+      "changes": [
+        "src/poseEstimator.ts: code f4194597f77a → c974337e803f"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:f4194597f77adfd7d913d08a2044c1ccd20542d45ff2a0cd0fb25bcdefd1db22",
+      "hash": "sha256:c974337e803f70945416d40a08acba55bd525d54bf6160ed32d99d1c7f510add",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {

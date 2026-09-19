@@ -312,5 +312,19 @@ console.log("H · the route turns, the car goes straight (Jeff 09-19 08:51:54, S
   }
 }
 
+console.log("I · the GPS goes quiet at speed: the car holds after POSE_DR_MAX_FIX_AGE_S (sim 09-19 stall; Jeff's 09-12 light)");
+{
+  // The sim, 2026-09-19 10:20 PDT: the location feed stalled for ~20 s at 36 km/h and route follow carried the puck 82 m past
+  // the last fix (`draw-cmp src=rf d=82.4m fixAge=19515`) — it had no fix-age bound. Jeff 09-12 14:55 (the estimator's own
+  // version, fixed in OTA-AS): stopped at a light, the last fix still read 16 km/h, the marker 41 m up the road.
+  // Drive the straight line at 10 m/s for 20 s, then no fixes for 15 s.
+  const fixes = drive((s) => ({ x: s, y: 0, crs: 90 }), 10, 20);
+  const { frames } = replay(straightLine, [...fixes, { ...fixes[fixes.length - 1], t: 35 }], true);   // one late fix at 35 s ends the gap
+  const lastFixM = rfProject(straightLine, fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lng, null)!.m;
+  const during = frames.filter((f) => f.t > 20 && f.t < 34.9 && f.m != null);
+  const ahead = Math.max(0, ...during.map((f) => f.m! - lastFixM));
+  ok("I1 at most POSE_DR_MAX_FIX_AGE_S of travel past the last fix (≤ 30 m at 10 m/s)", ahead <= 30, `${ahead.toFixed(1)} m (pre-fix 3f844877: 148.3 m, measured)`);
+}
+
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);
 if (fails) process.exit(1);

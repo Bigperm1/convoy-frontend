@@ -1,6 +1,6 @@
 {
   "approvedBy": "Jeff",
-  "approvedAt": "2026-09-18",
+  "approvedAt": "2026-09-19",
   "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
   "approvals": [
     {
@@ -115,11 +115,20 @@
       "changes": [
         "src/maneuverSpeech.ts: code 9c18150b4e6c → 2a63574d0c6b"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"The is a bug, the reroute should hae been quicker\" (his underpass off-ramp: offRouteGate crossing fast path + nav.ts nearestRouteInfo side/along) and \"Before you do that look at my drive\" in reply to the three route-follow fixes proposed that morning (switch-on needs a moving, agreeing fix; catch-up capped at 1.5x; the leaving-the-route change NOT made - King Rd trade-off, his call)",
+      "changes": [
+        "src/poseEstimator.ts: code c0433c779b0a → f4194597f77a",
+        "src/offRouteGate.ts: code 4e28787d6e8e → cedba524b93b",
+        "src/nav.ts: code 7e23fac2e198 → bf6dc1895f38"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:c0433c779b0aedbcc9c95a0ad3983bb610c05b6babd83051dc0dff844dcbccac",
+      "hash": "sha256:f4194597f77adfd7d913d08a2044c1ccd20542d45ff2a0cd0fb25bcdefd1db22",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {
@@ -147,7 +156,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/offRouteGate.ts": {
-      "hash": "sha256:4e28787d6e8ee0deae8d23dcd8b6a77ca1916e70c3a1ae9d22a43855b56ca2e5",
+      "hash": "sha256:cedba524b93bb7e2497d1f2c57389b919e3e0cb98c6d084ecbf7b6ed28ccebba",
       "why": "pure drive-engine module: code-locked"
     },
     "src/cornerBlend.ts": {
@@ -211,7 +220,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/nav.ts": {
-      "hash": "sha256:7e23fac2e1983e858e17ee4f5937ae208696bd0d593b52b829295b39838116c8",
+      "hash": "sha256:bf6dc1895f382962368c1f8cbd65348989010f368162242e5c983b9b4e3e2980",
       "why": "pure drive-engine module: code-locked"
     },
     "src/navNotification.ts": {

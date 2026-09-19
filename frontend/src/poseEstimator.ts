@@ -842,6 +842,21 @@ export const RF_MAX_LEAD_M = 30;
 /** A fix on a bend this sharp (the line turns more than this across ±RF_BEND_SPAN_M) cannot say the puck is AHEAD. */
 export const RF_BEND_DEG = 20;
 export const RF_BEND_SPAN_M = 10;
+// ── 2026-09-19, the first drives on OTA-BB (Jeff: "Before you do that look at my drive"; the fixes proposed to him that
+// morning). Replays: tools/sim-qc/route_follow_test.mts F and G, built from the rows.
+/** SWITCHING ON needs a fix that says which way the car is going: moving at least this fast, WITH a course that agrees
+ *  with the line. Say Phin 07:27:16 (Android Auto): route follow switched on at 3 km/h while he pulled out of a driveway
+ *  the other way (the course check only ran from 3 m/s), and the car sat frozen on the line pointing the route's way —
+ *  90° while he drove 181° then 260° — for 18 s. A slow or course-less fix now neither counts toward switching on nor
+ *  against it; once ON, slow fixes still hold it (a stop at a light must not drop it). */
+export const RF_MOVING_MS = 3;
+/** CATCH-UP: behind its fixes the puck runs at most RF_CATCHUP_FRAC faster than the car (floor RF_CATCHUP_MIN_MS).
+ *  John 07:03:46 and Say Phin 07:33:27 (the same 90° corner): the car cut the corner the line draws square (Say Phin's
+ *  fixes moved 9.5 m in a second while their projection on the line moved ~23 m; John's also jumped 13 m), the fix landed
+ *  15–20 m ahead of the puck, and RF_CORR_TAU_S closed all of it in ~1 s — the drawn car ran 2–3× the car's speed out of
+ *  the turn. The gap now closes over a few seconds; ahead of its fixes nothing changes (it still only slows). */
+export const RF_CATCHUP_FRAC = 0.5;
+export const RF_CATCHUP_MIN_MS = 2;
 
 /** The same road, possibly a new object (a traffic refresh rebuilds the line with identical vertices). */
 export function rfSameLine(a: RfLine | null | undefined, b: RfLine | null | undefined): boolean {
@@ -907,7 +922,9 @@ export function rfPredict(st: RfState, line: RfLine | null | undefined, nowMs: n
   const adv = Number.isFinite(spdMs) && spdMs >= 0.5 ? spdMs * dt : 0;
   const k = dt > 0 ? 1 - Math.exp(-dt / RF_CORR_TAU_S) : 0;
   const want = adv + st.errM * k;
-  const step = Math.max(0, want);
+  // Catch-up cap (2026-09-19): never more than RF_CATCHUP_FRAC faster than the car; the rest of the gap carries.
+  const cap = adv + Math.max(RF_CATCHUP_MIN_MS, (Number.isFinite(spdMs) && spdMs > 0 ? spdMs : 0) * RF_CATCHUP_FRAC) * dt;
+  const step = Math.max(0, Math.min(want, cap));
   const errM = st.errM - (step - adv);
   const m = Math.max(0, Math.min(line.totalM, st.m + step));
   return { ...st, key: line, m, errM, tAt: nowMs };
@@ -923,15 +940,19 @@ export function rfFix(
   const spd = typeof f.speedMs === "number" && Number.isFinite(f.speedMs) && f.speedMs > 0 ? f.speedMs : 0;
   const p = same ? rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2) : rfProject(line, f.lat, f.lng, null);
   if (!p) return same ? { ...st!, key: line, active: false, onN: 0, offN: st!.offN + 1 } : null;
-  let good = p.distM <= RF_ON_M;
-  if (good && f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= 3) {
-    good = Math.abs(wrap180(f.courseDeg - rfBearing(line, p.m, rfNoseW(spd)))) <= RF_AGREE_DEG;
-  }
+  // `agree`: true/false when the fix can say which way the car is going (moving, with a course), null when it cannot.
+  const agree = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS
+    ? Math.abs(wrap180(f.courseDeg - rfBearing(line, p.m, rfNoseW(spd)))) <= RF_AGREE_DEG
+    : null;
+  const good = p.distM <= RF_ON_M && agree !== false;
   const ageS = Math.max(0, Math.min(2, (nowMs - f.at) / 1000));
   const target = Math.min(line.totalM, p.m + Math.min(RF_MAX_LEAD_M, spd * ageS));
-  if (!same) return { key: line, m: target, errM: 0, active: false, onN: good ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs };
+  if (!same) return { key: line, m: target, errM: 0, active: false, onN: good && agree === true ? 1 : 0, offN: good ? 0 : 1, tAt: nowMs };
   const s = st!;
   if (good) {
+    // Not following yet: a fix that cannot say which way the car is going neither counts toward switching on nor against
+    // it (RF_MOVING_MS — Say Phin's pull-out). Once ON, it holds as before.
+    if (!s.active && agree !== true) return { ...s, key: line, m: target, errM: 0, offN: 0, tAt: nowMs };
     const onN = s.onN + 1;
     // A fix on a BEND projects short of the car: the car cuts the inside of the corner and its projection sticks at the
     // vertex (17:59 replay: the fix read 4.5 m behind the puck at the vertex, and draining that made the puck crawl out

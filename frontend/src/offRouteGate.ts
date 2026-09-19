@@ -189,6 +189,33 @@ export const HDG_FAST_MANEUVER_CLEAR_M = 100;
  *  GROWS: Jeff's ramp went 2.2 → 43.3 m (16 → 30 m across its qualifying window). A car parked beside
  *  the line, or circling a lot, does not. */
 export const HDG_FAST_GROWTH_M = 8;
+// ── CROSSING FAST PATH (2026-09-19, Jeff's underpass ramp) ─────────────────────
+// Jeff, 2026-09-19: "so my route i took the off ramp off the highway that goes under the highway. usually it re routes
+// right when im under the highway but this time it took alot longer and i was already commited into the intersection then
+// it re routed... The is a bug, the reroute should hae been quicker."
+// Receipts (crash_reports, the same ramp three times; the route stayed on Hwy 1 at 292° and the ramp passes UNDER it):
+//   09-15 crossed under 09:23:35.2 (course 11, d 1.5)  → tripped 09:23:39.2 d=23 why=heading   (+4.0 s, 23–26 km/h)
+//   09-18 crossed under 09:29:26.2 (course 11, d 0.5)  → tripped 09:29:30.2 d=30 why=heading   (+4.0 s, 25–29 km/h)
+//   09-19 crossed under 08:50:58.2 (course 11, d 1.1)  → tripped 08:51:02.3 d=37 why=heading   (+4.0 s, 30–38 km/h)
+// The decision was not slower on 09-19 — the car was faster, so the same 4 s carried it 37 m past the line and into the
+// intersection, and the new route's first instruction ("Turn left", 55 m) came too late to make (a second reroute
+// followed at 08:51:58). The heading path needs HDG_FAST_TICKS ticks with dRoute > HDG_FAST_MIN_M, and a car that
+// passes under (or over) the route line starts that count from ZERO on the far side: the ramp came at the line from one
+// side (12.5 → 8.8 → 3.9 m, course 25–55° off) and only the far side counts.
+// A car that was clearly off the line on ONE side and is now clearly off it on the OTHER, at the same place along the
+// route, with its own course > OFFROUTE_HEADING_TOL_DEG off the line, went THROUGH it. A car following the route never
+// does: its course runs along the line. So one tick on the far side is the evidence. Guards, all reused from the heading
+// path: a known course (the fix's own), moving (≥ HDG_FAST_MIN_SPEED_MS), no maneuver within HDG_FAST_MANEUVER_CLEAR_M
+// either way (a legitimate turn AT a maneuver), the car was on this route (`onThisRoute`); plus its own: the two sides
+// are measured against the SAME stretch of route (|Δalong| ≤ CROSS_SAME_PLACE_M — the other leg of a hairpin is a
+// different stretch) within CROSS_WINDOW_MS, and a side only counts where the fix projects INSIDE a segment (nav.ts
+// passes side 0 at a vertex, where "left/right" is not defined). No side/along (every caller before 09-19, and the
+// replays that do not model them) = inert. Replay: tools/sim-qc/offroute_storm_test.mts scenario Y (09-18 and 09-19
+// measured: 3.0 s sooner both days) and its five must-not-trip cases.
+export const CROSS_MIN_BEFORE_M = 8;
+export const CROSS_MIN_AFTER_M = 5;
+export const CROSS_WINDOW_MS = 8000;
+export const CROSS_SAME_PLACE_M = 40;
 // ── DIVERGENCE TREND (2026-07-31) ──────────────────────────────────────────
 // Jeff: "I took a different route and it took a while for the route to change, at
 // least 1 min."
@@ -269,7 +296,7 @@ const OFFROUTE_MIN_GAP_MS = 8000;
 //     hanging requests + frozen timers); M asserts a fresh-GPS wrong turn with timers
 //     frozen and no request in flight trips on exactly the tick it does today;
 //     N asserts the second request is allowed once the fix-driven abort fires.
-export type OffRouteWhy = "missed" | "diverging" | "far" | "heading" | "sustained";
+export type OffRouteWhy = "missed" | "diverging" | "far" | "crossed" | "heading" | "sustained";
 export type OffRouteHold = "moved" | "trend" | "creeping" | "inflight";
 
 // How long a reroute request may be outstanding before it is abandoned. ONE number for
@@ -304,6 +331,8 @@ export type OffRouteGateState = {
   onThisRoute: boolean;                             // has been within ONROUTE_M since the swap
   hdgOffTicks: number;                              // consecutive ticks qualifying for the heading fast path
   hdgOffD: number[];                                // the last HDG_FAST_TICKS qualifying dRoute values (rolling growth test)
+  /** The last tick that was > CROSS_MIN_BEFORE_M off the line on a KNOWN side (crossing fast path, 2026-09-19). */
+  crossOff: { side: number; alongM: number; t: number } | null;
 };
 
 export type OffRouteTickInput = {
@@ -324,6 +353,11 @@ export type OffRouteTickInput = {
    *  < 25 m, so `dManeuverM` jumps to the NEXT turn while the car is still inside this one — the
    *  guard must look both ways (Codex 2026-09-11). null/undefined = none / unknown. */
   dManeuverBehindM?: number | null;
+  /** Which side of the route line the fix is on (+1 left, −1 right of the nearest segment's direction), 0/undefined =
+   *  unknown (the fix projects onto a vertex). And how far along the route that projection is, in metres. Both from
+   *  nav.ts's nearestRouteInfo; the crossing fast path (2026-09-19) needs both and is inert without them. */
+  side?: number | null;
+  alongM?: number | null;
   missedManeuver: boolean; // the missed-maneuver fast path (nav.ts)
   lat: number;
   lng: number;
@@ -361,7 +395,7 @@ export type OffRouteDecision = {
 
 export const newOffRouteGateState = (now = 0): OffRouteGateState => ({
   streak: 0, hist: [], swapAt: now, travelSinceSwapM: 0, lastFix: null, lastFastAt: 0,
-  lastTripAt: 0, onThisRoute: false, hdgOffTicks: 0, hdgOffD: [],
+  lastTripAt: 0, onThisRoute: false, hdgOffTicks: 0, hdgOffD: [], crossOff: null,
 });
 
 /**
@@ -396,6 +430,7 @@ export function resetOffRouteGate(st: OffRouteGateState, now: number): void {
   st.onThisRoute = false;   // re-earned against the NEW line, on the next fix
   st.hdgOffTicks = 0;
   st.hdgOffD.length = 0;
+  st.crossOff = null;       // a side of the OLD line says nothing about the new one
 }
 
 const haversineM = (aLat: number, aLng: number, bLat: number, bLng: number): number => {
@@ -515,6 +550,22 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
     st.onThisRoute &&
     st.hdgOffD.length === HDG_FAST_TICKS &&
     t.dRoute > st.hdgOffD[0] + HDG_FAST_GROWTH_M;
+  // Crossing fast path (2026-09-19): clearly off on one side, now clearly off on the other, same stretch, course off the
+  // line, moving, no maneuver to explain it. See CROSS_* above. The record is taken AFTER the test so this tick's own
+  // side can never be compared with itself.
+  const side = t.side === 1 || t.side === -1 ? t.side : 0;
+  const along = typeof t.alongM === "number" && Number.isFinite(t.alongM) ? t.alongM : null;
+  const prevOff = st.crossOff;
+  const crossed =
+    side !== 0 && along !== null && prevOff !== null &&
+    t.now - prevOff.t <= CROSS_WINDOW_MS &&
+    side !== prevOff.side &&
+    t.dRoute > CROSS_MIN_AFTER_M &&
+    Math.abs(along - prevOff.alongM) <= CROSS_SAME_PLACE_M &&
+    t.headingKnown === true && t.courseOff === true &&
+    spd !== null && spd >= HDG_FAST_MIN_SPEED_MS &&
+    maneuverClear && st.onThisRoute;
+  if (side !== 0 && along !== null && t.dRoute > CROSS_MIN_BEFORE_M) st.crossOff = { side, alongM: along, t: t.now };
 
   // ── divergence trend — catches the slow parallel-street departure long before the
   // 80 m threshold does. See the DIVERGE_* block for why a trend beats a distance.
@@ -539,6 +590,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   const strongWhy: OffRouteWhy | null =
     t.missedManeuver ? "missed" :
     conclusivelyOff ? (st.streak >= 2 ? "far" : null) :
+    crossed ? "crossed" :                                          // the 09-19 crossing fast path
     hdgFastArmed ? "heading" :                                     // the 09-11 fast path
     t.headingOff ? (st.streak >= 3 ? "heading" : null) :
                    (st.streak >= 6 ? "sustained" : null);
@@ -582,6 +634,7 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
   st.lastTripAt = t.now;
   st.hdgOffTicks = 0;      // one departure is one reroute: the window must be rebuilt from scratch
   st.hdgOffD.length = 0;
+  st.crossOff = null;      // …and so is a crossing
   st.streak = 0;
   st.hist.length = 0;          // the trend has been acted on; re-earn it from here
   return { trip: true, why, held: null, ...base };

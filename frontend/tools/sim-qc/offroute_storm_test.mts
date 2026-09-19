@@ -43,6 +43,7 @@ import {
   newOffRouteGateState, resetOffRouteGate, offRouteTick, ROUTE_FETCH_TIMEOUT_MS,
   SWAP_ARM_TRAVEL_M, SWAP_FASTPATH_ARM_M, ONROUTE_M, REROUTE_DISTANCE_M, type OffRouteGateState,
   HDG_FAST_MIN_M, HDG_FAST_TICKS, HDG_FAST_MIN_SPEED_MS, HDG_FAST_MANEUVER_CLEAR_M, HDG_FAST_GROWTH_M,
+  CROSS_MIN_AFTER_M, CROSS_SAME_PLACE_M,
 } from "../../src/offRouteGate.ts";
 // The REAL one-in-flight slot nav.ts wraps (review 2026-09-05: the first version of this
 // gate kept its own `outstanding[]` and would have passed with the registry deleted).
@@ -69,6 +70,10 @@ type Tick = {
   courseOff?: boolean;
   dManeuverM?: number | null;
   dManeuverBehindM?: number | null;
+  /** 2026-09-19 crossing fast path: which side of the line (+1/−1, 0 = at a vertex) and where along it. Unset in every
+   *  scenario before Y, so the new path is INERT there — that is the regression assertion. */
+  side?: number | null;
+  alongM?: number | null;
 };
 
 /** `swapD` maps the car's position at a swap to its offset from the NEW line. */
@@ -141,6 +146,7 @@ function run(
     const dec = offRouteTick(st, {
       now: t, dRoute: d, headingOff: k.headingOff ?? true, missedManeuver: k.missed ?? false,
       headingKnown: k.headingKnown, courseOff: k.courseOff ?? k.headingOff ?? false, dManeuverM: k.dManeuverM, dManeuverBehindM: k.dManeuverBehindM,
+      side: k.side, alongM: k.alongM,
       lat: LAT0 - k.pos / M_PER_DEG_LAT, lng: LNG0, speedMs: k.speedMs, accM: k.accM,
       timersStarvedMs: opts?.starvedMs,
       rerouteInFlightMs: inFlightMs,
@@ -700,6 +706,97 @@ check(U.trips.length === 0, `U divided highway produced ${U.trips.length} rerout
 const Ah = run(stormTicks.map((k) => ({ ...k, headingKnown: true, dManeuverM: 500 })), { swapD: swapToRoad });
 check(Ah.trips.length <= 1, `A lot storm WITH a known heading produced ${Ah.trips.length} reroutes (want ≤1: creep ${HDG_FAST_MIN_SPEED_MS} m/s floor)`);
 
+// ── Y: JEFF'S UNDERPASS RAMP (2026-09-19) — the crossing fast path ────────────────
+// Jeff: "usually it re routes right when im under the highway but this time it took alot longer and i was already
+// commited into the intersection … The is a bug, the reroute should hae been quicker." The route stayed on Hwy 1 (292°);
+// his ramp ran SOUTH of that line and then passed UNDER it heading north. MEASURED rows (crash_reports, handle Jeff):
+//   09-19 08:50:55.3 d=12.5 S course 331 19 km/h · :56.3 8.8 S 331 21 · :57.2 3.9 S 347 23 · :58.2 1.1 N 11 30
+//         :00.6 snap-mode distM=21.3 · 08:51:02.267 off-route tripped d=37m why=heading
+//   09-18 09:29:22.2 d=16.5 S 302 20 · :23.2 15.1 S 317 19 · :24.2 9.1 S 331 20 · :25.2 4.0 S 347 22 · :26.2 0.5 S 11 25
+//         :27.2 7.0 N 12 28 · :28.5 snap-mode distM=14.7 · 09:29:30.182 off-route tripped d=30m why=heading
+// Sides are the signed cross-track distance of each corner-trace `raw=` against the line through the rf puck's on-line
+// points (292°): S = left of the route's direction = +1, N = −1. Interpolated (labelled): the 09-19 ticks :59.2–:01.2
+// (between the measured 1.1 at :58.2, 21.3 at :00.6 and 37 at the trip, at course 11–12 ≈ 80° off, ~9–11 m/s) and the
+// 09-18 ticks :28.2/:29.2 (between 7.0, 14.7 and 30); the ramp approach before the first measured tick (no rows — any
+// admissible fill trips nothing: d ≤ 16, course along the line). dManeuverM is not in the rows; every field trip was
+// why=heading, which REQUIRES the maneuver guard clear, and the crossing tick is 3 s / ≤ 30 m from there — held at 300 m.
+const underpass = (rows: Array<[number, number, number, number, boolean]>): Tick[] => {
+  // rows: [d, side, speedMs, alongStepM, courseOff]
+  const t: Tick[] = [];
+  let pos = 0, along = 0;
+  for (let i = 0; i < 60; i++) { pos += 28; along += 28; t.push({ pos, d: 3, side: 1, alongM: along, speedMs: 28, headingOff: false, headingKnown: true, courseOff: false, dManeuverM: 3000 }); }
+  for (let i = 0; i < 18; i++) {   // the ramp leaves the highway: slowing 27 → 7 m/s, drifting 4 → 16 m south
+    const v = 27 - (20 * i) / 17;
+    pos += v; along += v * 0.99;
+    t.push({ pos, d: 4 + (12 * i) / 17, side: 1, alongM: along, speedMs: v, headingOff: false, headingKnown: true, courseOff: false, dManeuverM: 300 });
+  }
+  for (const [d, side, v, step, off] of rows) {
+    pos += v; along += step;
+    t.push({ pos, d, side, alongM: along, speedMs: v, headingOff: off, headingKnown: true, courseOff: off, dManeuverM: 300 });
+  }
+  return t;
+};
+const y19Rows: Array<[number, number, number, number, boolean]> = [
+  [12.5, 1, 5.3, 4.3, false], [8.8, 1, 5.8, 4.5, false], [3.9, 1, 6.4, 3.7, false], [1.1, -1, 8.3, 1.6, true],   // :55.3–:58.2 MEASURED
+  [9.9, -1, 9.4, 1.8, true], [19.5, -1, 10.3, 2.0, true], [28.5, -1, 10.8, 2.1, true],                           // :59.2–:01.2 interpolated
+  [37, -1, 11.0, 2.1, true],                                                                                     // 08:51:02.2 MEASURED (the trip)
+  [45, -1, 11.0, 2.1, true], [53, -1, 11.0, 2.1, true],
+];
+const y18Rows: Array<[number, number, number, number, boolean]> = [
+  [16.5, 1, 5.6, 5.5, false], [15.1, 1, 5.3, 4.8, false], [9.1, 1, 5.6, 4.3, false], [4.0, 1, 6.1, 3.5, false], // :22.2–:25.2 MEASURED
+  [0.5, 1, 6.9, 1.3, true], [7.0, -1, 7.8, 1.4, true],                                                          // :26.2, :27.2 MEASURED
+  [12.9, -1, 8.1, 1.4, true], [21.0, -1, 8.3, 1.5, true],                                                       // :28.2, :29.2 interpolated
+  [30, -1, 8.3, 1.5, true],                                                                                     // 09:29:30.2 MEASURED (the trip)
+  [38, -1, 8.3, 1.5, true], [46, -1, 8.3, 1.5, true],
+];
+const stripSides = (ts: Tick[]) => ts.map((k) => ({ ...k, side: undefined, alongM: undefined }));
+const Y19 = underpass(y19Rows), Y18 = underpass(y18Rows);
+const y19Trip = (60 + 18 + 8) * 1000, y18Trip = (60 + 18 + 9) * 1000;   // the tick index of each field trip
+const Y19base = run(stripSides(Y19)), Y18base = run(stripSides(Y18));
+check(Y19base.trips.length === 1 && Y19base.trips[0] === y19Trip,
+  `Y 09-19 baseline model is wrong: the logic without sides tripped at [${fmt(Y19base)}], the field tripped at ${y19Trip / 1000}s (08:51:02.2)`);
+check(Y18base.trips.length === 1 && Y18base.trips[0] === y18Trip,
+  `Y 09-18 baseline model is wrong: the logic without sides tripped at [${fmt(Y18base)}], the field tripped at ${y18Trip / 1000}s (09:29:30.2)`);
+const Y19x = run(Y19), Y18x = run(Y18);
+const y19Gain = (y19Trip - (Y19x.trips[0] ?? Infinity)) / 1000, y18Gain = (y18Trip - (Y18x.trips[0] ?? Infinity)) / 1000;
+check(Y19x.trips.length === 1 && y19Gain >= 3,
+  `Y 09-19 with sides: ${Y19x.trips.length} reroutes [${fmt(Y19x)}], ${y19Gain}s sooner than the field (want exactly one, ≥ 3 s sooner — the first tick ${CROSS_MIN_AFTER_M} m past the line)`);
+check(Y18x.trips.length === 1 && y18Gain >= 3,
+  `Y 09-18 with sides: ${Y18x.trips.length} reroutes [${fmt(Y18x)}], ${y18Gain}s sooner than the field (want exactly one, ≥ 3 s sooner)`);
+// …and it must fire on the FAR side, never on the approach: the trip tick is the first one > CROSS_MIN_AFTER_M north.
+check(Y19x.trips[0] === (60 + 18 + 5) * 1000, `Y 09-19 tripped at ${Y19x.trips[0] / 1000}s, want ${(60 + 18 + 5)}s (:59.2, 9.9 m north)`);
+check(Y18x.trips[0] === (60 + 18 + 6) * 1000, `Y 09-18 tripped at ${Y18x.trips[0] / 1000}s, want ${(60 + 18 + 6)}s (:27.2, 7.0 m north)`);
+// MUST NOT TRIP — five ways a crossing-shaped trace can occur on a route the car IS following.
+const onRoad = (n: number, extra: (i: number) => Partial<Tick>): Tick[] => {
+  const t: Tick[] = [];
+  for (let i = 0; i < 40; i++) t.push({ pos: 15 * i, d: 3, side: 1, alongM: 15 * i, speedMs: 15, headingOff: false, headingKnown: true, courseOff: false, dManeuverM: 2000 });
+  for (let i = 0; i < n; i++) t.push({ pos: 600 + 15 * i, d: i % 2 ? 6 : 9, side: i % 2 ? -1 : 1, alongM: 600 + 15 * i, speedMs: 15, headingOff: false, headingKnown: true, courseOff: false, dManeuverM: 2000, ...extra(i) });
+  return t;
+};
+const Yn1 = run(onRoad(30, () => ({})));                                             // GPS flipping 9 m S / 6 m N, course along the road
+const Yn1guard = run(onRoad(30, () => ({ courseOff: true, headingOff: true })));      // …the same with the course off the line: MUST trip
+const Yn2 = run(onRoad(30, () => ({ courseOff: true, headingOff: true, dManeuverM: 60 })));                   // a turn AT a maneuver
+const Yn3 = run(onRoad(30, (i) => ({ courseOff: true, headingOff: true, alongM: 600 + 15 * i + (i % 2 ? 90 : 0) })));   // a hairpin's other leg
+const Yn4 = run(onRoad(30, () => ({ courseOff: true, headingOff: true, speedMs: 2, pos: undefined as unknown as number })).map((k, i) => ({ ...k, pos: k.pos ?? 600 + 2 * i })));   // crawling in a lot
+// A crossing CANNOT be "never joined": the car passes through d ≈ 0, which is inside ONROUTE_M, so `onThisRoute` is
+// always true by the far side (the first draft of this case asserted otherwise and was wrong). What stops the lot storm
+// shape is the post-swap arm every non-trend path carries: nothing fast may trip until SWAP_FASTPATH_ARM_M of driving on
+// the NEW line. Model: a reroute has just installed a line (session reset), and the car, still manoeuvring, crosses it
+// 75 m later with the course off the line.
+const yAfterSwap: Tick[] = [];
+for (let i = 0; i < 5; i++) yAfterSwap.push({ pos: 15 * i, d: i % 2 ? 6 : 9, side: i % 2 ? -1 : 1, alongM: 15 * i, speedMs: 15, headingOff: true, headingKnown: true, courseOff: true, dManeuverM: 2000 });
+const Yn5 = run(yAfterSwap, { sessionReset: true });
+check(Yn1.trips.length === 0, `Y GPS flipping sides on a road the car is following produced ${Yn1.trips.length} reroutes (want 0: the course runs along the line)`);
+check(Yn1guard.trips.length >= 1, `Y the same flip with the course ${">"}55° off produced ${Yn1guard.trips.length} reroutes (want ≥ 1 — proves the course guard is what holds the one above)`);
+check(Yn2.trips.length === 0, `Y a crossing-shaped trace AT a maneuver produced ${Yn2.trips.length} reroutes (want 0: ${HDG_FAST_MANEUVER_CLEAR_M} m guard)`);
+check(Yn3.trips.length === 0, `Y a hairpin (the other leg ${CROSS_SAME_PLACE_M}+ m along) produced ${Yn3.trips.length} reroutes (want 0)`);
+check(Yn4.trips.length === 0, `Y crawling across the line at 2 m/s produced ${Yn4.trips.length} reroutes (want 0: ${HDG_FAST_MIN_SPEED_MS} m/s floor)`);
+check(Yn5.trips.length === 0 && Yn5.holds.includes("trend"), `Y a crossing 75 m after a reroute installed the line produced ${Yn5.trips.length} reroutes, holds ${[...new Set(Yn5.holds)].join("/") || "none"} (want 0, held by the ${SWAP_FASTPATH_ARM_M} m post-swap arm)`);
+
+console.log(
+  `Y Jeff's underpass: 09-19 field ${y19Trip / 1000}s → ${fmt(Y19x)} (+${y19Gain}s) · 09-18 field ${y18Trip / 1000}s → ${fmt(Y18x)} (+${y18Gain}s) (want ≥ +3 s, one reroute) | ` +
+  `must-not-trip: flip=${Yn1.trips.length} maneuver=${Yn2.trips.length} hairpin=${Yn3.trips.length} crawl=${Yn4.trips.length} just-swapped=${Yn5.trips.length} (want 0s) · guard proof=${Yn1guard.trips.length} (want ≥1)`,
+);
 console.log(
   `A lot storm: today=${Atoday.trips.length} [${fmt(Atoday)}] → gated=${A.trips.length} [${fmt(A)}] ` +
   `holds=${[...new Set(A.holds)].join("/") || "-"} (want ≤1) | ` +

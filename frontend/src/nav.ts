@@ -661,11 +661,14 @@ function bearingBetween(a: LatLng, b: LatLng): number {
 // off-route. The segment bearing lets the caller gate off-route on heading, so
 // GPS multipath off an overpass/bridge — a big sideways jump while still heading
 // down the road — no longer triggers a phantom reroute.
-function nearestRouteInfo(lat: number, lng: number, pts: LatLng[]): { distM: number; bearingDeg: number } {
-  if (!pts || pts.length < 2) return { distM: Infinity, bearingDeg: NaN };
+// `side` (+1 left / −1 right of the nearest segment's direction, 0 = the fix projects onto a VERTEX, where left/right is
+// not defined) and `alongM` (metres along the route to that projection) feed offRouteGate's crossing fast path
+// (2026-09-19, Jeff's underpass ramp). Same scan, same winner — distM and bearingDeg are unchanged.
+function nearestRouteInfo(lat: number, lng: number, pts: LatLng[]): { distM: number; bearingDeg: number; side: number; alongM: number } {
+  if (!pts || pts.length < 2) return { distM: Infinity, bearingDeg: NaN, side: 0, alongM: NaN };
   const kx = Math.cos((lat * Math.PI) / 180);
   const px = lng * kx, py = lat;
-  let best = Infinity, bi = 0;
+  let best = Infinity, bi = 0, bSide = 0, bAlong = 0, cum = 0;
   for (let i = 0; i < pts.length - 1; i++) {
     const ax = pts[i].lng * kx, ay = pts[i].lat;
     const bx = pts[i + 1].lng * kx, by = pts[i + 1].lat;
@@ -676,9 +679,15 @@ function nearestRouteInfo(lat: number, lng: number, pts: LatLng[]): { distM: num
     const cx = ax + t * dx, cy = ay + t * dy;
     const ex = px - cx, ey = py - cy;
     const d = ex * ex + ey * ey;
-    if (d < best) { best = d; bi = i; }
+    const segM = Math.sqrt(len2) * 111320;
+    if (d < best) {
+      best = d; bi = i;
+      bAlong = cum + t * segM;
+      bSide = t > 0 && t < 1 ? Math.sign(dx * (py - ay) - dy * (px - ax)) : 0;
+    }
+    cum += segM;
   }
-  return { distM: Math.sqrt(best) * 111320, bearingDeg: bearingBetween(pts[bi], pts[bi + 1]) };
+  return { distM: Math.sqrt(best) * 111320, bearingDeg: bearingBetween(pts[bi], pts[bi + 1]), side: bSide, alongM: bAlong };
 }
 
 // Arrival line — ONE utterance, composed by src/arrivalEndings.ts (pure; gated under Node by
@@ -1426,6 +1435,8 @@ export function useTurnByTurn(
         // The 09-11 heading fast path (offRouteGate HDG_FAST_*): a KNOWN heading, and how far the
         // current maneuver is (a turn about to happen explains an off-segment course).
         headingKnown, courseOff, dManeuverM: dManeuver, dManeuverBehindM: dManeuverBehind,
+        // The 09-19 crossing fast path: which side of the line, and where along it (offRouteGate CROSS_*).
+        side: info.side, alongM: info.alongM,
         lat: user.lat, lng: user.lng, speedMs: user.speed, accM: user.acc,
         // Receipt only — never a blocker. See offRouteGate.ts's GATE 4.
         timersStarvedMs: starvedMs,

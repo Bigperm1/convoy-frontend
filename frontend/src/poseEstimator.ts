@@ -972,19 +972,20 @@ export function rfPredict(st: RfState, line: RfLine | null | undefined, nowMs: n
   // U-turned, it outran the reacquire window and route follow never came back).
   if (!st.active) return { ...st, key: line, tAt: nowMs };
   const dt = st.tAt > 0 ? Math.max(0, Math.min(1.5, (nowMs - st.tAt) / 1000)) : 0;
-  // No fix for POSE_DR_MAX_FIX_AGE_S: hold (the estimator's rule — the car may have stopped; the last speed is not evidence).
-  if (!(st.fixAt > 0 && (nowMs - st.fixAt) / 1000 <= POSE_DR_MAX_FIX_AGE_S)) return { ...st, key: line, tAt: nowMs };
-  const adv = Number.isFinite(spdMs) && spdMs >= 0.5 ? spdMs * dt : 0;
   const k = dt > 0 ? 1 - Math.exp(-dt / RF_CORR_TAU_S) : 0;
   // STOPPED (Codex r5, reproduced): settle onto where the car stopped — the one place never-backward must yield, or the
   // predict overshoot of the last metres before a stop sits the car past the stop line (John's lights 09-19: 7 m; a hard
   // stop at 36 km/h: 10 m) — at most RF_CATCHUP_MIN_MS either way. rfFix fixes the target at the FIRST stationary fix,
-  // so GPS drift while stopped cannot drag it.
-  if (adv === 0 && st.stopM != null) {
+  // so GPS drift while stopped cannot drag it. BEFORE the no-fix hold: a stopped iPhone sends no more fixes (distanceFilter
+  // 2 m), and a settle is a correction toward a known place, not dead reckoning (route_follow_test N3).
+  if (st.stopM != null && !(Number.isFinite(spdMs) && spdMs >= 0.5)) {
     const want = (st.stopM - st.m) * k, lim = RF_CATCHUP_MIN_MS * dt;
     const step = Math.max(-lim, Math.min(lim, want));
     return { ...st, key: line, m: Math.max(0, Math.min(line.totalM, st.m + step)), errM: 0, tAt: nowMs };
   }
+  // No fix for POSE_DR_MAX_FIX_AGE_S: hold (the estimator's rule — the car may have stopped; the last speed is not evidence).
+  if (!(st.fixAt > 0 && (nowMs - st.fixAt) / 1000 <= POSE_DR_MAX_FIX_AGE_S)) return { ...st, key: line, tAt: nowMs };
+  const adv = Number.isFinite(spdMs) && spdMs >= 0.5 ? spdMs * dt : 0;
   const want = adv + st.errM * k;
   // Catch-up cap (2026-09-19): never more than RF_CATCHUP_FRAC faster than the car; the rest of the gap carries. And NONE
   // while the car is stopped (Codex r5, reproduced: GPS drifting 15 m ahead for 5 s at a light pulled the stopped puck

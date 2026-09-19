@@ -168,11 +168,18 @@
       "changes": [
         "src/poseEstimator.ts: code 72263cb1dec9 → 489f8bf42aab"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — the stop settle runs before the 2.5 s no-fix hold (a stopped iPhone sends no more fixes; one stationary fix then silence left the settle half done)",
+      "changes": [
+        "src/poseEstimator.ts: code 489f8bf42aab → a326e7145ef8"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:489f8bf42aabbffb6a31d224c1a8b043ec9e4e44eb5588f68e5ce411a6b4a09a",
+      "hash": "sha256:a326e7145ef87101d53af97763c4df64880419483fa91cd04ec0dbff927b1872",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {

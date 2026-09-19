@@ -425,6 +425,13 @@ console.log("N · stopped at a light while the GPS drifts 15 m ahead: the car do
   const end = mAtT(49.5);
   ok("N1 the stopped car does not creep toward the drifting fixes (≤ 2 m)", creep <= 2, `${creep.toFixed(1)} m`);
   ok("N2 and sits where it stopped (within 3 m of 200 m)", Math.abs(end - 200) <= 3, `${end.toFixed(1)} m`);
+  // …and on iOS a stopped car sends NO fixes (distanceFilter 2 m — John's 25–34 s gaps at lights): ONE stationary fix, then
+  // silence. The settle must finish anyway (the 2.5 s no-fix hold must not cut it short).
+  const fx2 = fx.filter((f) => f.t <= 21);
+  fx2.push({ ...fx2[fx2.length - 1], t: 45 });
+  const r2 = replay(straightLine, fx2, true).frames;
+  const at44 = rfProject(straightLine, r2.filter((f) => f.t >= 44)[0].lat, r2.filter((f) => f.t >= 44)[0].lng, null)!.m;
+  ok("N3 one stationary fix then silence: still settles where it stopped (within 3 m)", Math.abs(at44 - 200) <= 3, `${at44.toFixed(1)} m`);
 }
 
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);

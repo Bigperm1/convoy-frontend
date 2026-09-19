@@ -1066,6 +1066,12 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BB `7fad7fad-901b-4e12-b164-fa1460203f80` (2026-09-18 ~23:05 PDT, Jeff: "ship now everything"; KEY_PRESENT=1 both):**
+  ROUTE FOLLOW — on the route the car rides the line and turns at the corner (Jeff: *"we are still over shooting corners … it is over
+  shooting in the 2d map too"*; his 09-16 corners 7.7–18.7 m off the line → 0.0 m, `tools/sim-qc/route_follow_test.mts`; sim before/after:
+  ~8–9 m past the junction → turns at it) `9ea4c19b`; corner zoom 18.5 → 17, slight turns + Mapbox "new name" silent, arrive-on-your-side
+  never adds a U-turn and never > 250 m (John's 09-16 report) `e2a35a2c`; U-turns always spoken `88766116`. **Codex NOT run** (usage limit
+  until 2026-09-19 10:38) — run it then on base `5ad8a7d9`. Field check: `src=rf` on draw-cmp / pose-fix rows; corners on CarPlay.
 - **SHIPPED AS OTA-BA `82ad8bfb-fefa-4aac-8662-170d3f85ac1a` (2026-09-18 ~10:30 PDT, Jeff: "do it now please"; KEY_PRESENT=1 both):**
   (1) the in-app update check in `src/UpdateReadyPill.tsx` — Olaf's phone kept one process alive 15 h and never
   downloaded OTA-AZ; it now checks on mount / foreground / every 30 min while on screen (Codex r4 APPROVE, `a852f5d5`…`08a7096c`);

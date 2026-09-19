@@ -342,5 +342,32 @@ console.log("J · a 30 s GPS gap while driving on (a tunnel): route follow finds
   ok("J2 and the car is drawn where it is after that (≤ 15 m along)", late.every((f) => f.rf) && worst <= 15, `${late.filter((f) => f.rf).length}/${late.length} frames on the line, worst ${worst.toFixed(1)} m`);
 }
 
+console.log("K · a route that drives the same road twice: after a gap route follow stays on THIS lap (Codex r2 2026-09-19)");
+{
+  // Codex (high, REPRODUCED): (0,0)→(1000,0)→(1000,100)→(0,100)→(0,0)→(1000,0)→(1000,−100) — the eastbound road is on the route
+  // twice. On the SECOND pass at m≈2300, a 30 s gap, then fixes at (400,0), (410,0): the whole-line search took the FIRST
+  // pass (m 410, not 2610) and the puck would follow that lap's NORTH turn where this lap turns SOUTH.
+  const lap = lineOf([[0, 0], [1000, 0], [1000, 100], [0, 100], [0, 0], [1000, 0], [1000, -100]].flatMap(([x, y], i, a) => {
+    if (i === 0) return [mE(x, y)];
+    const [px, py] = a[i - 1]; const n = Math.max(1, Math.round(Math.hypot(x - px, y - py) / 10));
+    return Array.from({ length: n }, (_, j) => mE(px + ((x - px) * (j + 1)) / n, py + ((y - py) * (j + 1)) / n));
+  }));
+  // Drive it from the START (a real drive tracks the first lap), on to x = 310 of the second pass, a 30 s gap, then fixes
+  // from x = 400 (m = 2600) to x = 1000 and south to y = −100.
+  const at = (sM: number): { x: number; y: number; crs: number } =>
+    sM <= 1000 ? { x: sM, y: 0, crs: 90 } : sM <= 1100 ? { x: 1000, y: sM - 1000, crs: 0 } : sM <= 2100 ? { x: 2100 - sM, y: 100, crs: 270 }
+      : sM <= 2200 ? { x: 0, y: 2200 - sM, crs: 180 } : sM <= 3200 ? { x: sM - 2200, y: 0, crs: 90 } : { x: 1000, y: -(sM - 3200), crs: 180 };
+  const fx: FieldFix[] = [];
+  const put = (t: number, sM: number) => { const p = at(sM); const [lng, lat] = mE(p.x, p.y); fx.push({ t, lat, lng, crs: p.crs, spd: 10 }); };
+  for (let t = 0; t <= 251; t++) put(t, 10 * t);                 // to m = 2510 (x = 310, second pass)
+  for (let t = 282; t <= 351; t++) put(t, 2600 + 10 * (t - 282));  // GPS back at x = 400 (m = 2600) → south leg
+  const { frames } = replay(lap, fx, true);
+  const after = frames.filter((f) => f.t >= 284 && f.t <= 340 && f.rf && f.m != null);
+  const worstLap = Math.max(0, ...after.map((f) => Math.abs(f.m! - (2600 + 10 * (f.t - 282)))));
+  const south = frames.filter((f) => f.t >= 344 && f.rf);
+  ok("K1 back on THIS lap after the gap (along within 20 m of 2200 + x)", after.length > 0 && worstLap <= 20, `${after.length} frames, worst ${worstLap.toFixed(0)} m`);
+  ok("K2 turns SOUTH with this lap, never north with the first", south.length > 0 && south.every((f) => Math.abs(wrap180(f.hdg - 180)) <= 45), `${south.length} frames, headings ${[...new Set(south.map((f) => Math.round(f.hdg / 10) * 10))].slice(0, 5).join("/")}`);
+}
+
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);
 if (fails) process.exit(1);

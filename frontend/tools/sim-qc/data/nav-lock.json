@@ -139,11 +139,19 @@
         "src/poseEstimator.ts: code c974337e803f → 99d5567ddb49",
         "src/offRouteGate.ts: code cedba524b93b → d7b12c647374"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"The is a bug, the reroute should hae been quicker\" + \"Before you do that look at my drive\" — Codex r2 (same day, both reproduced): the crossing keeps the near-side record until the second course-off fix confirms (a crossing between fixes was lost); route follow reacquires only forward of where it was and within reach of the gap (a route driving the same road twice reacquired on the other lap)",
+      "changes": [
+        "src/poseEstimator.ts: code 99d5567ddb49 → 840dfec82c15",
+        "src/offRouteGate.ts: code d7b12c647374 → 3653af044b31"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:99d5567ddb4984f662668f17da2c94aabe10d98d7d4a842fb91c45815ac65825",
+      "hash": "sha256:840dfec82c15b09e488b770293cdf8fc39fb75787fccadd4cfe7ddab4414eeff",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {
@@ -171,7 +179,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/offRouteGate.ts": {
-      "hash": "sha256:d7b12c647374cf07a0622b43cca86f94de34d172bfc987a50b959d6e6917cb7d",
+      "hash": "sha256:3653af044b313e38d5413d6e71314ef58a2ef36363f0f3f27d33969e1a153fec",
       "why": "pure drive-engine module: code-locked"
     },
     "src/cornerBlend.ts": {

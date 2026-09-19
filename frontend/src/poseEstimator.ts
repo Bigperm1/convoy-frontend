@@ -901,8 +901,15 @@ export function rfProject(line: RfLine, lat: number, lng: number, nearM: number 
 
 /** The WHOLE line, preferring segments that run the way the car is going (course within RF_AGREE_DEG) — the reacquire
  *  search (Codex 2026-09-19). Falls back to the plain nearest point when no segment agrees or no course is known. */
-export function rfProjectAgreeing(line: RfLine, lat: number, lng: number, courseDeg: number | null): { m: number; distM: number } | null {
-  const any = rfProject(line, lat, lng, null);
+export function rfProjectAgreeing(
+  line: RfLine, lat: number, lng: number, courseDeg: number | null, loM = -Infinity, hiM = Infinity,
+): { m: number; distM: number } | null {
+  // Only [loM, hiM] of the line (Codex r2: a route that drives the same road twice must not reacquire on the OTHER lap —
+  // the caller bounds the search by where the car was and how far it could have gone since).
+  const bounded = Number.isFinite(loM) || Number.isFinite(hiM);
+  const lo = Math.max(0, loM), hi = Math.min(line.totalM, hiM);
+  if (bounded && hi < lo) return null;
+  const any = bounded ? rfProject(line, lat, lng, (lo + hi) / 2, (hi - lo) / 2) : rfProject(line, lat, lng, null);
   if (courseDeg == null || !Number.isFinite(courseDeg) || !any) return any;
   const n = line.coords.length;
   const k = Math.PI / 180, cosLat = Math.cos(lat * k), R = 6371000;
@@ -912,15 +919,22 @@ export function rfProjectAgreeing(line: RfLine, lat: number, lng: number, course
   for (let i = 1; i < n; i++) {
     const cx = X(line.coords[i][0]), cy = Y(line.coords[i][1]);
     const dx = cx - px, dy = cy - py, l2 = dx * dx + dy * dy;
-    if (l2 > 0 && Math.abs(wrap180(courseDeg - (Math.atan2(dx, dy) * 180) / Math.PI)) <= RF_AGREE_DEG) {
+    const inRange = !bounded || (line.cum[i] >= lo && line.cum[i - 1] <= hi);
+    if (inRange && l2 > 0 && Math.abs(wrap180(courseDeg - (Math.atan2(dx, dy) * 180) / Math.PI)) <= RF_AGREE_DEG) {
       const t = Math.max(0, Math.min(1, -(px * dx + py * dy) / l2));
       const qx = px + t * dx, qy = py + t * dy, d2 = qx * qx + qy * qy;
-      if (d2 < best2) { best2 = d2; bestM = line.cum[i - 1] + t * (line.cum[i] - line.cum[i - 1]); }
+      const mm = line.cum[i - 1] + t * (line.cum[i] - line.cum[i - 1]);
+      if (d2 < best2 && (!bounded || (mm >= lo && mm <= hi))) { best2 = d2; bestM = mm; }
     }
     px = cx; py = cy;
   }
   return best2 === Infinity ? any : { m: Math.max(0, Math.min(line.totalM, bestM)), distM: Math.sqrt(best2) };
 }
+/** Reacquire bounds (Codex r2): no further back than RF_BACK_M from where the puck was, no further ahead than the car could
+ *  have gone — RF_REACH_MS for the time since its last fix, never less than RF_REACH_MIN_M. */
+export const RF_BACK_M = 100;
+export const RF_REACH_MS = 45;
+export const RF_REACH_MIN_M = 200;
 
 /** The point `m` metres along the line. */
 export function rfPoint(line: RfLine, m: number): { lat: number; lng: number } {
@@ -978,7 +992,10 @@ export function rfFix(
   const gapped = same && !(st!.fixAt > 0 && f.at - st!.fixAt <= POSE_DR_MAX_FIX_AGE_S * 1000);
   const wide = !same || gapped || !st!.active;
   const crs = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS ? f.courseDeg : null;
-  const p = wide ? rfProjectAgreeing(line, f.lat, f.lng, crs) : rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2);
+  const sinceS = same && st!.fixAt > 0 ? Math.max(0, (f.at - st!.fixAt) / 1000) : 0;
+  const p = !wide ? rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2)
+    : same ? rfProjectAgreeing(line, f.lat, f.lng, crs, st!.m - RF_BACK_M, st!.m + Math.max(RF_REACH_MIN_M, RF_REACH_MS * sinceS))
+    : rfProjectAgreeing(line, f.lat, f.lng, crs);
   if (!p) return same ? { ...st!, key: line, active: false, onN: 0, offN: st!.offN + 1, fixAt: f.at } : null;
   // `agree`: true/false when the fix can say which way the car is going (moving, with a course), null when it cannot.
   const agree = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS

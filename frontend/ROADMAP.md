@@ -1066,7 +1066,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
-- **READY, NOT SHIPPED — `3f844877` (2026-09-19, awaits Jeff's OTA go + the Codex review at 10:38):** the first field drives on
+- **READY, NOT SHIPPED — `3f844877` + `cf71f893` + `6d5ddd01` (2026-09-19; Codex r1 NEEDS-ATTENTION → both findings reproduced + fixed in `6d5ddd01`; r2 running; awaits Jeff's OTA go):** the first field drives on
   OTA-BB (John ×2 CarPlay, Say Phin AA, Jeff CarPlay; memory `field-2026-09-19-first-drives-on-ota-bb`) — route follow ON for 94–98 %
   of corner fixes, no overshoot, zoom max exactly 17, curb U-turn rule working. Fixed: (1) Jeff's underpass off-ramp — the reroute
   came 4.0 s after he crossed under Hwy 1 on 09-15, 09-18 AND 09-19 (why=heading); faster today, so 37 m past the line and too late
@@ -1075,7 +1075,10 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   froze the car 18 s; switching on now needs a moving, agreeing fix (`route_follow_test` F). (3) the 2–3× lurch out of a 90°
   intersection turn (John + Say Phin, the same corner) — catch-up capped at 1.5× (G: 4.9×/3.5× → 1.50×). **OPEN, Jeff's call:**
   at a turn the driver skips, rf draws the car down the route's road 0.8–1.9 s (H, regression guard) — fixing it trades against
-  King Rd (the line cuts that corner ~15 m).
+  King Rd (the line cuts that corner ~15 m). Also: `cf71f893` route follow honours the 2.5 s no-fix hold (sim: 82 m ahead of a
+  19.5 s-old fix; gate I 148.3 → 25.0 m); `6d5ddd01` Codex r1 — the crossing needs two course-off fixes clear of the GPS accuracy
+  (one noisy fix tripped it), and route follow reacquires over the whole line after a gap (a 30 s gap lost it for the drive; gate J).
+  Sim-verified in the real app: `off-route tripped d=6m why=crossed` on a steep crossing (0 Ave, 10:28).
 - **SHIPPED AS OTA-BB `7fad7fad-901b-4e12-b164-fa1460203f80` (2026-09-18 ~23:05 PDT, Jeff: "ship now everything"; KEY_PRESENT=1 both):**
   ROUTE FOLLOW — on the route the car rides the line and turns at the corner (Jeff: *"we are still over shooting corners … it is over
   shooting in the 2d map too"*; his 09-16 corners 7.7–18.7 m off the line → 0.0 m, `tools/sim-qc/route_follow_test.mts`; sim before/after:

@@ -575,7 +575,12 @@ export function offRouteTick(st: OffRouteGateState, t: OffRouteTickInput): OffRo
     courseOffNow && st.prevCourseOff &&
     spd !== null && spd >= HDG_FAST_MIN_SPEED_MS &&
     maneuverClear && st.onThisRoute;
-  if (side !== 0 && along !== null && t.dRoute > Math.max(CROSS_MIN_BEFORE_M, acc)) st.crossOff = { side, alongM: along, t: t.now };
+  // Codex r2 (reproduced): the FIRST far-side fix must not overwrite the near-side record while the crossing still waits for
+  // its second course-off fix — keep an unexpired opposite-side record until it confirms or ages out (CROSS_WINDOW_MS).
+  if (side !== 0 && along !== null && t.dRoute > Math.max(CROSS_MIN_BEFORE_M, acc)) {
+    const pending = prevOff !== null && prevOff.side !== side && t.now - prevOff.t <= CROSS_WINDOW_MS;
+    if (!pending) st.crossOff = { side, alongM: along, t: t.now };
+  }
   st.prevCourseOff = courseOffNow;
 
   // ── divergence trend — catches the slow parallel-street departure long before the

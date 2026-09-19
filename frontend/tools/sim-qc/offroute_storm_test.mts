@@ -796,6 +796,18 @@ yNoisy.push({ pos: 410, d: 6, side: -1, alongM: 410, speedMs: 10, headingOff: tr
 for (let i = 1; i <= 10; i++) yNoisy.push({ pos: 410 + 10 * i, d: 3, side: 1, alongM: 410 + 10 * i, speedMs: 10, headingOff: false, headingKnown: true, courseOff: false, accM: 10, dManeuverM: 500 });
 const Yn6 = run(yNoisy);
 check(Yn6.trips.length === 0, `Y ONE noisy fix (10 m left → 6 m right at 30 m accuracy, one course 60° off) produced ${Yn6.trips.length} reroutes (want 0 — Codex 2026-09-19)`);
+// Codex r2 2026-09-19 (medium, REPRODUCED): a crossing BETWEEN fixes — signed +12, −12, −24, then −24 m for a minute,
+// the course off on the two far-side fixes only, 5 m accuracy, along +5 m per fix, 25 then 13 m/s. r1's version recorded
+// the first far-side fix as the new side before the second course-off fix could confirm, and never tripped; the car then
+// settled on a parallel road 24 m off, under every other threshold — a LOST crossing.
+const yBetween: Tick[] = [];
+for (let i = 0; i < 40; i++) yBetween.push({ pos: 13 * i, d: 3, side: 1, alongM: 5 * i, speedMs: 13, headingOff: false, headingKnown: true, courseOff: false, accM: 5, dManeuverM: 500 });
+yBetween.push({ pos: 520, d: 12, side: 1, alongM: 200, speedMs: 25, headingOff: false, headingKnown: true, courseOff: false, accM: 5, dManeuverM: 500 });
+yBetween.push({ pos: 545, d: 12, side: -1, alongM: 205, speedMs: 25, headingOff: true, headingKnown: true, courseOff: true, accM: 5, dManeuverM: 500 });
+yBetween.push({ pos: 558, d: 24, side: -1, alongM: 210, speedMs: 13, headingOff: true, headingKnown: true, courseOff: true, accM: 5, dManeuverM: 500 });
+for (let i = 1; i <= 60; i++) yBetween.push({ pos: 558 + 13 * i, d: 24, side: -1, alongM: 210 + 5 * i, speedMs: 13, headingOff: false, headingKnown: true, courseOff: false, accM: 5, dManeuverM: 500 });
+const Ybetween = run(yBetween);
+check(Ybetween.trips.length === 1 && Ybetween.trips[0] === 43000, `Y a crossing between fixes (+12 → −12 → −24, course off on the far side only) produced [${fmt(Ybetween)}] (want exactly one reroute at 43s — the second far-side fix; Codex r2)`);
 check(Yn1.trips.length === 0, `Y GPS flipping sides on a road the car is following produced ${Yn1.trips.length} reroutes (want 0: the course runs along the line)`);
 check(Yn1guard.trips.length >= 1, `Y the same flip with the course ${">"}55° off produced ${Yn1guard.trips.length} reroutes (want ≥ 1 — proves the course guard is what holds the one above)`);
 check(Yn2.trips.length === 0, `Y a crossing-shaped trace AT a maneuver produced ${Yn2.trips.length} reroutes (want 0: ${HDG_FAST_MANEUVER_CLEAR_M} m guard)`);
@@ -805,7 +817,7 @@ check(Yn5.trips.length === 0 && Yn5.holds.includes("trend"), `Y a crossing 75 m 
 
 console.log(
   `Y Jeff's underpass: 09-19 field ${y19Trip / 1000}s → ${fmt(Y19x)} (+${y19Gain}s) · 09-18 field ${y18Trip / 1000}s → ${fmt(Y18x)} (+${y18Gain}s) (want ≥ +3 s, one reroute) | ` +
-  `must-not-trip: flip=${Yn1.trips.length} maneuver=${Yn2.trips.length} hairpin=${Yn3.trips.length} crawl=${Yn4.trips.length} just-swapped=${Yn5.trips.length} one-noisy-fix=${Yn6.trips.length} (want 0s) · guard proof=${Yn1guard.trips.length} (want ≥1)`,
+  `must-not-trip: flip=${Yn1.trips.length} maneuver=${Yn2.trips.length} hairpin=${Yn3.trips.length} crawl=${Yn4.trips.length} just-swapped=${Yn5.trips.length} one-noisy-fix=${Yn6.trips.length} (want 0s) · between-fixes=[${fmt(Ybetween)}] (want 43s) · guard proof=${Yn1guard.trips.length} (want ≥1)`,
 );
 console.log(
   `A lot storm: today=${Atoday.trips.length} [${fmt(Atoday)}] → gated=${A.trips.length} [${fmt(A)}] ` +

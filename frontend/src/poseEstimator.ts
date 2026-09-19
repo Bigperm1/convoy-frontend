@@ -930,8 +930,8 @@ export function rfProjectAgreeing(
   }
   return best2 === Infinity ? any : { m: Math.max(0, Math.min(line.totalM, bestM)), distM: Math.sqrt(best2) };
 }
-/** Reacquire bounds (Codex r2): no further back than RF_BACK_M from where the puck was, no further ahead than the car could
- *  have gone — RF_REACH_MS for the time since its last fix, never less than RF_REACH_MIN_M. */
+/** Reacquire bounds (Codex r2/r3): around the anchor — the car's last place on the line — as far as the car could have gone
+ *  since its last fix at RF_REACH_MS either way, never less than RF_BACK_M back / RF_REACH_MIN_M ahead. */
 export const RF_BACK_M = 100;
 export const RF_REACH_MS = 45;
 export const RF_REACH_MIN_M = 200;
@@ -962,6 +962,9 @@ const rfNoseW = (spd: number) => Math.max(RF_NOSE_MIN_M, (Number.isFinite(spd) &
 /** Advance the puck along the line to `nowMs` at `spdMs`, draining the fix error (never backward). */
 export function rfPredict(st: RfState, line: RfLine | null | undefined, nowMs: number, spdMs: number): RfState {
   if (!st || !line || !rfSameLine(st.key, line)) return st && line ? null : st;
+  // Not following: the anchor is not drawn, and only FIXES move it (Codex r3, reproduced: predicted forward while the car
+  // U-turned, it outran the reacquire window and route follow never came back).
+  if (!st.active) return { ...st, key: line, tAt: nowMs };
   const dt = st.tAt > 0 ? Math.max(0, Math.min(1.5, (nowMs - st.tAt) / 1000)) : 0;
   // No fix for POSE_DR_MAX_FIX_AGE_S: hold (the estimator's rule — the car may have stopped; the last speed is not evidence).
   if (!(st.fixAt > 0 && (nowMs - st.fixAt) / 1000 <= POSE_DR_MAX_FIX_AGE_S)) return { ...st, key: line, tAt: nowMs };
@@ -994,7 +997,7 @@ export function rfFix(
   const crs = f.courseDeg != null && Number.isFinite(f.courseDeg) && spd >= RF_MOVING_MS ? f.courseDeg : null;
   const sinceS = same && st!.fixAt > 0 ? Math.max(0, (f.at - st!.fixAt) / 1000) : 0;
   const p = !wide ? rfProject(line, f.lat, f.lng, st!.m, RF_WIN_M + spd * 2)
-    : same ? rfProjectAgreeing(line, f.lat, f.lng, crs, st!.m - RF_BACK_M, st!.m + Math.max(RF_REACH_MIN_M, RF_REACH_MS * sinceS))
+    : same ? rfProjectAgreeing(line, f.lat, f.lng, crs, st!.m - Math.max(RF_BACK_M, RF_REACH_MS * sinceS), st!.m + Math.max(RF_REACH_MIN_M, RF_REACH_MS * sinceS))
     : rfProjectAgreeing(line, f.lat, f.lng, crs);
   if (!p) return same ? { ...st!, key: line, active: false, onN: 0, offN: st!.offN + 1, fixAt: f.at } : null;
   // `agree`: true/false when the fix can say which way the car is going (moving, with a course), null when it cannot.
@@ -1023,7 +1026,11 @@ export function rfFix(
     return { ...s, key: line, m: target, errM: 0, onN, offN: 0, tAt: nowMs };
   }
   const offN = s.offN + 1;
-  return { ...s, key: line, active: s.active && offN < RF_OFF_FIXES, onN: 0, offN };
+  const stillOn = s.active && offN < RF_OFF_FIXES;
+  // Not following (or letting go now): keep the anchor on the car's own place along the line whenever the car is ON it, even
+  // going the other way — the reacquire window is built around it (Codex r3: a U-turn and back must find the car again).
+  const m = !stillOn && p.distM <= RF_ON_M ? p.m : s.m;
+  return { ...s, key: line, m, errM: stillOn ? s.errM : 0, active: stillOn, onN: 0, offN };
 }
 
 /** The drawn pose while route follow is active, else null (the estimator draws). */

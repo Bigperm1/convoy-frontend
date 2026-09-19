@@ -147,11 +147,18 @@
         "src/poseEstimator.ts: code 99d5567ddb49 → 840dfec82c15",
         "src/offRouteGate.ts: code d7b12c647374 → 3653af044b31"
       ]
+    },
+    {
+      "at": "2026-09-19",
+      "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — Codex r3 (same day, reproduced): a not-following route-follow anchor no longer predicts forward and tracks the car along the line even going the other way; the reacquire window reaches back as far as forward (a U-turn and back never switched route follow on again)",
+      "changes": [
+        "src/poseEstimator.ts: code 840dfec82c15 → 05103398dfa6"
+      ]
     }
   ],
   "files": {
     "src/poseEstimator.ts": {
-      "hash": "sha256:840dfec82c15b09e488b770293cdf8fc39fb75787fccadd4cfe7ddab4414eeff",
+      "hash": "sha256:05103398dfa634d635a4439232e68b76ff050900f1e94edbbcffc2bc58842bbb",
       "why": "pure drive-engine module: code-locked"
     },
     "src/chaseZoom.ts": {

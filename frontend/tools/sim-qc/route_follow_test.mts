@@ -369,5 +369,23 @@ console.log("K · a route that drives the same road twice: after a gap route fol
   ok("K2 turns SOUTH with this lap, never north with the first", south.length > 0 && south.every((f) => Math.abs(wrap180(f.hdg - 180)) <= 45), `${south.length} frames, headings ${[...new Set(south.map((f) => Math.round(f.hdg / 10) * 10))].slice(0, 5).join("/")}`);
 }
 
+console.log("L · a U-turn on the route and back: route follow switches on again (Codex r3 2026-09-19)");
+{
+  // Codex r3 (medium, REPRODUCED): 5 km straight eastbound line, vertices every 10 m, 1 Hz fixes at 10 m/s: on at
+  // m 1000/1010, then WEST for 20 s to m 810, then east again. The inactive puck kept advancing east in rfPredict, the
+  // reacquire window (r2) moved ahead of the car, and route follow never came back.
+  const five = lineOf(Array.from({ length: 501 }, (_, i) => mE(i * 10, 0)));
+  const fx: FieldFix[] = [];
+  const put = (t: number, x: number, crs: number) => { const [lng, lat] = mE(x, 0); fx.push({ t, lat, lng, crs, spd: 10 }); };
+  for (let t = 0; t <= 11; t++) put(t, 900 + 10 * t, 90);          // east to 1010
+  for (let t = 12; t <= 31; t++) put(t, 1010 - 10 * (t - 11), 270); // U-turn: west to 810
+  for (let t = 32; t <= 101; t++) put(t, 810 + 10 * (t - 31), 90);  // east again to 1510
+  const { frames } = replay(five, fx, true);
+  const back = frames.find((f) => f.t >= 32 && f.rf && Math.abs(rfProject(five, f.lat, f.lng, null)!.m - (810 + 10 * (f.t - 31))) <= 15);
+  const late = frames.filter((f) => f.t >= 40);
+  ok("L1 route follow is back on within 4 s of heading the route's way again", !!back && back.t <= 36, back ? `on again at ${back.t.toFixed(1)} s (east again from 32 s)` : "never");
+  ok("L2 and stays on the line with the car", late.every((f) => f.rf), `${late.filter((f) => f.rf).length}/${late.length} frames on the line`);
+}
+
 console.log(fails === 0 ? "\nPASS route_follow" : `\nFAIL route_follow (${fails})`);
 if (fails) process.exit(1);

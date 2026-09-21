@@ -1066,6 +1066,70 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **READY TO PUBLISH AS OTA-BD `<GROUP>` (2026-09-20 night, runtime 1.29.0, branch `mapbox-migration`; code `<SHA>` — the
+  group id and the `KEY_PRESENT=1` proof go in after `eas update`):** tester Olaf (handle `Enablewhore`) sent FIVE complaints by
+  iMessage on 09-20. Two are fixed here; the other three are questions for HIM (next bullet).
+  **(1) The CarPlay "Where to?" list was being yanked off the screen while he drove** — *"Can't select home or work on the
+  CarPlay screen. It just says search and that's it. Have to load on the phone."* The saved-places list (`openWhereToIOS` /
+  `getWhereToTemplate` in `src/carplay/carActions.ts`) shared the search KEYBOARD's ownership flag `_searchPushed`, so
+  `armSearchAutoDismiss` — which exists because a CPSearchTemplate is a dead modal while driving (Jeff, 2026-07-24) — popped it
+  to root after two ticks above `_SEARCH_POP_SPEED_MS`. A list of saved places is NOT a dead modal: taking taps at any speed is
+  the whole reason it was built (Rodrigo's long saved list, 2026-09-03). Receipts, re-queried from `crash_reports` 2026-09-20
+  22:1x PDT: his handle carries **10 × `ios-stack op=push id=whereto`, 10 × `op=root why=dismiss` — nine of them the very next
+  row after a push, shortest gap 0.14 s on the device clock (`event_at`) — 2 × `op=root why=selected`, 0 × `op=push id=search`,
+  0 × `op=recover`.** He never reached the keyboard; the list was taken from him while he was MOVING — his `draw-cmp` and `cam-probe` rows
+  inside that same minute (2026-09-13 02:27 UTC, nine pushes and dismisses) read `spd=44`, `46`, `50`. And it is not only him: since
+  09-12 the fleet has **29 `id=whereto` pushes** (Rodrigo 10, Olaf 10, Ni GR/John 9) against 11 `why=selected` of any kind.
+  **Fix:** the list owns `_whereToPushed`; the motion watcher's guard still reads `_searchPushed || _searchPresented` and
+  nothing else, so the keyboard keeps its motion pop untouched; the Search-recovery branch, `dismissCarSearch`,
+  `popCarSearchDeferred`, `endCarNav` and the disconnect reset all clear the new flag, and `ios-stack` rows now carry
+  `whereto=0|1` so the next report says whether the list went with the pop. New trap-check rule
+  `whereto-list-claims-the-keyboards-ownership-flag` guards the two call sites that used to set the flag; the watcher's guard
+  itself is inside NAV-LOCK region `act-search-motion-dismiss`, so `nav_lock_test` holds that end. There is no `tools/sim-qc`
+  gate: `carActions.ts` imports react-native-carplay and runs `armPosRing()` at module load, so the node harness cannot load it.
+  **NOT FIELD-VERIFIED — nobody has driven this.** The ONE check that settles it: Olaf taps Search while moving and the list
+  STAYS — a fresh `op=push id=whereto … whereto=1` with no `op=root why=dismiss` behind it.
+  **(2) The phone turn-by-turn actions moved to the bottom** — Jeff, 2026-09-20: *"on the turnbyturn phone screen lets move the
+  end/arrived/shop map/add stop to the bottom replacing the current full width show map."* In `src/CarDriveList.tsx`: four equal
+  candy buttons — End · Arrived · Show map · Add stop, his order — where the full-width ghost "Show map" was, all four built from
+  the same construction End and Arrived already carried; the floating 50×50 End/Arrived squares under the logo are DELETED and
+  the header's right padding drops 76 → 70 (the logo is all that is left up there). The width is arithmetic at the NARROWEST
+  phone, 375 pt: (375 − 24 padding − 24 gaps) / 4 = 81.7 pt per button against a 72.0 pt "Show map" at 14/800, with
+  `adjustsFontSizeToFit` + `maxFontSizeMultiplier` as the belt to those braces.
+  **(3) Add stop is reachable mid-drive on BOTH phone faces** — Olaf, 09-19: *"would be nice to have a button that stands out to
+  add a stop on the phone screen … hard to find and end up having to just start a new route"* (a long-press on the map always did
+  it; nothing on screen ever said so). `src/components/StepDrawer.tsx` gains a blue 50×50 tile, leftmost so the destructive End
+  stays hard right under the thumb. The tiles stay 50×50 because that footprint is Jeff's (2026-08-31), so the TEXT gives ground
+  instead: measured on the 16 Pro sim at 3×, two tiles leave 47 pt of air, three still fit a normal readout, four would ellipsise
+  BOTH metas — so the arrival clock hides at four tiles (only reachable with a head unit attached) and the time remaining never
+  shrinks. `app/(app)/map.tsx` wires `addStopNow` into both faces: it flips the written-directions face to the map first (that
+  face mounts no map, so "tap the map to drop your stop" would be an instruction the driver cannot follow), then arms the SAME
+  pin-first stop mode the Drive card's pill arms — the map tap, the plot-via-stops branch and the off-route re-plot are untouched —
+  and the pin banner is lifted by `STEP_BAR_H` while guidance runs, where it used to land exactly on the collapsed step bar.
+  First add-stop telemetry the app has ever had: `phone-tap:add-stop`. Nothing distinguished "nobody wants stops" from "nobody can
+  find the button", which is exactly what Olaf raised.
+  **Gates, run against the working tree 2026-09-20 22:2x PDT:** `yarn typecheck` clean · `scripts/trap-check.py` **50 rules,
+  0 hits** · `tools/sim-qc/nav_lock_test.mts` **PASS — 43 files, 457 locks, NOTHING moved** (the only edit inside a locked region
+  is a comment, and the hashes strip comments) · `tools/sim-qc/nav_lock_regions.mts --verify` ok · **36 of 36 `tools/sim-qc` gates
+  PASS** · `doc-check --live` 0 broken. Codex adversarial review (read-only, base `0b76c574`): **approve, no material finding.**
+  The two OPEN nav items below — the skipped-turn draw (H) and the stopped-car drift (r5/r6, reverted) — are untouched by this
+  OTA and ride along still open.
+- **OPEN — the other three of Olaf's five (2026-09-20), each needs HIM to answer before anyone codes:**
+  (a) **A blank screen after three launches, 09-16.** He was on build 78 / runtime 1.28.0 that day and his handle carries
+  **305 `timer-starve` rows in the 09-16 window** (same window: Ni GR 327, Rodrigo 160, SPL_GRC 38, Jeff 30, SMSGRC 14 — all
+  1.28.0). That is CO-OCCURRENCE, not a cause. ⚠ And "it has not recurred on 79" is REFUTED by the table (query 2026-09-20
+  22:1x PDT): `timer-starve` on runtime **1.29.0** = 2 rows (09-18) · **109 (09-19, 5 instances, 4 handles)** · 23 (09-20) ·
+  4 (09-21 UTC), against 1.28.0's 496–620 a day. Far rarer on 79, NOT gone. Ask him whether the blank screen has happened since
+  he installed 79.
+  (b) **A "sleep glitch"** — no description, no time, nothing queryable. Ask what he saw and roughly when; then the rows exist.
+  (c) **CarPlay pinch.** It is implemented on both surfaces; what is missing is the car. The gesture probe has been live since
+  2026-07-30 (`logCarGestureOnce`, once per kind per process) and in the ~52 days since there is **not one
+  `carplay-gesture:zoomBegin` row from any handle** — and a real pinch always sends begin. What there IS: `tapZoomIn` from three
+  handles, Olaf's own twice (latest 2026-09-19 19:56 UTC) — his double-tap zoom-in works, which is what his message says.
+  Apple gates raw multitouch per head unit (`CPMapTemplate.h`: these callbacks "May not be called when connected to some CarPlay
+  systems"). Absence is not proof — the crumb is once per process and `logEvent` drops pre-client rows (memory
+  `logevent-drops-preclient-rows`) — so the honest answer to him is: no head unit in this fleet has ever reported a pinch; the
+  map buttons and the double-tap are the zoom that works.
 - **SHIPPED AS OTA-BC `ad19e9d4-0a68-441e-8182-b674184c9d0b` (2026-09-19 ~11:15 PDT, Jeff: "ship it"; KEY_PRESENT=1 both; code `0622b2f3`; Codex r1–r4 findings fixed, r5/r6 = the two OPEN items below):**
   OTA-BB (John ×2 CarPlay, Say Phin AA, Jeff CarPlay; memory `field-2026-09-19-first-drives-on-ota-bb`) — route follow ON for 94–98 %
   of corner fixes, no overshoot, zoom max exactly 17, curb U-turn rule working. Fixed: (1) Jeff's underpass off-ramp — the reroute

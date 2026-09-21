@@ -357,9 +357,10 @@ export async function endCarNav(): Promise<void> {
   // the stranded search keyboard STILL covering the map because nothing here popped
   // it. iOS-only — Android's dismiss path pops to the AA nav template by id, and on
   // AA endCarNav can run while other templates are legitimately stacked.
-  if (Platform.OS !== 'android' && (_searchPushed || _searchPresented)) {
+  if (Platform.OS !== 'android' && (_searchPushed || _searchPresented || _whereToPushed)) {
     iosStack('op=root why=end');
     _searchPushed = false;
+    _whereToPushed = false;   // one root pop clears the WHOLE stack — keyboard and list
     try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
   }
   // 🔒 NAV-LOCK begin act-endnav-clear-state — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
@@ -413,10 +414,21 @@ let _searchPresented = false;
 // only pop while the template is visible, and a driver who is moving is exactly when it
 // is not. Fixing it this way is correct under either mechanism.
 let _searchPushed = false;
-// "Where to?" saved-places list (iOS) — see getWhereToTemplate. Shares _searchPushed.
+// "Where to?" saved-places list (iOS) — see getWhereToTemplate.
 let _whereTo: any | null = null;
 let _whereToShown: SavedPlace[] = [];
 let _whereToToSearch = false;
+// ── THE LIST OWNS ITSELF (Olaf, 2026-09-20) ────────────────────────────────────
+// "Can't select home or work on the CarPlay screen. It just says search and that's it.
+// Have to load on the phone." The "Where to?" list SHARED _searchPushed with the keyboard,
+// so the motion watcher — written for a keyboard CarPlay itself refuses to serve while
+// driving — yanked the keyboard-LESS list away too. His 20 days of receipts: 10 ×
+// `op=push id=whereto` each followed by `op=root why=dismiss`, 0 selections, dismiss gaps
+// as short as 0.14 s, tapped at ~44 km/h. A list of saved places is NOT a dead modal: it
+// takes taps at any speed, which is the whole reason it exists (Rodrigo, 2026-09-03).
+// So it owns itself here, and the watcher's `_searchPushed || _searchPresented` guard now
+// means the keyboard and nothing else — the keyboard keeps its motion pop untouched.
+let _whereToPushed = false;
 
 // ── ANDROID AUTO SEARCH (2026-08-15) ────────────────────────────────────────────
 // FILMED: the driver taps Search on the AA action strip, the green "Search ✓" receipt
@@ -616,13 +628,21 @@ let _iosStackRows = 0;
 function iosStack(what: string): void {
   if (Platform.OS === 'android' || _iosStackRows >= 60) return;
   _iosStackRows += 1;
-  try { logEventReliable(`ios-stack ${what} pushed=${_searchPushed ? 1 : 0} presented=${_searchPresented ? 1 : 0}`); } catch {}
+  // `whereto=` is the third state as of 2026-09-20: pushed/presented are the KEYBOARD's
+  // (ownership, visibility), whereto is the saved-places list's ownership. A pop row with
+  // whereto=1 took the list with it; whereto=0 means only the keyboard was up.
+  try { logEventReliable(`ios-stack ${what} pushed=${_searchPushed ? 1 : 0} presented=${_searchPresented ? 1 : 0} whereto=${_whereToPushed ? 1 : 0}`); } catch {}
 }
 
 // One dismiss for both car surfaces.
 function dismissCarSearch(): void {
   if (Platform.OS === 'android') { aaPop(); return; }
-  iosStack('op=root why=dismiss');
+  iosStack('op=root why=dismiss');   // crumb FIRST: it records whereto=1 if the list went too
+  // popToRootTemplate empties the stack, so a list sitting UNDER the keyboard is gone
+  // whether or not the native call lands. This is the only clear on the motion path —
+  // the list's own didDisappear cannot be relied on to fire for a template that was
+  // already covered when the pop arrived.
+  _whereToPushed = false;
   try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
 }
 
@@ -788,6 +808,7 @@ let _movingTicks = 0;
 function popCarSearchDeferred(): void {
   iosStack('op=root why=selected');
   _searchPushed = false;
+  _whereToPushed = false;                  // same root pop: the list is on its way out too
   setTimeout(() => { try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {} }, 350);
 }
 function armSearchAutoDismiss(): void {
@@ -800,6 +821,7 @@ function armSearchAutoDismiss(): void {
     getLib()?.CarPlay?.registerOnDisconnect?.(() => {
       _searchPushed = false;
       _searchPresented = false;
+      _whereToPushed = false;
       _movingTicks = 0;
     });
   } catch {}
@@ -811,6 +833,10 @@ function armSearchAutoDismiss(): void {
     // native ground truth (didAppear), so "visible right now while moving" always pops
     // even when ownership mis-tracked. Popping when neither flag is set stays forbidden —
     // that would yank whatever else the driver is looking at.
+    // BOTH FLAGS ARE THE KEYBOARD'S, and only the keyboard's (2026-09-20). The "Where to?"
+    // list borrowed _searchPushed until Olaf's report and was popped by this rule too; it
+    // owns _whereToPushed now, which this guard deliberately does not read. A list of saved
+    // places is not a dead modal — no code below this line may reach for that flag.
     if (!_searchPushed && !_searchPresented) { _movingTicks = 0; return; }
     if ((st.speedMs || 0) > _SEARCH_POP_SPEED_MS) {
       _movingTicks += 1;
@@ -935,12 +961,13 @@ function getSearchTemplate(): any | null {
 // always raises its keyboard, and on his head unit it covers the saved rows the empty
 // query lists. So the Search button now opens a plain CPListTemplate first — Home, Work,
 // custom places — with one last row that pushes the keyboard template for typing. A
-// driver with no saved places goes straight to the keyboard, as before. The list shares
-// the search flow's OWNERSHIP flag (_searchPushed): the motion watcher pops it to root
-// when the car moves, the Search-button recovery branch clears it, and a genuine
-// back-out releases it in onDidDisappear — the same rules that keep the keyboard
-// template from ever being double-pushed. Android Auto is untouched (its native search
-// template lists the saved rows as `items` already).
+// driver with no saved places goes straight to the keyboard, as before. The list carries
+// its OWN ownership flag (_whereToPushed, 2026-09-20 — it used to borrow _searchPushed and
+// inherit the keyboard's motion pop with it): the Search-button recovery branch clears it,
+// a genuine back-out releases it in onDidDisappear, and every pop-to-root clears it — the
+// same double-push protection the keyboard template has, WITHOUT the motion dismiss.
+// Android Auto is untouched (its native search template lists the saved rows as `items`
+// already).
 // Rodrigo has LOTS of saved places (Jeff, 2026-09-03) — the list scrolls, so the cap only
 // guards a runaway store. CPListTemplate.maximumItemCount is 500 on iOS 14+ head units.
 const WHERE_TO_MAX = 30;
@@ -997,12 +1024,18 @@ function getWhereToTemplate(): any | null {
         const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
         if (ok) popCarSearchDeferred();     // release + pop to root only when the pop really happens
       },
-      onDidAppear: () => { _searchPushed = true; _movingTicks = 0; },
+      // didAppear is native ground truth that the list is on the stack — the same
+      // self-healing re-arm the keyboard template does, so a wrong release below is
+      // healed at the next re-present. It no longer zeroes _movingTicks: that counter
+      // belongs to the keyboard's motion rule, and the watcher zeroes it itself on every
+      // tick where neither keyboard flag is set (which is exactly list-only).
+      onDidAppear: () => { _whereToPushed = true; },
       onDidDisappear: () => {
         if (_whereToToSearch) { _whereToToSearch = false; return; }
-        // Genuine back-out, or the motion / recovery pop: release ownership unless the
-        // keyboard template is the thing on screen.
-        if (!_searchPresented) _searchPushed = false;
+        // Genuine back-out, or a pop that took the whole stack: release ownership unless
+        // the keyboard template is the thing on screen — then the list is merely COVERED
+        // and is still stacked underneath it.
+        if (!_searchPresented) _whereToPushed = false;
       },
     });
   } catch {
@@ -1013,10 +1046,13 @@ function getWhereToTemplate(): any | null {
 function openWhereToIOS(): void {
   const t = getWhereToTemplate();
   if (!t || _whereToShown.length === 0) { pushSearchTemplateIOS(); return; }
+  // Still armed here even though the list has no motion pop of its own: this is what
+  // registers the disconnect reset that clears _whereToPushed between sessions, and the
+  // driver's very next tap can be the keyboard row.
   armSearchAutoDismiss();                    // idempotent
   iosStack('op=push id=whereto');
-  _searchPushed = true;
-  try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _searchPushed = false; }
+  _whereToPushed = true;                     // claim BEFORE the push so a double tap cannot double-push
+  try { getLib()?.CarPlay?.pushTemplate?.(t, true); } catch { _whereToPushed = false; }
 }
 
 // ── nav-bar buttons shared by BOTH map roots (cold idle + warm) ─────────────
@@ -1370,7 +1406,7 @@ export function handleCarBarButton(id: string, src = "?"): void {
     // dead whenever the flag was stranded true. Recovery instead: pop to root (clears
     // a stuck/hidden search template), release ownership, and let the driver's NEXT
     // tap open it fresh. One tap heals, two taps searches — never a double push.
-    if (_searchPushed || (Platform.OS !== 'android' && _searchPresented)) {
+    if (_searchPushed || (Platform.OS !== 'android' && (_searchPresented || _whereToPushed))) {
       // RECOVERY, and it MUST actually dismiss on both platforms.
       // ⚠ REGRESSION I SHIPPED THIS MORNING (found in Say Phin's 6:06 PM
       // telemetry): this branch cleared the ownership flag but only popped on
@@ -1386,6 +1422,9 @@ export function handleCarBarButton(id: string, src = "?"): void {
       // and Search would be dead for good, the exact bug class this fixes.
       iosStack('op=recover');
       _searchPresented = false;
+      // Same F4 rule for the "Where to?" list: dismissCarSearch clears it too, but clear
+      // it here as well so a stranded list flag can never survive a pop that no-ops.
+      _whereToPushed = false;
       dismissCarSearch();   // iOS: pop to root · Android: single pop to the nav screen
       return;
     }

@@ -10,12 +10,14 @@
 import React, { useImperativeHandle, useRef, forwardRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Animated, PanResponder, TouchableOpacity, Platform,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassFill, drawerTint } from "../Glass";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAccent } from "../appSkin";
+import { COLORS } from "../theme";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
 // Must match the real tab bar in app/(app)/_layout.tsx EXACTLY: height (86 iOS / 84 Android)
@@ -64,6 +66,10 @@ type Props = {
   // (Jeff, 8/21 drive to work). When provided, a "Directions" button sits left
   // of End and returns to the list face.
   onShowList?: () => void;
+  // ADD STOP, mid-drive (Olaf, 2026-09-19: "would be nice to have a button that stands out
+  // to add a stop on the phone screen … hard to find and end up having to just start a new
+  // route"). Long-press on the map has always done it; nothing on screen said so.
+  onAddStop?: () => void;
   // Live fraction of the route travelled (0..1). Optional precise override; when
   // omitted it's derived from distanceRemaining vs the route total.
   progress?: number;
@@ -72,7 +78,7 @@ type Props = {
 };
 
 const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
-  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, onArrived, onShowList, progress, onVisibilityChange },
+  { route, maneuverIcon, eta, distanceRemaining, arrival, onEnd, onArrived, onShowList, onAddStop, progress, onVisibilityChange },
   ref
 ) {
   // 0 = step list hidden (tucked behind the bar), 1 = fully open.
@@ -85,6 +91,12 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
   const insets = useSafeAreaInsets();
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
   const accent = useAccent();
+  // ⛔ EVERY HOOK IN THIS COMPONENT BELONGS ABOVE `if (!route) return null`, which sits a
+  // few dozen lines below. This one went under it on 2026-09-20 and the app died two
+  // seconds after launch with "Rendered more hooks than during the previous render" —
+  // route is null on the first render and not on the next, so the hook count changed.
+  // It reads the screen width for the step bar's readout budget (see textBudget).
+  const { width: screenW } = useWindowDimensions();
 
   const slideUp = React.useCallback(() => {
     setExpanded(true);
@@ -131,6 +143,23 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
   if (!route) return null;
   const steps = (route.steps ?? []) as Step[];
   const timeLabel = eta ?? route.duration_in_traffic_text ?? route.duration_text;
+  // How many 50pt tiles the right-hand group is about to draw. Two on an ordinary phone
+  // drive before Add stop, three after, and four only when a head unit is attached and the
+  // driver tapped Show map (that is what hands us onShowList).
+  const tileCount = [onAddStop, onShowList, onArrived, onEnd].filter(Boolean).length;
+  // WHAT IS LEFT FOR THE READOUTS, in points, from the real style values: barRow's 16+12
+  // padding (see styles.barRow) and the tile group's 50n + 10(n−1) (styles.barBtns gap).
+  // MEASURED need for the full three — time · distance · arrival: 194pt in SF on iOS,
+  // 201dp in Roboto at wght800 on Android (Android is also 18dp poorer to begin with,
+  // because its phones are narrower than the 402pt iPhone this was designed on). 200 is
+  // that need. Below it the arrival clock steps aside rather than letting BOTH numbers
+  // ellipsise into half-numbers — "3.2…" and "10:08…" is worse than one whole readout
+  // missing, and the clock is the one you need least at speed (it is on the car screen and
+  // the written-directions face anyway). Where it lands: 402pt iPhone keeps all three at
+  // three tiles (204) and drops the clock at four (144); a 384dp Android phone (Say Phin,
+  // SMSGRC — measured off their own android-auto-canvas rows) drops it at three (186), and
+  // so does a 375pt SE/mini (177), which has quietly been overflowing this row for weeks.
+  const textBudget = screenW - 28 - (tileCount * 50 + Math.max(0, tileCount - 1) * 10);
   // Compact formatting: drop the space ("25 min" → "25min", "6:24 PM" →
   // "6:24pm") to match the tightened nav bar layout.
   const compact = (s?: string) => (s ?? "").replace(/\s+/g, "");
@@ -189,19 +218,66 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
           <View style={styles.grabPill} />
         </View>
         <View style={styles.barRow}>
+          {/* numberOfLines everywhere (2026-09-20): with flexShrink 0 — RN's default, unlike
+              the web's — these three could push past their row and render under the tiles on
+              a narrow phone. Only the two meta readouts shrink, so the big time-remaining is
+              never the thing that truncates. See the width arithmetic on the Add stop tile. */}
           <View style={styles.barTextRow}>
-            <Text style={styles.barTime}>{compact(timeLabel)}</Text>
-            {!!distanceRemaining && <Text style={styles.barMeta}>{compact(distanceRemaining)}</Text>}
-            {!!arrival && <Text style={styles.barMeta}>{compact(arrival).toLowerCase()}</Text>}
+            {/* maxFontSizeMultiplier pins Dynamic Type out of this row (2026-09-20). The
+                tiles do not scale with it and barTime deliberately cannot shrink, so at the
+                accessibility sizes a 24pt readout would grow until it rendered UNDER them.
+                Same lock the pin banner and the new footer buttons use. */}
+            <Text style={styles.barTime} numberOfLines={1} maxFontSizeMultiplier={1}>{compact(timeLabel)}</Text>
+            {!!distanceRemaining && <Text style={styles.barMeta} numberOfLines={1} maxFontSizeMultiplier={1}>{compact(distanceRemaining)}</Text>}
+            {/* The arrival clock steps aside when the row cannot hold all three — see
+                textBudget above for the measurement and where it lands on each phone.
+                Tiles stay 50x50: that footprint is Jeff's (2026-08-31, matching the logo
+                tile), so the text gives ground, not the buttons. */}
+            {!!arrival && textBudget >= 200 && <Text style={styles.barMeta} numberOfLines={1} maxFontSizeMultiplier={1}>{compact(arrival).toLowerCase()}</Text>}
           </View>
-          {(onShowList || onEnd || onArrived) && (
-            /* THE PAIR, SIDE BY SIDE (Jeff, 2026-08-31): "place the show map green
-               button to the same square and place it right beside the end button."
-               Both are now mapLogoBacking's exact footprint — 50x50, r14 — so the
-               logo tile, this green tile and this red tile read as one family. The row
-               owns marginLeft:auto so the two travel together against the right edge;
-               previously each button carried its own and they fought over the space. */
+          {(onShowList || onEnd || onArrived || onAddStop) && (
+            /* SIDE BY SIDE (Jeff, 2026-08-31): "place the show map green button to the
+               same square and place it right beside the end button." Every tile here is
+               mapLogoBacking's exact footprint — 50x50, r14 — so the logo tile and all of
+               these read as one family. The row owns marginLeft:auto so they travel
+               together against the right edge; previously each button carried its own and
+               they fought over the space. Started as a pair; Arrived joined 9/12 and Add
+               stop 9/20, which is what the arrival-clock rule above is paying for. */
             <View style={styles.barBtns}>
+              {onAddStop && (
+                /* ADD STOP — leftmost, so the destructive End stays hard right under the
+                   thumb where it has always been. MEASURED on the 16 Pro sim at 3x, not
+                   computed: this tile pushes the group's left edge from 282pt to 220pt, so
+                   the text budget goes 47pt-of-air → 204pt-for-194pt. It fits, and the
+                   fourth tile is what does not — see the arrival-clock rule above, which is
+                   where that is paid for. The numberOfLines guards are still the backstop:
+                   a long label ellipsises a tail instead of sliding under these tiles. */
+                <TouchableOpacity
+                  onPress={onAddStop}
+                  style={styles.barAddStop}
+                  activeOpacity={0.85}
+                  testID="add-stop-nav"
+                  hitSlop={6}
+                  accessibilityLabel="Add a stop"
+                >
+                  {/* Candy BLUE, mid-stop COLORS.primary so the app gains no second blue
+                      (theme.ts's ACTION discipline: one red, one green). It is the only hue
+                      a driver cannot confuse with the green/orange/red beside it — those
+                      three are steps along one ramp and are exactly the trio red-green
+                      colour blindness collapses. Not a tier colour either (DESIGN.md). */}
+                  <LinearGradient
+                    colors={["#4AA8FF", COLORS.primary, "#0A4DA0"]}
+                    locations={[0, 0.5, 1]}
+                    style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+                  />
+                  <GlassFill tintColor={COLORS.primary} style={{ borderRadius: 14, overflow: "hidden" }} />
+                  {/* map-marker-plus: a pin with a +, which is literally what the tap does
+                      (it arms pin-first Add stop). Verified present in the installed
+                      @expo/vector-icons 15.1.1 MaterialCommunityIcons glyphmap. 26 in a
+                      50pt tile matches its three neighbours. */}
+                  <MaterialCommunityIcons name="map-marker-plus" size={26} color="#04142A" />
+                </TouchableOpacity>
+              )}
               {onShowList && (
                 /* Green twin of End, carrying the classic turn-arrow "directions"
                    glyph — the universal turn-by-turn symbol — so it reads at a glance
@@ -312,11 +388,15 @@ const styles = StyleSheet.create({
   barRow: { flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 12 },
   // Text group shares a BASELINE so the small distance/arrival sit on the same
   // line as the big time instead of floating high against its center.
-  barTextRow: { flexDirection: "row", alignItems: "baseline", gap: 12, flexShrink: 1 },
+  // minWidth 0 lets the row actually give ground when the tile group grows; without it
+  // a flexShrink parent still reports its content's intrinsic width as the floor.
+  barTextRow: { flexDirection: "row", alignItems: "baseline", gap: 12, flexShrink: 1, minWidth: 0 },
   // Time remaining — big, system green. Distance + arrival sit beside it a notch
   // smaller. No custom fontFamily → renders in the OS system font.
+  // barTime deliberately carries NO flexShrink: the number you read at speed keeps its
+  // width and the two meta readouts give theirs up first.
   barTime: { color: "#30D158", fontSize: 24, fontWeight: "800", letterSpacing: -0.4 },
-  barMeta: { color: "#F4F4F4", fontSize: 16, fontWeight: "600" },
+  barMeta: { color: "#F4F4F4", fontSize: 16, fontWeight: "600", flexShrink: 1 },
   barExit: {
     width: 50, height: 50, borderRadius: 14,
     // Color comes from the candy-red LinearGradient child; keep the container
@@ -324,6 +404,15 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     overflow: "hidden",
     borderWidth: 1, borderColor: "rgba(255,90,120,0.9)",
+    alignItems: "center", justifyContent: "center",
+  },
+  // Same footprint as barExit / barTurns / barArrived — the four tiles must read as one
+  // family; only the paint and the glyph change.
+  barAddStop: {
+    width: 50, height: 50, borderRadius: 14,
+    backgroundColor: "transparent",
+    overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(120,190,255,0.9)",
     alignItems: "center", justifyContent: "center",
   },
   // Same footprint as barExit / barTurns — the three tiles must read as one family.

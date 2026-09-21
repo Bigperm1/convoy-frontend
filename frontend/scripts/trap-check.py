@@ -19,6 +19,24 @@ ROOT = Path(__file__).resolve().parent.parent
 # (id, glob, regex, why) — regex is searched per FILE (multiline).
 RULES = [
     (
+        "whereto-list-claims-the-keyboards-ownership-flag",
+        ["src/carplay/carActions.ts"],
+        r"function openWhereToIOS\(\)[\s\S]{0,500}?_searchPushed\s*=\s*true|onDidAppear:\s*\(\)\s*=>\s*\{\s*_searchPushed\s*=\s*true",
+        "2026-09-20 (Olaf, iMessage: 'Can\'t select home or work on the CarPlay screen. It just says search and "
+        "that\'s it. Have to load on the phone'): the keyboard-LESS \"Where to?\" list must own itself "
+        "(_whereToPushed), never _searchPushed. Sharing that flag handed it the KEYBOARD's motion rule — "
+        "armSearchAutoDismiss pops to root after 2 ticks above _SEARCH_POP_SPEED_MS because a CPSearchTemplate is a "
+        "dead modal while driving (Jeff, 2026-07-24) — and a list of saved places is not: it takes taps at any speed, "
+        "which is the whole reason it exists (Rodrigo, 2026-09-03). His 20 days of crash_reports: 10 x "
+        "`ios-stack op=push id=whereto` each followed by `op=root why=dismiss`, 0 op=push id=search, 0 op=recover, "
+        "2 op=root why=selected, dismiss gaps as short as 0.14 s, tapped at ~44 km/h. The motion watcher's guard "
+        "itself is NAV-LOCKed (act-search-motion-dismiss) so nav_lock_test guards that end; this rule guards the two "
+        "CALL SITES outside the lock that used to set the flag — openWhereToIOS's claim-before-push and the list "
+        "template's onDidAppear. The keyboard template's own onDidAppear sets _searchPresented FIRST, so it does not "
+        "trip this. There is no tools/sim-qc gate: carActions.ts imports react-native and react-native-carplay and "
+        "runs armPosRing() at module load, so the node harness cannot load it.",
+    ),
+    (
         "old-convoy-logo-is-back",
         ["src/**/*.ts", "src/**/*.tsx", "app/**/*.ts", "app/**/*.tsx", "plugins/*.js"],
         r"final_icon",

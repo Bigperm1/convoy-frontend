@@ -47,6 +47,60 @@ const SCROLL_HOLD_MS = 5000;
 // and only when a song is actually loaded (no song = no row = no dead space).
 const MUSIC_ROW_H = 60;
 
+// One construction for all four footer actions so they read as a family: the
+// candy-apple ramp (bright → mid → deep) with an iOS-only tinted GlassFill sheen,
+// clipped to r14 — literally what End and Arrived carried as floating squares before
+// Jeff moved them down here. Android skips the glass for the same reason End always
+// did (Say Phin's 8/18 screenshot: on Android the glass layer rendered the fill
+// visibly inset/narrower than the tile around it).
+function FooterBtn(props: {
+  label: string;
+  ramp: readonly [string, string, string];
+  tint: string;
+  border: string;
+  textColor: string;
+  onPress: () => void;
+  accessibilityLabel: string;
+}) {
+  return (
+    <Pressable
+      onPress={props.onPress}
+      style={[styles.footerBtn, { borderColor: props.border }]}
+      // 4, not the 8 the old full-width ghost carried: at 8 each button's hit rect covered
+      // the whole 8pt gap, and RN gives an overlap to the LATER sibling — so a tap a few
+      // points right of End fired Arrived, which banks the drive as an arrival instead of
+      // an End. Harmless when these were 50pt squares 20pt apart at the top of the screen;
+      // not harmless now they are 88pt neighbours under a moving thumb. 4 + 4 meets exactly
+      // at the middle of the gap with no overlap. (Pre-flight review, 2026-09-20.)
+      hitSlop={4}
+      accessibilityLabel={props.accessibilityLabel}
+    >
+      <LinearGradient
+        colors={props.ramp}
+        locations={[0, 0.5, 1]}
+        style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+      />
+      {Platform.OS === "ios" && (
+        <GlassFill tintColor={props.tint} style={{ borderRadius: 14, overflow: "hidden" }} />
+      )}
+      {/* "Show map" is the longest label and the 375pt phone has the least room:
+          (375 − 24 padding − 24 gaps) / 4 = 81.7pt per button against 72.0pt of
+          14pt/800 text (measured against the system font's advance widths), so it
+          fits with ~5pt each side. maxFontSizeMultiplier pins Dynamic Type out of
+          it and adjustsFontSizeToFit is the belt to that braces. */}
+      <Text
+        style={[styles.footerBtnText, { color: props.textColor }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+        maxFontSizeMultiplier={1}
+      >
+        {props.label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export default function CarDriveList(props: {
   steps: NavStep[];
   stepIndex: number;            // tbt.stepIndex — the step the driver is ON; +1 is the upcoming maneuver
@@ -65,6 +119,10 @@ export default function CarDriveList(props: {
   onShowMap: () => void;
   onEnd: () => void;
   onArrived?: () => void;   // candy-orange Arrived — declares arrival by hand
+  // ADD STOP (Olaf, 2026-09-19: "would be nice to have a button that stands out to add a
+  // stop on the phone screen … hard to find and end up having to just start a new route").
+  // Optional so the button simply isn't there when the parent has nothing to wire it to.
+  onAddStop?: () => void;
 }) {
   const { steps, stepIndex } = props;
   // The tab bar is position:'absolute' (app/(app)/_layout.tsx ~:285, 86pt iOS / 84pt
@@ -204,10 +262,62 @@ export default function CarDriveList(props: {
         }}
       />
       <View style={[styles.footer, { bottom: tabBarH }]}>
+        {/* THE ACTION ROW (Jeff, 2026-09-20: "on the turnbyturn phone screen lets move the
+            end/arrived/shop map/add stop to the bottom replacing the current full width show
+            map"). End and Arrived used to float as 50x50 squares up under the logo — two
+            thumb-stretches from where the hand actually rests — and Add stop had no home on
+            this face at all. Four equal buttons in Jeff's stated order, same candy
+            construction the squares carried, so nothing new had to be invented. */}
         <View style={styles.footerRow}>
-          <Pressable onPress={props.onShowMap} style={styles.btnGhost} hitSlop={8}>
-            <Text style={styles.btnGhostText}>Show map</Text>
-          </Pressable>
+          <FooterBtn
+            label="End"
+            ramp={["#FF3B5C", "#E4002B", "#B00020"]}
+            tint="#E4002B"
+            border="rgba(255,90,120,0.9)"
+            textColor="#FFFFFF"
+            onPress={props.onEnd}
+            accessibilityLabel="End navigation"
+          />
+          {props.onArrived && (
+            <FooterBtn
+              label="Arrived"
+              ramp={["#FFB03B", "#FF8A00", "#C25E00"]}
+              tint="#FF8A00"
+              border="rgba(255,190,110,0.95)"
+              textColor="#2A1200"
+              onPress={props.onArrived}
+              accessibilityLabel="I have arrived"
+            />
+          )}
+          <FooterBtn
+            label="Show map"
+            // The SAME green as StepDrawer's "directions" tile — one green for "go look at
+            // the map", both directions of that trip.
+            ramp={["#3DFF9A", "#1FC96E", "#0E8F4C"]}
+            tint="#1FC96E"
+            border="rgba(120,255,180,0.9)"
+            textColor="#04150B"
+            onPress={props.onShowMap}
+            accessibilityLabel="Show map"
+          />
+          {props.onAddStop && (
+            <FooterBtn
+              label="Add stop"
+              // THE FOURTH COLOUR IS BLUE, and the middle stop is COLORS.primary so the app
+              // gains no second blue (same discipline as ACTION in theme.ts: one red, one
+              // green). Blue is the only hue left that a driver cannot confuse with the other
+              // three at a glance — red/orange/green are three steps along one ramp and are
+              // exactly the trio red-green colour blindness collapses, while blue separates
+              // from all of them for both protan and deutan vision. It is also not a tier
+              // colour (gold/silver are entitlements — DESIGN.md), so it costs nothing.
+              ramp={["#4AA8FF", COLORS.primary, "#0A4DA0"]}
+              tint={COLORS.primary}
+              border="rgba(120,190,255,0.9)"
+              textColor="#FFFFFF"
+              onPress={props.onAddStop}
+              accessibilityLabel="Add a stop"
+            />
+          )}
         </View>
         {hasMusic && (
           <View style={styles.musicRow}>
@@ -246,45 +356,10 @@ export default function CarDriveList(props: {
           </View>
         )}
       </View>
-      {/* END — square, candy red, directly under the Hairpin logo and matching its
-          exact footprint (mapLogoBacking: 50×50 r14 at right 12, top 52/28 — the
-          logo is zIndex 100 so it paints above this screen, which is deliberate).
-          Named "End" to match CarPlay/AA. */}
-      {/* ARRIVED (Jeff, 2026-09-12: "beside the red END") — candy ORANGE, the same 50x50 r14
-          square, sitting immediately to End's left on the same row. Runs the real arrival
-          path, so the line is spoken and the drive banks as an arrival rather than an End. */}
-      {props.onArrived && (
-        <Pressable onPress={props.onArrived} style={styles.arrivedSquare} hitSlop={8} accessibilityLabel="I have arrived">
-          <LinearGradient
-            colors={["#FFB03B", "#FF8A00", "#C25E00"]}
-            locations={[0, 0.5, 1]}
-            style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
-          />
-          {Platform.OS === "ios" && (
-            <GlassFill tintColor="#FF8A00" style={{ borderRadius: 14, overflow: "hidden" }} />
-          )}
-          <Text style={styles.arrivedSquareText}>Arrived</Text>
-        </Pressable>
-      )}
-      <Pressable onPress={props.onEnd} style={styles.endSquare} hitSlop={8}>
-        {/* The CANDY-APPLE construction, copied exactly from StepDrawer's End circle
-            (Jeff, 2026-08-16: "way more premium looking" — the premium is not the hex,
-            it's the bright→deep gradient + red-tinted glass sheen + rosy border). */}
-        <LinearGradient
-          colors={["#FF3B5C", "#E4002B", "#B00020"]}
-          locations={[0, 0.5, 1]}
-          style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
-        />
-        {/* iOS only (Say Phin's 8/18 screenshot): on Android the glass layer rendered
-            the red visibly INSET/narrower than the logo square above it — the same
-            elevation/halo artifact class as android-glass-elevation-halo. The candy
-            gradient alone carries the look on Android; the UIGlassEffect sheen is an
-            iOS material anyway. */}
-        {Platform.OS === "ios" && (
-          <GlassFill tintColor="#E4002B" style={{ borderRadius: 14, overflow: "hidden" }} />
-        )}
-        <Text style={styles.endSquareText}>End</Text>
-      </Pressable>
+      {/* The floating END and ARRIVED squares that used to live here — 50x50 r14, stacked
+          under the Hairpin logo at the top right since 8/16 and 9/12 — are GONE: both are
+          footer buttons now (Jeff, 2026-09-20). The logo still floats there on its own; it
+          is map.tsx's, at zIndex 100, and the header's paddingRight clears it. */}
       <ShareSheet
         visible={!!sharePayload}
         onClose={() => setSharePayload(null)}
@@ -298,8 +373,11 @@ const styles = StyleSheet.create({
   // Opaque, above the map overlays (they stay mounted beneath; zIndex wins among
   // siblings). Modals/sheets still present above via the native modal layer.
   root: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.bg, zIndex: 50, elevation: 50 },
-  // paddingRight clears the logo + End column on the right edge.
-  header: { paddingTop: Platform.OS === "ios" ? 64 : 40, paddingLeft: 20, paddingRight: 76, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: COLORS.hairline },
+  // paddingRight clears the floating Hairpin logo on the right edge — and now ONLY the
+  // logo: it is 50 wide at right 12, so 62 is the hard minimum and 70 leaves a gutter.
+  // Was 76 while the End/Arrived squares hung beneath the logo; those are in the footer
+  // now (2026-09-20), which hands the one-line ETA readout 6pt back before it shrinks.
+  header: { paddingTop: Platform.OS === "ios" ? 64 : 40, paddingLeft: 20, paddingRight: 70, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: COLORS.hairline },
   onCar: { color: COLORS.brand, fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
   eta: { color: "#F4F4F4", fontSize: 22, fontWeight: "800", marginTop: 8 },
   dest: { color: "#9BA1A6", fontSize: 14, fontWeight: "600", marginTop: 2 },
@@ -313,14 +391,18 @@ const styles = StyleSheet.create({
   rowTextCurrent: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
   rowDist: { color: "#9BA1A6", fontSize: 13, fontWeight: "700" },
   rowDistCurrent: { color: COLORS.brand, fontSize: 15, fontWeight: "800" },
-  // `bottom` is set inline (tab bar height + inset — see tabBarH above). Now a
-  // COLUMN: the Show map row, then (when a song is loaded) the now-playing row —
-  // "between the show map and the system drawer at the bottom".
+  // `bottom` is set inline (tab bar height + inset — see tabBarH above). Still a
+  // COLUMN: the action row, then (when a song is loaded) the now-playing row —
+  // "between the show map and the system drawer at the bottom". The music row did
+  // not move; the row above it went from one full-width ghost to four candy buttons.
   footer: {
     position: "absolute", left: 0, right: 0,
     backgroundColor: COLORS.bg, borderTopWidth: 1, borderTopColor: COLORS.hairline,
   },
-  footerRow: { flexDirection: "row", gap: 12, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12 },
+  // 20/12 became 12/8 to buy the four labels their width: at 375pt that is
+  // (375 − 24 − 24) / 4 = 81.7pt each, and at 430pt 95.5pt. The old 20/12 would have
+  // left 74.7pt against a 72.0pt "Show map" — under 1.5pt of air per side.
+  footerRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 12 },
   musicRow: {
     flexDirection: "row", alignItems: "center", height: MUSIC_ROW_H,
     paddingHorizontal: 20, gap: 12, borderTopWidth: 1, borderTopColor: COLORS.hairline,
@@ -329,27 +411,19 @@ const styles = StyleSheet.create({
   musicArtEmpty: { alignItems: "center", justifyContent: "center" },
   musicTitle: { color: "#F4F4F4", fontSize: 14, fontWeight: "700" },
   musicSub: { color: "#9BA1A6", fontSize: 12, fontWeight: "600", marginTop: 1 },
-  btnGhost: { flex: 1, height: 48, borderRadius: 12, borderWidth: 1, borderColor: COLORS.hairlineStrong, alignItems: "center", justifyContent: "center" },
+  // btnGhostText survives on its own: the reroute-offer banner's "No" still uses it.
   btnGhostText: { color: "#F4F4F4", fontSize: 16, fontWeight: "700" },
-  // Same footprint as mapLogoBacking (50×50 r14, right 12), stacked 8pt beneath it.
-  // Container transparent + clipped: the color is the candy gradient child.
-  endSquare: {
-    position: "absolute", right: 12, top: (Platform.OS === "ios" ? 52 : 28) + 50 + 8,
-    width: 50, height: 50, borderRadius: 14, backgroundColor: "transparent",
-    overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,90,120,0.9)",
-    alignItems: "center", justifyContent: "center", zIndex: 60,
+  // r14, not the old ghost button's r12 — the radius is the shape language the logo
+  // tile, the car strip and StepDrawer's tiles all share. Container transparent +
+  // clipped: the colour is the candy gradient child.
+  footerBtn: {
+    flex: 1, height: 48, borderRadius: 14,
+    backgroundColor: "transparent", overflow: "hidden", borderWidth: 1,
+    alignItems: "center", justifyContent: "center",
   },
-  endSquareText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
-  // Immediately LEFT of End on the same row: right 12 + 50 + 8 = 70. Same 50x50 r14 footprint
-  // so End, Arrived and the logo above them read as one family.
-  arrivedSquare: {
-    position: "absolute", right: 70, top: (Platform.OS === "ios" ? 52 : 28) + 50 + 8,
-    width: 50, height: 50, borderRadius: 14, backgroundColor: "transparent",
-    overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,190,110,0.95)",
-    alignItems: "center", justifyContent: "center", zIndex: 60,
-  },
-  // "Arrived" needs to fit 50pt: 11pt against End's 15.
-  arrivedSquareText: { color: "#2A1200", fontSize: 11, fontWeight: "800" },
+  // 14pt where the old full-width label was 16: the widest label ("Show map") measures
+  // 72.0pt at 14/800 against 81.7pt of button on a 375pt phone. 15pt would leave 5.7pt.
+  footerBtnText: { fontSize: 14, fontWeight: "800", letterSpacing: 0.1 },
   offer: {
     flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 10,
     padding: 12, borderRadius: 12, borderWidth: 1, borderColor: COLORS.brandDim,

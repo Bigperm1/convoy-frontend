@@ -2989,6 +2989,32 @@ export default function MapScreen() {
   }, [carListMapOverride]);
   // 🔒 NAV-LOCK end map-carlist-showmap-reset
 
+  // ── WHO DISARMS PIN MODE (pre-flight review, 2026-09-20) ──────────────────────
+  // Pin mode is armed by a tap and consumed by a tap, and until tonight NOTHING else owned
+  // it. That was harmless while the only way in was the preview Drive card — End and
+  // Arrived do not exist on that screen. Add stop mid-drive makes all of it reachable, and
+  // the flag outlives the drive:
+  //  · End keeps the destination and drops to preview (endNav), but the Drive card is
+  //    gated on `!stopPinMode` — so an armed flag REPLACES the Start button with a stop
+  //    banner for a drive that is over, and the only way back is finding Cancel.
+  //  · Clear nulls the destination and the stops and does not touch this, so the next map
+  //    tap became a phantom "Stop 1" on an empty trip — which the destination picked after
+  //    it then quietly routed through. A route disturbance with no visible cause.
+  //  · The written-directions face has no map to tap, and it comes back on its own when
+  //    the head unit reconnects or the phone goes in a pocket (the override reset just
+  //    above), leaving pin mode armed with its banner underneath that face at zIndex 50.
+  // Three one-line owners, rather than editing the nav-locked teardown.
+  // ⛔ THEY LIVE HERE, ABOVE `if (!coords) return <Locating…>`, because everything below
+  // that guard is conditional: putting them next to addStopNow killed the app two seconds
+  // after launch with "Rendered more hooks than during the previous render", and
+  // `npx eslint` names the line. Hooks go above the guard in this file, always.
+  useEffect(() => { setStopPinMode(false); }, [navMode]);
+  useEffect(() => { if (!destination) setStopPinMode(false); }, [destination]);
+  // The override going false is the written-directions face coming BACK (carListMode is
+  // `… && !carListMapOverride`). Arming never self-cancels: addStopNow sets the override
+  // TRUE, and this only disarms on the false edge.
+  useEffect(() => { if (!carListMapOverride) setStopPinMode(false); }, [carListMapOverride]);
+
   // HEAT PROBE — one row per 60 s of guidance. Jeff's 2-hour drive on build 73 ended
   // with the phone too hot to charge, and the analysis that followed is arithmetic, not
   // measurement: it assumes rAF runs at 60 Hz, when app.json sets
@@ -4829,7 +4855,12 @@ export default function MapScreen() {
   const controlsBottom = (bannerUp
     ? TAB_BAR_H + previewBannerH + 12
     : navBarUp
-    ? TAB_BAR_H + stepDrawerH + 12
+    // Pin mode DURING guidance stacks two banners: the step bar, then the pin banner above
+    // it (which now carries the same STEP_BAR_H offset). Without previewBannerH in here the
+    // FAB stack sits at TAB_BAR_H+96, inside the banner's TAB_BAR_H+84…+200 span —
+    // arithmetic from styles.pinBanner/pinBannerCard/pinBannerRow, 2026-09-20. The
+    // pin-mode lift itself is not new; it is what `bannerUp` already does in preview.
+    ? TAB_BAR_H + stepDrawerH + (stopPinMode ? previewBannerH + 10 : 0) + 12
     : TAB_BAR_H + 8) + navInset;
   const weatherBottom = controlsBottom + 68;
 
@@ -4865,6 +4896,25 @@ export default function MapScreen() {
   const carListHidden = headUnitHere && navMode === "turn-by-turn" && tbt.active
     && carListMapOverride && (activeRoute?.steps?.length ?? 0) > 0;
   // 🔒 NAV-LOCK end map-carlist-mode
+
+  // ADD STOP from either drive face (Jeff, 2026-09-20: "move the end/arrived/shop map/add
+  // stop to the bottom"). Olaf is the why — "would be nice to have a button that stands out
+  // to add a stop on the phone screen … hard to find and end up having to just start a new
+  // route" — so this is the SAME pin-first mode the Drive card's pill arms, reached from
+  // mid-drive instead of only from the preview. It changes nothing about how a stop is
+  // added: the map tap, the plot-via-stops branch and the off-route re-plot are untouched.
+  const addStopNow = () => {
+    // The written-directions face has NO map mounted (`{!carListMode && <MapEngine>}`
+    // above), so "Tap the map to drop your stop" would be an instruction the driver
+    // physically cannot follow. Flip to the map first — the same flip Show map does.
+    if (carListMode) setCarListMapOverride(true);
+    setStopPinMode(true);
+    Haptics.selectionAsync().catch(() => {});
+    // First add-stop telemetry the app has ever had: nothing distinguished "nobody wants
+    // stops" from "nobody can find the button", which is exactly the question Olaf raised.
+    try { logEvent("phone-tap:add-stop"); } catch {}
+  };
+
 
   return (
     <View style={styles.c}>
@@ -5112,6 +5162,7 @@ export default function MapScreen() {
           onShowMap={() => { setCarListMapOverride(true); try { logEvent("phone-tap:show-map"); } catch {} }}
           onEnd={endNav}
           onArrived={arrivedNow}
+          onAddStop={addStopNow}
         />
       )}
 
@@ -5328,8 +5379,14 @@ export default function MapScreen() {
           auto-starts turn-by-turn (see navAutoStartedRef effect above). */}
 
       {/* ===== Pin-first Add stop — tap the map, or search instead ===== */}
+      {/* Add stop is reachable MID-DRIVE now (the StepDrawer tile / the car-list footer,
+          2026-09-20), and at TAB_BAR_H this banner landed exactly on StepDrawer's 80pt
+          collapsed bar — same `bottom`, one on top of the other. Lift it clear of the bar
+          whenever guidance is running. STEP_BAR_H, not stepDrawerH: an EXPANDED step list
+          would shove the banner 300pt up the screen, and the driver who just tapped Add
+          stop has the collapsed bar. */}
       {stopPinMode && (
-        <View style={[styles.pinBanner, { bottom: TAB_BAR_H + navInset }]} pointerEvents="box-none" onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
+        <View style={[styles.pinBanner, { bottom: TAB_BAR_H + navInset + (navBarUp ? STEP_BAR_H : 0) }]} pointerEvents="box-none" onLayout={(e) => setPreviewBannerH(e.nativeEvent.layout.height)}>
           <View style={styles.pinBannerCard}>
             <Ionicons name="location" size={20} color={accent} />
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -6183,6 +6240,7 @@ export default function MapScreen() {
           onEnd={endNav}
           onArrived={arrivedNow}
           onShowList={carListHidden ? () => setCarListMapOverride(false) : undefined}
+          onAddStop={addStopNow}
           onVisibilityChange={setStepsExpanded}
         />
       )}

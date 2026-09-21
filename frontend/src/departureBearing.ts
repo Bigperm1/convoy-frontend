@@ -50,7 +50,7 @@
 // timeout or a throw all return null, and a null simply means "rank by ETA alone",
 // i.e. exactly today's behaviour.
 import * as Location from "expo-location";
-import { haversineMeters } from "./nav";
+import { haversineMeters, countRouteUturns } from "./nav";
 import { carSpot } from "./locationPrivacy";
 import { spotFacing } from "./carSpotTrust";
 
@@ -180,12 +180,66 @@ export function routeInitialBearing(r: any): number | null {
   return end && typeof end.lat === "number" ? bearingDeg(start, end) : null;
 }
 
+// ══ A U-TURN COSTS TWO MINUTES WHEN WE RANK (2026-09-21, Jeff: "you can fix them ...go") ══
+// Rodrigo, WhatsApp 2026-09-20 23:37: "the app loves to send me on borderline illegal
+// u-turns. On my last drive tonight it tried to make me do two u turns that weren't safe.
+// Something I haven't experience with waze or gmaps" — and 23:46, after a week of running
+// Waze alongside: "it never sent me in weird u turns".
+//
+// MEASURED at his departure point (49.242496,-123.003784, live Directions replay
+// 2026-09-21, his 05:12:06Z drive): Mapbox offered BOTH of these and we took the second.
+//   alt0  363 s  departs 102°  0 U-turns   "Turn right onto Willingdon Avenue"
+//   alt1  336 s  departs 360°  1 U-turn    "Make a left U-turn at Willingdon Avenue… if permitted"
+// His row: `depart-rank facing=273 chosenBr=344 cands=179/402s,344/379s`. The ranking below
+// scored alt1 "forward" (70° off his facing, inside the 75° gate) and then sorted on pure
+// duration — so it traded a clean route for 27 SECONDS. Nothing in this file, or anywhere
+// else on the path to the driver, had ever looked at whether a route contains a U-turn.
+//
+// 120 s is a JUDGEMENT, not a measurement: enough to lose 27 s comfortably, not so much
+// that a genuine 5-minute detour beats one legal U-turn. Where every candidate carries the
+// same U-turn — a divided arterial with the destination behind you, which is the OTHER half
+// of Rodrigo's night — the penalty cancels out and the order is unchanged. That case is
+// Mapbox's answer and no ranking can fix it.
+export const UTURN_PENALTY_S = 120;
+
+// ⛔ AND A U-TURN IN THE FIRST 600 m IS A REVERSAL WEARING A DISGUISE.
+// The time penalty alone does NOT fix Rodrigo's night, and the gate below is why: his clean
+// option left 94° off his facing — an ordinary right turn out of the lot — so the 75° forward
+// gate had already thrown it into the back group, where no amount of penalty can reach past a
+// "forward" route. Meanwhile the route we picked went north and then made its U-turn 400 m
+// later, which is a reversal in everything but the first 25 m of bearing the ranker measures.
+// So an EARLY U-turn costs a route its forward status; a U-turn 5 km down a genuinely
+// forward line does not, and only pays the time penalty. That keeps Jeff's original 2026-07-30
+// complaint fixed ("when I'm parked at work and I start a route it makes me do a U-turn when I
+// can easily go forward") — a clean forward route still beats a clean backward one every time.
+export const EARLY_UTURN_M = 600;
+
+// Does the route ask for a U-turn inside the first EARLY_UTURN_M metres? Walks NavStep
+// distances in order and stops at the first U-turn key.
+export function hasEarlyUturn(r: any): boolean {
+  const steps = r?.steps;
+  if (!Array.isArray(steps)) return false;
+  let run = 0;
+  for (const s of steps) {
+    const k = typeof s?.maneuver === "string" ? s.maneuver.toLowerCase() : "";
+    if (k === "uturn" || k.endsWith("|uturn")) return run <= EARLY_UTURN_M;
+    const d = s?.distance_m;
+    run += typeof d === "number" && Number.isFinite(d) ? d : 0;
+    if (run > EARLY_UTURN_M) return false;
+  }
+  return false;
+}
+
 // Order routes so the FASTEST one heading roughly the way the car already faces comes
 // first; options that start with a U-turn fall to the back (also fastest-first).
 // No heading -> plain fastest-first, i.e. the behaviour before any of this existed.
+// Either way a route is ranked on its duration PLUS UTURN_PENALTY_S per U-turn it asks for.
 export function orderRoutesForward<T = any>(res: T[], heading?: number, toleranceDeg?: number): T[] {
   if (!Array.isArray(res) || res.length <= 1) return res;
-  const dur = (r: any) => r?.duration_in_traffic_s ?? r?.duration_s ?? Infinity;
+  const dur = (r: any) => {
+    const base = r?.duration_in_traffic_s ?? r?.duration_s ?? Infinity;
+    return Number.isFinite(base) ? base + UTURN_PENALTY_S * countRouteUturns(r) : base;
+  };
   if (typeof heading !== "number" || !Number.isFinite(heading)) {
     return [...res].sort((a, b) => dur(a) - dur(b));
   }
@@ -193,7 +247,9 @@ export function orderRoutesForward<T = any>(res: T[], heading?: number, toleranc
   const offBy = (br: number) => Math.abs(((br - heading + 540) % 360) - 180); // 0..180
   const scored = res.map((r) => {
     const br = routeInitialBearing(r);
-    return { r, forward: br != null && offBy(br) <= tol, d: dur(r) };
+    // An early U-turn disqualifies a route from "forward" however promising its first
+    // 25 m look — see EARLY_UTURN_M. Everything else is unchanged.
+    return { r, forward: br != null && offBy(br) <= tol && !hasEarlyUturn(r), d: dur(r) };
   });
   const fwd = scored.filter((s) => s.forward).sort((a, b) => a.d - b.d);
   const rest = scored.filter((s) => !s.forward).sort((a, b) => a.d - b.d);

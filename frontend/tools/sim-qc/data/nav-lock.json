@@ -1,6 +1,6 @@
 {
   "approvedBy": "Jeff",
-  "approvedAt": "2026-09-19",
+  "approvedAt": "2026-09-21",
   "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
   "approvals": [
     {
@@ -166,6 +166,15 @@
       "at": "2026-09-19",
       "quote": "Jeff, 2026-09-19: \"Before you do that look at my drive\" — REVERT of the stop handling (9ab9d701 + ecb5236b): Codex r6 reproduced that it slid a stopped car back 25 m on one bad stationary fix and froze a crawl under 2 km/h; poseEstimator.ts is back to the Codex-r5-reviewed c76ec74f bytes",
       "changes": []
+    },
+    {
+      "at": "2026-09-21",
+      "quote": "Jeff, 2026-09-21: you can fix them ...go — Rodrigo's borderline illegal U-turns: rank a U-turn route behind a clean one (UTURN_PENALTY_S 120 s), an early U-turn is not a forward departure (EARLY_UTURN_M 600 m), and log uturns= on depart-rank/route-swap",
+      "changes": [
+        "src/departureBearing.ts: code 88f98e91cfa3 → 046873f65e90",
+        "src/nav.ts: code bf6dc1895f38 → e347421e1a21",
+        "app/(app)/map.tsx#map-plot-depart-facing-pick region 215b808ef63d → 5c45515974f5"
+      ]
     }
   ],
   "files": {
@@ -214,7 +223,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/departureBearing.ts": {
-      "hash": "sha256:88f98e91cfa3fd8becabd3a6b61960bdbfe7ce9ca3bb3605e394891580ffc099",
+      "hash": "sha256:046873f65e9067a9194a668f46b51d65666fbcde4e59412e14dcc508cc0895de",
       "why": "pure drive-engine module: code-locked"
     },
     "src/carSpotTrust.ts": {
@@ -262,7 +271,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/nav.ts": {
-      "hash": "sha256:bf6dc1895f382962368c1f8cbd65348989010f368162242e5c983b9b4e3e2980",
+      "hash": "sha256:e347421e1a21d5365d60e8769259c11510354ae31d18160cb0f275f9f069ee75",
       "why": "pure drive-engine module: code-locked"
     },
     "src/navNotification.ts": {
@@ -623,7 +632,7 @@
         "map-route-round-trip": "sha256:c50538752c6cbcec2bd08c49acd252524f1b2b9acd4a3ba8fd45778a97e10f85",
         "map-plot-clear-no-dest": "sha256:0e9cc2362c4d793d2a43847dafca0a34f8c5f94ec8151b166cf507d0298a830d",
         "map-plot-via-stops": "sha256:1da71459cf26aa6c6113a0aa6fbed98d1ff9dd737facb391d20d8225b203de46",
-        "map-plot-depart-facing-pick": "sha256:215b808ef63dceb7f467e7b250e803db7811c41a7edc03767b5c281a928dcdc1",
+        "map-plot-depart-facing-pick": "sha256:5c45515974f589ff2ba05c95a0c25f1953f9830fca6fc628c0cb96ed4315f3d4",
         "map-plot-scenic-alternate": "sha256:ffd22eab074b49cbc809b8f18cbc6136612eb32e46b2be2adb65c3d9a062cbf0",
         "map-plot-announce-options": "sha256:24bacbe734a4b07b5497c37c2108f765c8aa511f75428bd70b1c590051fd1ab4",
         "map-plot-cruise-autoselect": "sha256:8cef7ddb16e615068dedbc0bd03e123a6832c3454542b089b444a9e8ec1674a4",

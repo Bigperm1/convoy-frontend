@@ -173,6 +173,25 @@ export function mapboxManeuverKey(type?: string, modifier?: string): string {
   return mod ? `${t}|${mod}` : t;
 }
 
+// U-TURNS ON A NavRoute (2026-09-21, Rodrigo's "borderline illegal u-turns"). NavStep.maneuver
+// is the joined key mapboxManeuverKey builds above — "<type>|<modifier>", e.g. "continue|uturn"
+// — NOT the raw Mapbox maneuver object.
+// ⚠ Do NOT "unify" this with countUturns() in mapboxDirections.ts: that one reads
+// `step.maneuver.modifier` off a raw MapboxRouteStep and returns 0 on a NavRoute, which would
+// make the ranking penalty in departureBearing.ts silently do nothing. Two shapes, two readers,
+// on purpose. It lives here, beside NavStep, because departureBearing.ts already imports from
+// this file — putting it there instead would close an import cycle.
+export function countRouteUturns(r: any): number {
+  const steps = r?.steps;
+  if (!Array.isArray(steps)) return 0;
+  let n = 0;
+  for (const s of steps) {
+    const k = typeof s?.maneuver === "string" ? s.maneuver.toLowerCase() : "";
+    if (k === "uturn" || k.endsWith("|uturn")) n++;
+  }
+  return n;
+}
+
 // ---- Route preferences ----
 export type AvoidPrefs = {
   tolls?: boolean;
@@ -1186,7 +1205,13 @@ export function useTurnByTurn(
         if (u && coords && coords.length >= 2 && steps?.length) {
           const a = anchorStepIndex(coords, steps, u);
           idx = a.onRoute ? a.index : 0;
-          logEvent(`route-swap steps=${steps.length} coords=${coords.length} carSeg=${a.carSeg} onRoute=${a.onRoute ? 1 : 0} anchored=${idx}`);
+          // uturns= is the count on the route the driver is ACTUALLY being given (2026-09-21,
+          // Rodrigo's "borderline illegal u-turns"). Before today nothing in the fleet's
+          // telemetry named a maneuver, so a route that opened with a U-turn looked identical
+          // in these rows to one that went straight on — steps/coords/carSeg/anchored are the
+          // same either way. Now a `uturns=1` here can be matched against the depart-rank
+          // cands= list to say whether WE chose it or Mapbox gave us no choice.
+          logEvent(`route-swap steps=${steps.length} coords=${coords.length} carSeg=${a.carSeg} onRoute=${a.onRoute ? 1 : 0} anchored=${idx} uturns=${countRouteUturns(route)}`);
         }
       } catch {}
       const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: idx };

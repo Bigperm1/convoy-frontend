@@ -19,6 +19,19 @@ ROOT = Path(__file__).resolve().parent.parent
 # (id, glob, regex, why) — regex is searched per FILE (multiline).
 RULES = [
     (
+        "route-ranking-blind-to-uturns",
+        ["src/departureBearing.ts"],
+        r"const dur = \(r: any\) => r\?\.duration_in_traffic_s \?\? r\?\.duration_s \?\? Infinity;",
+        "2026-09-21 (Rodrigo, WhatsApp: 'the app loves to send me on borderline illegal u-turns … something I "
+        "haven't experience with waze or gmaps'): orderRoutesForward ranked candidates on duration alone, so at his "
+        "departure it took a 336 s route carrying a U-turn over a 363 s route with none — MEASURED against the live "
+        "Directions API at 49.242496,-123.003784, and his own row says it: `depart-rank facing=273 chosenBr=344 "
+        "cands=179/402s,344/379s`. The sort key must carry UTURN_PENALTY_S * countRouteUturns(r), and hasEarlyUturn "
+        "must strip 'forward' status from a route that U-turns inside EARLY_UTURN_M — a time penalty alone cannot "
+        "reach past the forward/rest split, which is what made his clean 94°-off option unreachable. Gate: "
+        "tools/sim-qc/uturn_rank_test.mts (E5 is his exact row).",
+    ),
+    (
         "whereto-list-claims-the-keyboards-ownership-flag",
         ["src/carplay/carActions.ts"],
         r"function openWhereToIOS\(\)[\s\S]{0,500}?_searchPushed\s*=\s*true|onDidAppear:\s*\(\)\s*=>\s*\{\s*_searchPushed\s*=\s*true",

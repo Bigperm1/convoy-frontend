@@ -40,7 +40,7 @@ import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
-  useRouteTrafficRefresh, fetchRouteViaStops, arriveNow,
+  useRouteTrafficRefresh, fetchRouteViaStops, arriveNow, countRouteUturns,
 } from "../../src/nav";
 import { getDepartureBearing, departureBearingSource, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot } from "../../src/locationPrivacy";
@@ -1441,12 +1441,17 @@ export default function MapScreen() {
         // cands= every candidate's initial bearing/duration (2026-09-03: Jeff's 15:37 start chose
         // off=155 with n=2 and Rodrigo's 12:45 off=147 — neither row could say whether a
         // forward-departing option EXISTED and lost, or Mapbox returned none. Now it can.)
+        // Each candidate now also prints its U-turn count as `/uN` (2026-09-21). Until
+        // today NOTHING in the fleet's telemetry named a maneuver type, so Rodrigo's
+        // "borderline illegal u-turns" could not be seen in the data at all — it took him
+        // running Waze alongside for a week to notice. `u1` on the chosen candidate with a
+        // `u0` sibling is this bug; the same count on every candidate is Mapbox's answer.
         const _cands = raw.map((r: any) => {
           const b = routeInitialBearing(r);
           const d = r?.duration_in_traffic_s ?? r?.duration_s;
-          return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s`;
+          return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s/u${countRouteUturns(r)}`;
         }).join(',');
-        logEvent(`depart-rank constrained=${constrained} fsrc=${departureBearingSource()} n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} cands=${_cands}`);
+        logEvent(`depart-rank constrained=${constrained} fsrc=${departureBearingSource()} n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} uturns=${countRouteUturns(sorted[0])} cands=${_cands}`);
       } catch {}
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the

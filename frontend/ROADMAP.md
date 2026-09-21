@@ -1066,6 +1066,33 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BE `bbdb70fd` (2026-09-21 ~01:20 PDT, Jeff: "you can fix them ...go"; KEY_PRESENT=1 both platforms; runtime 1.29.0, code `a6d355d6`) — A U-TURN NOW COSTS A ROUTE ITS RANKING.**
+  Rodrigo, WhatsApp 2026-09-20 23:37: *"the app loves to send me on borderline illegal u-turns. On my last drive tonight it
+  tried to make me do two u turns that weren't safe. Something I haven't experience with waze or gmaps"*; 23:46, after a week
+  running Waze alongside: *"it never sent me in weird u turns"*.
+  - **ONE OF HIS TWO WAS OURS.** Live Directions replay at his 05:12:06Z departure (49.242496,-123.003784): `alt0 363 s / 0
+    U-turns` vs `alt1 336 s / 1 U-turn`; we took alt1. His row: `depart-rank facing=273 chosenBr=344 cands=179/402s,344/379s`.
+    `orderRoutesForward` ranked on duration alone — a clean route lost by 27 s. `countUturns()` had existed since the curb
+    rule but its only callers were inside `curbVerdict`; the route handed to the driver was never counted.
+  - **THE OTHER WAS NOT.** At his first reroute BOTH alternatives carry the same U-turn (398 s / 427 s): Willingdon is a
+    divided arterial, his destination was behind him, crossing the median is required. `bearings`, `continue_straight`,
+    `approaches`, `exclude` and `avoid_maneuver_radius` all swept — none removes it. Mapbox hedges it *"if permitted"*.
+  - **TWO RULES, because the first alone does not work.** `UTURN_PENALTY_S = 120` added to the sort key per U-turn; and
+    `EARLY_UTURN_M = 600` — a U-turn inside the first 600 m costs the route its "forward" status. The penalty alone could not
+    fix his case: his clean option left 94° off his facing, so the 75° gate had already demoted it and no time penalty reaches
+    past the forward/rest split. A late U-turn on a genuinely forward line only pays the time, so Jeff's 2026-07-30 parked
+    complaint stays fixed.
+  - **WE CAN SEE IT NOW.** No telemetry row in the fleet had ever named a maneuver type — which is why this needed a tester
+    running Waze for a week. `depart-rank` gains `uturns=` plus `/uN` per candidate; `route-swap` gains `uturns=` on every
+    route installed. `u1` chosen beside a `u0` sibling = this bug; the same count on every candidate = Mapbox's answer.
+  - **VERIFIED END TO END**, not just unit-tested: sim parked at his departure point, routed to his destination →
+    `depart-rank … chosenBr=183 … uturns=0 cands=183/360s/u0,343/346s/u1` — the app took the clean 360 s route over the
+    346 s U-turn one. Gates: new `tools/sim-qc/uturn_rank_test.mts` (21 checks, E5 = his exact row, N1 = the reroute nothing
+    could have saved), trap rule `route-ranking-blind-to-uturns` proven to fire on the previous commit, 37/37 sim-qc,
+    typecheck, eslint, doc-check. Nav lock relocked on his say-so.
+  - **STILL OPEN:** the divided-arterial U-turn is Mapbox's and we cannot remove it. If it keeps biting, the only levers left
+    are a different routing provider for that case or asking Mapbox about U-turn penalties.
+
 - **SHIPPED AS OTA-BD `1767048c` (2026-09-20 ~22:50 PDT, Jeff: "do it all"; KEY_PRESENT=1 both platforms; 2026-09-20 night, runtime 1.29.0, branch `mapbox-migration`; code `2d58196f` — the
   group id and the `KEY_PRESENT=1` proof go in after `eas update`):** tester Olaf (handle `Enablewhore`) sent FIVE complaints by
   iMessage on 09-20. Two are fixed here; the other three are questions for HIM (next bullet).

@@ -1066,7 +1066,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
-- **READY TO PUBLISH AS OTA-BD `<GROUP>` (2026-09-20 night, runtime 1.29.0, branch `mapbox-migration`; code `<SHA>` — the
+- **SHIPPED AS OTA-BD `1767048c` (2026-09-20 ~22:50 PDT, Jeff: "do it all"; KEY_PRESENT=1 both platforms; 2026-09-20 night, runtime 1.29.0, branch `mapbox-migration`; code `2d58196f` — the
   group id and the `KEY_PRESENT=1` proof go in after `eas update`):** tester Olaf (handle `Enablewhore`) sent FIVE complaints by
   iMessage on 09-20. Two are fixed here; the other three are questions for HIM (next bullet).
   **(1) The CarPlay "Where to?" list was being yanked off the screen while he drove** — *"Can't select home or work on the

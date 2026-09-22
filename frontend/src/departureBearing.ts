@@ -52,7 +52,7 @@
 import * as Location from "expo-location";
 import { haversineMeters, countRouteUturns, firstUturnMeters } from "./nav";
 import { carSpot } from "./locationPrivacy";
-import { spotFacing } from "./carSpotTrust";
+import { spotFacing, SPOT_WRITE_MAX_SPEED_MS } from "./carSpotTrust";
 
 // How long a GPS course stays trustworthy as a proxy for "facing". A car that was
 // moving 90 s ago is almost certainly still pointing the way it was travelling —
@@ -74,11 +74,32 @@ export type DepartureBearingSource = "spot" | "course" | "compass" | "none";
 let _lastSource: DepartureBearingSource = "none";
 export function departureBearingSource(): DepartureBearingSource { return _lastSource; }
 
-// Feed every GPS fix that carries a real course. Cheap, called from the position
-// pipeline. Negative / non-finite values are iOS's "no course" and are ignored.
-export function noteCourse(headingDeg: number | null | undefined): void {
+// Feed every GPS fix that carries a real course, WITH the fix's speed (m/s). Cheap, called from
+// the position pipeline. Negative / non-finite values are iOS's "no course" and are ignored.
+//
+// ── A COURSE BELOW MOVING PACE IS THE PHONE'S DIRECTION, NOT THE CAR'S (2026-09-22) ──
+// Olaf, 14:14:04Z: the plot ranked on facing=295 (fsrc=course) — a course noted 18 s earlier by
+// the FIRST fresh fix in 8 h, reported at 0.28 m/s (draw-cmp spd=1) while the phone was 2 m from
+// the parked car (parked=1 hu=1 spotAge=45398s). The car left EAST: `reroute-result id=1
+// bearing=90` 38 s after the plot, `pose-fix course=90 spd=31` — 155° from the "facing", 20°
+// from the spot's own frozen heading (110, the last moving fix before the 01:37:21Z stop), which
+// step 1b below never got to answer because a course ≤ 90 s old always wins. Same shape 01:17:30Z
+// (facing=191, departed 14°, reroute 45 s) and Rodrigo 09-21 05:12Z (facing=273, a course reported
+// between two 0–1 km/h fixes 150° apart). Fleet since fsrc= exists (09-17, sim excluded): about two
+// thirds of the fsrc=course plots whose last pre-plot sample was parked and below walking pace
+// departed > 85° from the facing and rerouted inside 2 min; about one in eight after a MOVING sample.
+// So a fix below SPOT_WRITE_MAX_SPEED_MS (1.5 m/s) neither records nor clears the course. That is the
+// line the car spot's OWN facing is observed at (src/carSpotTrust.ts), so the two sources see the same
+// last moving fix — DRIVING_SPEED_MS (2.5) was tried first and a 2.0 m/s U-turn park then answered
+// the PRE-manoeuvre course, 180° wrong (depart_facing_test C8); every measured wrong facing sat below
+// 1.4 m/s, and the fleet's 5–9 km/h courses agree with the road as often as its 10–12 km/h ones (76 %
+// vs 80 % within 45°). The last course noted AT SPEED keeps its own timestamp and still expires at
+// COURSE_FRESH_MS, after which the precedence is unchanged: spot → compass → none. A caller passing no
+// speed keeps the old behaviour (fail-open); the one caller, map.tsx's fix ingest, passes the fix's speed.
+export function noteCourse(headingDeg: number | null | undefined, speedMs?: number | null): void {
   if (typeof headingDeg !== "number" || !Number.isFinite(headingDeg)) return;
   if (headingDeg < 0 || headingDeg > 360) return;
+  if (typeof speedMs === "number" && Number.isFinite(speedMs) && speedMs < SPOT_WRITE_MAX_SPEED_MS) return;
   lastCourse = { deg: headingDeg, at: Date.now() };
 }
 

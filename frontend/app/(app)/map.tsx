@@ -3717,12 +3717,13 @@ export default function MapScreen() {
             // unavailable accuracy as a negative, same sentinel convention as speed.
             const aRaw = pos.coords.accuracy;
             const acc = typeof aRaw === "number" && isFinite(aRaw) && aRaw >= 0 ? aRaw : undefined;
-            // Remember the last REAL travel course. It is the best "which way does
-            // the car face" answer for the first 90s after stopping — no compass
+            // Remember the last REAL travel course, at driving speed. It is the best "which
+            // way does the car face" answer for the first 90s after stopping — no compass
             // calibration, no interference from the car's own steel — and it is what
             // the departure-direction pick prefers before falling back to the
-            // magnetometer. See src/departureBearing.ts.
-            noteCourse(heading);
+            // magnetometer. The speed rides along so a course from a phone carried at
+            // walking pace is not taken for the car's (Olaf 2026-09-22). See src/departureBearing.ts.
+            noteCourse(heading, speed);
             // Survives a locked screen, unlike the 20s timer — see handleUserPan.
             releasePanHoldIfDue();
             // Push to the position history buffer so we can recall where the

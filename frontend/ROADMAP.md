@@ -1071,6 +1071,48 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **FIXES 2 + 3 BUILT ON JEFF'S "do 1-3" (2026-09-22 ~14:30 PDT) — the two nav-locked items held back above; relocked on his words; OTA with `3d725053` as ONE update.**
+  Workflow `fix-0922b-locked` (2 investigators → 2 builders → corners-first review + 2 adversarial refuters, 7 agents), then the
+  refuters' two majors applied by the architect. **Corners: 10 locked files 0 diff, every corner gate PASS, nav_lock relocked with
+  exactly four changes (departureBearing.ts, speedLimit.ts ×2, map.tsx#map-fgwatch-fix-ingest) and nothing else.**
+  - **(2) Olaf's phantom tier-2 dings — the cache is only complete near where it was fetched** (`src/speedLimit.ts` + NEW pure
+    `src/speedLimitCover.ts`, gate `speed_limit_cover_test.mts` 20 checks on live OSM geometry). VERIFIED mechanism (Overpass replay,
+    UTC rows): 14:31:39 `speed-limit lim=80>50 near=24 cls=tertiary x=80@11m/179°` → 14:31:41 `speed-alert tier=2 over=44 limit=50`.
+    The fetch he was on had been centred ≥ 1.6 km behind him (past FETCH_RADIUS_M 1500) — a failed 30 s cycle (3 mirrors × 10 s) in
+    between, invisible until today — so the 250 m piece of his own carriageway (way 904359585) was not in the payload while the ~1 km
+    opposing carriageway and River Road (tertiary 50, 24 m) were; the snap did its job on a hole. THE RULE: a landed fetch is complete
+    for the snap inside `FETCH_RADIUS_M − SNAP_TOLERANCE_M` = 1470 m of its centre (derived, not tuned; Overpass `around:` is SEGMENT
+    distance, measured), and OUTSIDE that disc the sign may only CONTINUE the number it showed inside — a different number out there
+    is a road beside a hole → blank, never a neighbour's limit. The continue rule is the refuter's: "blank beyond 1470 m" alone was
+    measured at 200/480 ticks blank on a straight motorway under today's mirror health (overpass-api.de 200 on 4 of 11, the other two
+    mirrors unreachable) because the long piece the car is ON was still in the payload. Receipts: `speed-fetch ok= ms= ways= http=
+    moved=` on EVERY landing incl. failures (≤ 32/launch) and `speed-cover out d= r= lim= saw= crs= spd=` once per blanked stretch.
+    Two earlier readings corrected by receipts: `ahead-ingest` is NOT one-per-fetch (≤ 12/launch, only with rail/school/play > 0), and
+    "one fetch in flight 64 s" was two cycles, the first failed silently. **NOT fixed — mechanism B (pinned KNOWN-OPEN in the gate):**
+    the road under the car carries NO maxspeed and a tagged minor road runs ≤ 30 m beside it — Olaf 14:41:59 on the Hwy 17→99 loop
+    ramp beside Burns Drive (30), John 09-16 on the same ramp, Rodrigo ×5 on 09-20/21/22; and a `highway=construction` way with a
+    maxspeed snaps too. Fix = fetch untagged arterial/link ways as limit-less occupants (query + snap, both locked) — needs Jeff.
+    Since 09-10: 72 tier-2 rows fleet-wide, 8 preceded by a minor-class snap ≥ 41 over; 2 are mechanism A (this fix), 6 mechanism B.
+  - **(3) A course below the spot's own moving line is the phone's, not the car's** (`src/departureBearing.ts` `noteCourse(heading,
+    speedMs)`; map.tsx passes the fix's m/s — one token inside `map-fgwatch-fix-ingest`; gate `depart_facing_test.mts` C1–C8). Olaf
+    14:14:04Z: `depart-rank fsrc=course facing=295` from a 0.28 m/s fix (`draw-cmp spd=1 … parked=1 hu=1 spotAge=45398s gpsHdg=295`)
+    18 s earlier; the car left EAST (`reroute-result id=1 bearing=90` 38 s later); the spot's own frozen heading (110, the last moving
+    fix before the 01:37Z stop) was never consulted because a course ≤ 90 s old always answered first. Gate = `SPOT_WRITE_MAX_SPEED_MS`
+    1.5 m/s — the refuter's correction: the builder's 2.5 (DRIVING_SPEED_MS) made a 2.0 m/s U-turn park answer the PRE-turn course,
+    180° wrong (C8); every measured wrong facing sat below 1.4 m/s and the fleet's 5–9 km/h courses agree with the road as often as
+    its 10–12 km/h ones (76 % vs 80 %). Fleet since 09-17: about two thirds of parked, sub-walking-pace fsrc=course plots departed
+    > 85° and rerouted inside 2 min; about one in eight after a moving sample. Field receipt: `fsrc=spot` on Olaf's next plot at
+    that spot. Known unknown: nothing prints the in-memory spot's hdg, so Rodrigo's/Jeff's replays are indeterminate from rows.
+  - **SIM (release binary, bundle swap, iPhone 16 Pro), Olaf's Hwy 17 SB corridor at 26 m/s with nav:** `speed-fetch ok=1 ms=1665
+    ways=191` / `ok=0 ms=27408 … fetch-fail` / `ok=0 ms=30207` / `ok=1 ms=5909 ways=45` — today's mirror health in receipts;
+    `speed-cover out d=1489 r=1470` fired at the disc edge at 49.1774,-122.9135 — Olaf's phantom point — with NO `80>50 cls=tertiary`
+    and NO `speed-alert tier=2`; the ahead-alert route gate rejected 20 crossings 67–394 m off and spoke the one at `off=0`; alive
+    throughout. Honest limit: the 7-point straight-line path sits > 30 m from River Road, so the phantom snap itself was not
+    reproduced in the sim — the numeric gate (O1a–d on the real geometry) is that proof. Sim bench note: the phone's foreground watch
+    delivered no fixes on the first launch after a bundle swap until a nav session had run once (no loc-*/draw-cmp rows for 3 min),
+    and after End it froze again (`draw-cmp … nav=0 spd=94` at the same gps for 3+ min through a `location set` and a 0.3 m/s
+    scenario) — so the walking-phone plot recipe for fix 3 CANNOT run on this bench; its proof is the gate (C1 replays Olaf's rows
+    through the real modules) and the refuter's independent replays. Field receipt: `fsrc=spot` on Olaf's next plot at that spot.
 - **COMMITTED, NOT PUBLISHED — `3d725053` (2026-09-22 ~12:15 PDT), waiting on Jeff's go.** Jeff, in caps: *"I WANT TO MAKE SURE
   THAT #1 DOES NOT SCREW UP HOW THE ROUTING WORKS TO ESPECIALLY IN CORNERS CAUSE THEY ARE FINALLY WORKING CORRECTLY FIX ALL
   ISSUES"* → workflow `fix-0922` (four builders + a corners-first review), then the review's rejections applied by hand.

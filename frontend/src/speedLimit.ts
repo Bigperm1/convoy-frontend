@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { snapSpeedLimit, SNAP_TOLERANCE_M, type LimitWay, type SnapResult } from "./speedLimitSnap";
+import { isCovered, coverDistM, coverRadiusM, continuesCover, type Cover, type CoverSnap } from "./speedLimitCover";
 import { logEvent } from "./crashBreadcrumb";
 import { ingestAheadElements } from "./aheadAlertStore";
 // ── THE ROAD YOU ARE ON RUNS THE WAY YOU ARE GOING (2026-09-10) ──────────────────────────
@@ -254,6 +255,27 @@ let _speedMs: number | null = null;
 let _lastPos: { lat: number; lng: number } | null = null;
 let _receipts = 0;
 const RECEIPTS_MAX = 80;               // a drive changes limit a few dozen times; logEvent is a Supabase INSERT
+// ── THE CACHE IS ONLY COMPLETE NEAR WHERE IT WAS FETCHED (2026-09-22) ─────────────────────────────
+// Olaf's 14:31:39 UTC `speed-limit lim=80>50 near=24 cls=tertiary x=80@11m/179° crs=217 spd=92` →
+// tier-2 ding at 92 on Highway 17: the fetch he was running on had been centred ≥ 1.6 km behind him
+// (past FETCH_RADIUS_M), so the 250 m piece of his own carriageway was not in `_ways` while the ~1 km
+// opposing carriageway and River Road, poking into the old circle, were — and the snap picked the
+// road BESIDE him. `_cover` is the centre + radius of the last LANDED fetch (src/speedLimitCover.ts:
+// complete for the snap inside radius − SNAP_TOLERANCE_M = 1470 m, derived, not tuned). Outside it
+// the snap may only CONTINUE the limit the sign showed inside (continuesCover — the long motorway
+// piece the car is still on); a different number out there is a road beside a hole, and the sign goes
+// blank until the next fetch lands, never a neighbour's limit. Separate from `_center` on purpose:
+// `_center` is the refetch TRIGGER and is nulled by a failed fetch and by the self-heal, while a driver
+// stopped on a good cache through an Overpass outage must keep the sign.
+let _cover: Cover | null = null;
+let _coveredSnap: CoverSnap | null = null;   // the number the sign showed the last time the car was inside the disc
+let _uncovered = false;                // edge flag: one `speed-cover out` row per blanked stretch
+let _coverReceipts = 0;                // its own bound (FETCH_RECEIPTS_MAX) so it never eats the `speed-limit` budget
+// A bounded receipt on EVERY fetch landing, failures included. Until today a failed cycle left no row
+// at all, which is how Olaf's 14:30→14:32 chain was read as "one fetch in flight ≥ 64 s" when the
+// code caps a cycle at ~3 × FETCH_TIMEOUT_MS. 32 ≈ one row per km of a 30 km commute plus failures.
+const FETCH_RECEIPTS_MAX = 32;
+let _fetchReceipts = 0;
 
 function _emit(v: number | null): void {
   if (v === _current) return;          // only wake consumers on a real change
@@ -268,6 +290,41 @@ function _emit(v: number | null): void {
     try { logEvent(`speed-limit lim=${prev ?? "?"}>${v ?? "?"} near=${r && Number.isFinite(r.nearestM) ? Math.round(r.nearestM) : "?"} cls=${r?.highway ?? "?"} x=${x} crs=${_course == null ? "?" : Math.round(_course)} spd=${_speedMs == null ? "?" : Math.round(_speedMs * 3.6)}`); } catch {}
   }
   _subs.forEach((f) => { try { f(v); } catch {} });
+}
+
+// The one resolve for both sites (the fetch landing and the per-tick gate). Inside the cover, the snap,
+// remembered as the number the sign showed. Outside it the snap still runs (the O(ways × segments) cost
+// is what the old code paid on every tick) and is kept only while it continues that number; a different
+// one is a road beside a hole in the payload (Olaf 2026-09-22 14:31:39) and the sign goes blank instead.
+// `_lastNearestM` is written by nearestLimit either way, so the self-heal below keeps its old meaning.
+function _resolveAt(lat: number, lng: number): void {
+  const lim = nearestLimit(lat, lng, _ways, _course, _speedMs);
+  if (isCovered(_cover, lat, lng)) {
+    _uncovered = false;
+    _coveredSnap = { limitKmh: lim };
+    _emit(lim);
+    return;
+  }
+  if (continuesCover(_coveredSnap, { limitKmh: lim })) { _emit(lim); return; }
+  // The receipt only when the rule actually decided something: a number was showing, or the hole offered one.
+  // Sim 2026-09-22 21:19:42Z: `lim=? saw=?/motorway` — nothing within 30 m of a coarse waypoint path — is no information.
+  const decided = _coveredSnap?.limitKmh != null || lim != null;
+  if (_cover && !_uncovered && decided && _coverReceipts < FETCH_RECEIPTS_MAX) {
+    _coverReceipts += 1;
+    // `lim=` is what the sign showed inside the disc, `saw=` what the hole offered instead (Olaf: lim=80 saw=50/tertiary).
+    try { logEvent(`speed-cover out d=${Math.round(coverDistM(_cover, lat, lng))} r=${coverRadiusM(_cover.radiusM)} lim=${_coveredSnap?.limitKmh ?? "?"} saw=${lim ?? "?"}/${_lastSnap?.highway ?? "?"} crs=${_course == null ? "?" : Math.round(_course)} spd=${_speedMs == null ? "?" : Math.round(_speedMs * 3.6)}`); } catch {}
+  }
+  _uncovered = true;
+  _lastSnap = null;                  // so the `speed-limit lim=80>?` row reads near=? cls=?, not the rejected snap's numbers
+  _dbgSnap = "no-cover";             // TEMP debug
+  _emit(null);
+}
+
+function _fetchReceipt(ways: LimitWay[] | null, t0: number, lat: number, lng: number): void {
+  if (_fetchReceipts >= FETCH_RECEIPTS_MAX) return;
+  _fetchReceipts += 1;
+  const moved = _lastPos ? Math.round(haversineM(lat, lng, _lastPos.lat, _lastPos.lng)) : "?";
+  try { logEvent(`speed-fetch ok=${ways ? 1 : 0} ms=${Date.now() - t0} ways=${ways?.length ?? 0} http=${_dbgHttp} moved=${moved}`); } catch {}
 }
 
 export function getSpeedLimitKmh(): number | null { return _current; }
@@ -297,20 +354,26 @@ export function updateSpeedLimit(lat: number, lng: number, courseDeg?: number | 
     _inFlight = true;
     _lastFetch = now;
     _center = { lat, lng };
-    fetchSpeedLimitWaysAround(lat, lng)
+    const t0 = now;
+    // The radius is passed explicitly so the cover recorded below can never drift from the query.
+    fetchSpeedLimitWaysAround(lat, lng, FETCH_RADIUS_M)
       .then((ways) => {
         _inFlight = false;
+        _fetchReceipt(ways, t0, lat, lng);
         if (ways) {
           _ways = ways;
+          // This payload is complete inside 1470 m of the point it was CENTRED on — the closure's lat/lng,
+          // the fetch-start position — not of wherever the car is when it lands.
+          _cover = { lat, lng, radiusM: FETCH_RADIUS_M };
           // Resolve where the car IS now, with the direction of that same fix — one snapshot — and anchor
           // the resolve gate there so the next tick does not skip a correction against the new cache.
           const at = _lastPos ?? { lat, lng };
           _resolvedAt = at;
-          _emit(nearestLimit(at.lat, at.lng, ways, _course, _speedMs));
+          _resolveAt(at.lat, at.lng);
         }
         else { _center = null; }       // fetch failed — retry after the throttle window
       })
-      .catch(() => { _inFlight = false; _center = null; });
+      .catch(() => { _inFlight = false; _center = null; _fetchReceipt(null, t0, lat, lng); });
   }
   // ── RESOLVE DISTANCE GATE ───────────────────────────────────────────────────
   // nearestLimit() is O(ways x segments) and MEASURED heavy. One 1500 m Overpass
@@ -347,8 +410,8 @@ export function updateSpeedLimit(lat: number, lng: number, courseDeg?: number | 
     return _current;
   }
   _resolvedAt = { lat, lng };
-  // Resolve against whatever is cached right now (instant; no network).
-  _emit(nearestLimit(lat, lng, _ways, _course, _speedMs));
+  // Resolve against whatever is cached right now (instant; no network) — blank outside the cover.
+  _resolveAt(lat, lng);
   // Stale-cache self-heal: if the nearest cached road is implausibly far, the cache
   // is stale (a wedged/aborted fetch left the centre kilometres behind). Drop the
   // centre so the next call refetches. The throttle still applies, so this can never
@@ -361,7 +424,7 @@ export function updateSpeedLimit(lat: number, lng: number, courseDeg?: number | 
 }
 
 export function resetSpeedLimit(): void {
-  _ways = []; _center = null; _resolvedAt = null; _emit(null);
+  _ways = []; _center = null; _cover = null; _coveredSnap = null; _uncovered = false; _resolvedAt = null; _emit(null);
 }
 
 // Show the posted-limit sign only while actually moving. ONE rule, in km/h so it is

@@ -60,7 +60,7 @@ import { setCarState, setCarPeers, subscribeCarGesture, setCarSelfPosition, getC
 import { rawCourseHere } from "../../src/fixCourseHere";
 import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
-import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
+import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickArrivalWeather, noteArrivalWeather, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
 import { useAheadAlerts, resetAheadAlerts } from "../../src/aheadAlerts";
 import { useDriveBcEvents } from "../../src/driveBcEvents";
@@ -968,11 +968,18 @@ export default function MapScreen() {
   // the hour matching your ETA (now + route duration) and surface it as a
   // weather chip on the end pin. Gated on the weather layer toggle + a route.
   const destForecast = useDestinationWeather(destination?.lat ?? null, destination?.lng ?? null, showWeatherLayer && !!destination);
+  // Which answer: the destination's CURRENT conditions when the arrival is near, the forecast
+  // block otherwise (src/weatherLayer.ts pickArrivalWeather, 2026-09-22 — Scout said "raining"
+  // for a 3-minute drive on a sunny day off a 3-hour forecast block). `wx-dest why=plot` once
+  // per resolve.
   const destWeather = useMemo(() => {
     if (!destination || !destForecast) return null;
     const durS = activeRoute?.duration_in_traffic_s ?? activeRoute?.duration_s ?? 0;
-    const cond = pickForecastAt(destForecast, Date.now() + durS * 1000);
-    if (!cond) return null;
+    const arrivalMs = Date.now() + durS * 1000;
+    const pick = pickArrivalWeather(destForecast, arrivalMs);
+    if (!pick) return null;
+    noteArrivalWeather(pick, arrivalMs, "plot");
+    const cond = pick.cond;
     const t = Math.round(settings.speedUnit === "mph" ? cond.tempF : cond.tempC);
     return { kind: weatherKind(cond), temp: `${t}\u00b0` };
   }, [destination, destForecast, activeRoute?.duration_in_traffic_s, activeRoute?.duration_s, settings.speedUnit]);
@@ -2026,7 +2033,10 @@ export default function MapScreen() {
     arrivalContext: () => {
       if (!destination) return null;
       const saved = matchSavedPlace(destination.lat, destination.lng);
-      const cond = pickForecastAt(destForecastRef.current, Date.now());
+      // Arriving NOW: the destination's current conditions answer (fresh), else the block.
+      const pick = pickArrivalWeather(destForecastRef.current, Date.now());
+      noteArrivalWeather(pick, Date.now(), "arrive");
+      const cond = pick?.cond ?? null;
       return {
         placeKind: saved?.kind ?? null,
         place: saved ? null : destPlaceRef.current,

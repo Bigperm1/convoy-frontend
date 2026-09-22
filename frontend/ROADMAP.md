@@ -1071,6 +1071,23 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **WEATHER, same day ~17:15 PDT (Jeff: "make sure the weather is correct on arrival and the weather icon on the map screens …
+  always shows cloudy even when its sunny … scout mentioned twice it was raining at the end destination but it had not rained
+  all day"). Three verified causes, three fixes in `src/weatherLayer.ts` (unlocked) + the two call sites in map.tsx (unlocked):**
+  - **The grey cloud was thin high cloud.** MEASURED 16:00 PDT: OpenWeather id 803 "broken clouds" clouds=77 % at his location /
+    62 % Vancouver; the real sky (METAR CYXX 222300Z FEW043TCU SCT046 BKN250 · CYVR FEW048 FEW190 BKN240 RMK CI4) was a broken
+    deck of CIRRUS at 24–25 kft over a few cumulus — sunny to anyone under it. OpenWeather's bands (803 = 51–84 %) put that under
+    our grey-cloud glyph. Now 801–803 → "Partly cloudy" (sun + cloud) and only 804 (≥ 85 %) → "Overcast" (grey cloud).
+  - **A forecast block's "rain" is a probability.** His 13:42 PDT greeting — `greet-prep … "you'll find it raining at 18 degrees
+    when you get there"` — read the /forecast 3-hour block containing a 3-MINUTE-away arrival; the same feed showed a block
+    `id=500 light rain pop=0.23 rain3h=0.16 mm`. Now a drizzle/rain block is rain only at `pop ≥ 0.5` AND `rain3h ≥ 0.5 mm`
+    (`demoteTraceRain`), else it is described by its cloud cover. Current conditions (/weather) are never demoted.
+  - **Arriving soon = what is there NOW.** `useDestinationWeather` fetches the destination's current conditions alongside the
+    hourly blocks; `pickArrivalWeather` answers with current when the arrival is ≤ 90 min away (and the reading ≤ 30 min old),
+    the block otherwise. Both the plot-time chip/greeting and the arrival line read it.
+  - Receipts (≤ 12 each per launch): `wx-here id= clouds= pop= mm= desc= kind= t=` on every chip fetch, `wx-dest why=plot|arrive
+    src=cur|fc eta=<min> …` on every arrival resolve — the next "it said raining" is decidable from the row.
+  - Gate: `tools/sim-qc/weather_word_test.mts` (18 checks, the measured rows as fixtures). Rides in tonight's publish (HEAD).
 - **UI, same day ~16:45 PDT (Jeff): the written-directions face's footer now mirrors the map drawer — Show map (BLUE) · Add stop
   (GREEN) · Arrived · End, left to right (`src/CarDriveList.tsx`); and holding the map with NO route offers "Route here" under
   Custom… (`map.tsx` handleMapLongPress, outside every locked region — it is the dropped-pin `setDestination` verbatim; not offered

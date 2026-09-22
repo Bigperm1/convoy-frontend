@@ -15,14 +15,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { OPENWEATHER_KEY } from "./api";
+import { logEvent } from "./crashBreadcrumb";
 
 const OW_BASE = "https://api.openweathermap.org/data/2.5";
 
-// OpenWeather condition id -> a canonical phrase the existing weatherKind() /
-// weatherIconName() classifiers already understand (they substring-match the
-// description text). Keeps the two-tone HUD glyphs accurate without touching the
-// classifier. id ranges: 2xx thunder, 3xx drizzle, 5xx rain, 6xx snow, 7xx
-// atmosphere (mist/haze/fog), 800 clear, 801/802 partly, 803 broken, 804 overcast.
+// ── WHAT THE SKY LOOKS LIKE, NOT WHAT THE MODEL COUNTS (Jeff, 2026-09-22) ─────────────────────
+// "i find it always shows cloudy even when its sunny and no clouds." MEASURED the same afternoon,
+// 16:00 PDT: OpenWeather said id 803 "broken clouds", clouds 77 % at his location and 62 % over
+// Vancouver — and the real sky (METAR CYXX 222300Z: FEW043TCU SCT046 BKN250; CYVR: FEW048 FEW190
+// BKN240, RMK CI4) was a few low cumulus under a broken deck of CIRRUS at 24–25 thousand feet.
+// OpenWeather's percentage is honest — five to seven oktas of thin high cloud IS 60–80 % cover —
+// but nobody standing under it calls that "cloudy"; the sun is out. OpenWeather's own id bands
+// (801 11–25 %, 802 25–50 %, 803 51–84 %, 804 85–100 %) put everything from 51 % up under a grey
+// cloud on our chip. So the sun stays in the glyph until the deck is OVERCAST (804, ≥ 85 %):
+// 801–803 all read "Partly cloudy" (sun + cloud), 804 reads "Overcast" (grey cloud). Rain, snow,
+// fog and thunder are unchanged — those are the sky doing something, not a cover percentage.
 function owDesc(id: number): string {
   if (id >= 200 && id < 300) return "Thunderstorm";
   if (id >= 300 && id < 400) return "Drizzle";
@@ -30,11 +37,34 @@ function owDesc(id: number): string {
   if (id >= 600 && id < 700) return "Snow";
   if (id >= 700 && id < 800) return "Fog";
   if (id === 800) return "Clear";
-  if (id === 801 || id === 802) return "Partly cloudy";
-  if (id === 803) return "Cloudy";
+  if (id >= 801 && id <= 803) return "Partly cloudy";
   if (id === 804) return "Overcast";
   return "Clear";
 }
+// A cloud-cover description from the percentage alone, for a demoted rain block (below).
+function cloudsDesc(pct: number): string {
+  if (pct >= 85) return "Overcast";
+  if (pct >= 11) return "Partly cloudy";
+  return "Clear";
+}
+// ── A FORECAST BLOCK'S "RAIN" IS A PROBABILITY, NOT A DOWNPOUR (Jeff, 2026-09-22) ─────────────
+// "scout mentioned twice it was raining at the end destination but it had not rained all day and
+// sunny." His 13:42 PDT greeting ("you'll find it raining at 18 degrees when you get there") read
+// the /forecast 3-hour block that CONTAINED his 3-minute-away arrival. Those blocks carry id 500
+// "light rain" whenever the model puts ANY rain in the window — the same afternoon's feed showed
+// `id=500 light rain pop=0.23 rain3h=0.16 mm` for a block: a 23 % chance of 0.16 mm is not
+// "raining", it is a cloudy sky. So a drizzle/rain block is only rain when the model itself is
+// fairly sure (pop ≥ RAIN_POP_MIN) AND it is worth an umbrella (rain3h ≥ RAIN_MM_MIN); otherwise
+// it is described by its cloud cover. Thunder and snow are left alone. Applied to FORECAST
+// blocks only — /weather current conditions report what is falling now, not a probability.
+export const RAIN_POP_MIN = 0.5;
+export const RAIN_MM_MIN = 0.5;
+export function demoteTraceRain(id: number, pop: number, rainMm: number, cloudsPct: number): string {
+  const wet = (id >= 300 && id < 400) || (id >= 500 && id < 600);
+  if (wet && (pop < RAIN_POP_MIN || rainMm < RAIN_MM_MIN)) return cloudsDesc(cloudsPct);
+  return owDesc(id);
+}
+
 // OpenWeather marks day/night with a trailing d/n on the icon code (e.g. "04d").
 function owIsDay(icon: any): boolean {
   return typeof icon === "string" ? icon.endsWith("d") : true;
@@ -59,6 +89,12 @@ export type WeatherCondition = {
   uvIndex: number;
   isDaytime: boolean;
   fetchedAt: number;            // Date.now()
+  // The numbers behind the word, for the `wx-*` receipts (2026-09-22): OpenWeather id, cloud
+  // cover %, and for a forecast block its probability + 3-hour millimetres.
+  owId?: number;
+  cloudsPct?: number;
+  pop?: number;
+  rainMm?: number;
 };
 
 const REFRESH_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes (stationary refresh cadence)
@@ -114,10 +150,23 @@ export async function fetchWeatherConditions(
       uvIndex: 0, // UV needs One Call 3.0; not surfaced in the HUD anyway
       isDaytime: owIsDay(w0?.icon),
       fetchedAt: Date.now(),
+      owId: w0?.id ?? 800,
+      cloudsPct: data?.clouds?.all ?? 0,
+      rainMm: data?.rain?.["1h"] ?? 0,
     };
   } catch {
     return null;
   }
+}
+
+// One bounded receipt per resolved weather word, so the next "it said cloudy / raining" report is
+// decidable from the row instead of from memory: what the model said (id, clouds %, pop, mm) and
+// what we made of it. Two budgets, one for the chip (`wx-here`) and one for arrivals (`wx-dest`).
+const WX_RECEIPTS_MAX = 12;
+let _wxHereRows = 0;
+let _wxDestRows = 0;
+function wxFields(c: WeatherCondition): string {
+  return `id=${c.owId ?? "?"} clouds=${c.cloudsPct ?? "?"} pop=${c.pop == null ? "-" : Math.round(c.pop * 100)} mm=${c.rainMm == null ? "-" : c.rainMm} desc=${c.description} kind=${weatherKind(c)} t=${Math.round(c.tempC)}`;
 }
 
 // ---- React hook: auto-refreshes weather on a timer ----
@@ -164,6 +213,7 @@ export function useWeatherLayer(
       setLoading(false);
       if (result) {
         setWeather(result);
+        if (_wxHereRows < WX_RECEIPTS_MAX) { _wxHereRows += 1; try { logEvent(`wx-here ${wxFields(result)}`); } catch {} }
       } else {
         setError(true);
       }
@@ -262,6 +312,10 @@ export async function fetchHourlyForecast(
       const feelsC = h?.main?.feels_like ?? tempC;
       const windKph = (h?.wind?.speed ?? 0) * 3.6;
       const w0 = Array.isArray(h?.weather) ? h.weather[0] : null;
+      const id = w0?.id ?? 800;
+      const pop = (h?.pop ?? 0) as number;
+      const rainMm = (h?.rain?.["3h"] ?? 0) as number;
+      const cloudsPct = (h?.clouds?.all ?? 0) as number;
       out.push({
         startMs,
         endMs,
@@ -270,17 +324,21 @@ export async function fetchHourlyForecast(
           tempF: (tempC * 9) / 5 + 32,
           feelsLikeC: feelsC,
           feelsLikeF: (feelsC * 9) / 5 + 32,
-          description: owDesc(w0?.id ?? 800),
+          description: demoteTraceRain(id, pop, rainMm, cloudsPct),
           icon: owIconUrl(w0?.icon),
           humidity: h?.main?.humidity ?? 0,
           windSpeedKph: windKph,
           windSpeedMph: windKph * 0.621371,
           windDirectionDeg: h?.wind?.deg ?? 0,
-          precipProbability: Math.round(((h?.pop ?? 0) as number) * 100),
+          precipProbability: Math.round(pop * 100),
           visibility: (h?.visibility ?? 0) / 1000,
           uvIndex: 0,
           isDaytime: owIsDay(w0?.icon),
           fetchedAt: Date.now(),
+          owId: id,
+          cloudsPct,
+          pop,
+          rainMm,
         },
       });
     }
@@ -307,38 +365,68 @@ export function pickForecastAt(
   return best.condition;
 }
 
-// Hook: fetch the hourly forecast for a destination once (re-fetch only when the
-// destination moves > ~100 m or the data is > 30 min stale). Returns the hours;
-// the caller picks the arrival hour with pickForecastAt().
+// ── ARRIVAL WEATHER = WHAT IS THERE NOW when you are nearly there (2026-09-22) ─────────────────
+// The 3-hour forecast block is the right answer for a drive that ends in two hours; for a
+// 3-minute drive it is a model's guess standing in for a fact that is one request away. Below
+// NEAR_ARRIVAL_MS the destination's CURRENT conditions (/weather) answer, if they are fresher
+// than CURRENT_FRESH_MS; beyond it, the block containing the arrival time as before.
+export const NEAR_ARRIVAL_MS = 90 * 60 * 1000;
+export const CURRENT_FRESH_MS = 30 * 60 * 1000;
+export type DestinationWeather = { hours: ForecastHour[] | null; current: WeatherCondition | null };
+
+export function pickArrivalWeather(
+  dest: DestinationWeather | null,
+  arrivalMs: number,
+  nowMs = Date.now(),
+): { cond: WeatherCondition; src: "cur" | "fc" } | null {
+  if (!dest) return null;
+  const near = arrivalMs - nowMs <= NEAR_ARRIVAL_MS;
+  if (near && dest.current && nowMs - dest.current.fetchedAt <= CURRENT_FRESH_MS) return { cond: dest.current, src: "cur" };
+  const fc = pickForecastAt(dest.hours, arrivalMs);
+  if (fc) return { cond: fc, src: "fc" };
+  if (dest.current) return { cond: dest.current, src: "cur" };
+  return null;
+}
+
+/** The `wx-dest` receipt, bounded; `eta=` minutes to arrival, `src=` which feed answered. */
+export function noteArrivalWeather(pick: { cond: WeatherCondition; src: "cur" | "fc" } | null, arrivalMs: number, why: string): void {
+  if (!pick || _wxDestRows >= WX_RECEIPTS_MAX) return;
+  _wxDestRows += 1;
+  try { logEvent(`wx-dest why=${why} src=${pick.src} eta=${Math.round((arrivalMs - Date.now()) / 60000)} ${wxFields(pick.cond)}`); } catch {}
+}
+
+// Hook: fetch the destination's hourly forecast AND its current conditions once (re-fetch only
+// when the destination moves > ~100 m or the data is > 30 min stale). The caller picks the
+// arrival answer with pickArrivalWeather().
 export function useDestinationWeather(
   lat: number | null,
   lng: number | null,
   enabled: boolean
-): ForecastHour[] | null {
-  const [forecast, setForecast] = useState<ForecastHour[] | null>(null);
+): DestinationWeather | null {
+  const [dest, setDest] = useState<DestinationWeather | null>(null);
   const keyRef = useRef<string | null>(null);
   const lastFetchRef = useRef<number>(0);
 
   useEffect(() => {
     if (!enabled || lat == null || lng == null) {
-      setForecast(null);
+      setDest(null);
       keyRef.current = null;
       return;
     }
     const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;   // ~100 m granularity
-    const stale = Date.now() - lastFetchRef.current > 30 * 60 * 1000;
+    const stale = Date.now() - lastFetchRef.current > CURRENT_FRESH_MS;
     if (key === keyRef.current && !stale) return;
     keyRef.current = key;
     lastFetchRef.current = Date.now();
     let cancelled = false;
     (async () => {
-      const f = await fetchHourlyForecast(lat, lng, 24);
-      if (!cancelled && f) setForecast(f);
+      const [hours, current] = await Promise.all([fetchHourlyForecast(lat, lng, 24), fetchWeatherConditions(lat, lng)]);
+      if (!cancelled && (hours || current)) setDest({ hours, current });
     })();
     return () => { cancelled = true; };
   }, [enabled, lat, lng]);
 
-  return forecast;
+  return dest;
 }
 
 // ---- Daily forecast (aggregated from OpenWeather /forecast 3-hour blocks) ----

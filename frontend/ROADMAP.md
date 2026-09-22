@@ -1066,6 +1066,45 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BF `b61b18be` (2026-09-21 ~19:00 PDT, Jeff: "Yes build them and stage 2 for 80 … Ship it"; KEY_PRESENT=1 both platforms; runtime 1.29.0, code `82dc16b3`) — VOICE HEADS-UP FOR RAILWAY CROSSINGS, PLAYGROUND AND SCHOOL ZONES; LONGER SPEED-CAMERA LEAD; SPLASH SAFETY TIMEOUT.**
+  Spoken once per kind per drive, then the single speed-ding (Jeff: "Make the chime the same as the speed ding but 1 ding");
+  `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
+  `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
+  (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **COMMITTED, NOT PUBLISHED — `3d725053` (2026-09-22 ~12:15 PDT), waiting on Jeff's go.** Jeff, in caps: *"I WANT TO MAKE SURE
+  THAT #1 DOES NOT SCREW UP HOW THE ROUTING WORKS TO ESPECIALLY IN CORNERS CAUSE THEY ARE FINALLY WORKING CORRECTLY FIX ALL
+  ISSUES"* → workflow `fix-0922` (four builders + a corners-first review), then the review's rejections applied by hand.
+  - **CORNERS UNTOUCHED — PROVEN.** `git diff` on poseEstimator / cornerBlend / chaseZoom / camGlide / routeTrim / routeRibbon /
+    ribbonAnchor / navAnchor / offRouteGate / nav.ts = 0 lines each; `nav_lock_test` PASS with **no relock** (43 files, 456 locks);
+    every 🔒 region hash in map.tsx unchanged; corner_blend / route_follow / pose_estimator / chase_zoom / cam_glide /
+    offroute_storm all PASS. 37/37 sim-qc, typecheck 0, eslint 0, trap-check 0, doc-check 0.
+  - **THE ROUTE IS THE CORRIDOR** (`src/aheadAlertRules.ts`, `src/aheadAlerts.ts`, unlocked): OTA-BF's first field day chimed
+    21 times on two drives, 17 for a crossing on the next street over — the 12° nose-cone swallowed a Burnaby block; four
+    verified false positives 56–90 m off (one the miniature tourist railway). Now a feature must lie within `ROUTE_GATE_M = 25`
+    of the active route's decoded polyline (read-only `activeRoute.coordinates`) and ≤ `ROUTE_CAR_MAX_M = 80` of the car's
+    own projection; the cone runs only with no route and is 5° (`CONE_TAN 0.0875`, `CONE_HALF_MIN_M 25`). Replaying the day's
+    rows: **21 → 6**, all four false positives gone. Receipts: `ahead-alert … via=route|cone`; `ahead-reject id= kind= d= off=
+    lead= via= seen= rej=` (≤ 40 per trip) so a silent drive past a real crossing can be told from a drive that never had one.
+  - **`MIN_GAP_MS` stays 8 s.** The builder raised it to 45 s cross-kind; review: a speed camera 10–44 s after a school zone or
+    crossing would have gone silent for good. A cooldown alone would have removed only 29% of the day's chimes anyway.
+  - **`splash-done why=anim|safety ms=`** (`AnimatedSplash.tsx`): one row per mount, so the 09-21 safety timer finally reports
+    whether it has ever fired. Sim: `why=anim ms=1808`.
+  - **`trip-record … routeKm=` is the route as PLANNED** (`src/trips.ts` `notePlannedRoute`, keyed by the drive's start stamp,
+    first route wins; the effect in map.tsx sits OUTSIDE the locked regions). Jeff's 31 km drive had printed `routeKm=1.63` —
+    a late reroute's remnant. Credited km unchanged (odometer + current route, as before). Sim: `trip-record km=0.89 src=odo
+    routeKm=3.72` on a 3.7 km plot.
+  - **SIM SMOKE (release binary, bundle swap, iPhone 16 Pro):** boots → login → map → route → turn-by-turn at 54 km/h →
+    `ahead-ingest rail=7 … els=514 nodes=7 xing=7` (Overpass back up) → Arrived → `trip-record`. Alive throughout; no
+    `js-error` beyond the sim's pre-existing ionicons font rows (first seen 09-17); `main-gap dt=27060` is inside the sim's
+    normal range (57 s on 09-17, 48 s on 09-18 — control query).
+  - **HELD BACK (nav-locked — need Jeff's words):** (1) Olaf's phantom tier-2 dings on Hwy 91/99 (09-22 14:31 `x=80@11.3m`
+    River Road 24 m; 14:41 Burns Drive 29 m beside the Hwy 17→99 ramp; John hit the same ramp 09-16). Root cause VERIFIED: the
+    cache-edge race in `speedLimit.ts` — refetch fires 1000 m past the previous centre, radius 1500 m, at 92 km/h with a 64 s
+    Overpass fetch the own carriageway was never in the cache and the snap fell on a road beside it. The builder's
+    `SNAP_MINOR_OVER_KMH = 35` rule passed his two rows but review found the cost — tier-2 could never fire on any minor road
+    again, a 30 zone blanks at ≥ 66 km/h, no hysteresis — REVERTED, diff kept in the session scratchpad. The right fix is a
+    fetch-tunable change (earlier refetch / larger radius at highway speed) in a locked file. (2) Olaf's parked 207° facing at
+    1 km/h: `noteCourse` in map.tsx has no speed gate, so a carried phone's stale course outranked the car spot. Locked region.
 - **SHIPPED AS OTA-BE `bbdb70fd` (2026-09-21 ~01:20 PDT, Jeff: "you can fix them ...go"; KEY_PRESENT=1 both platforms; runtime 1.29.0, code `a6d355d6`) — A U-TURN NOW COSTS A ROUTE ITS RANKING.**
   Rodrigo, WhatsApp 2026-09-20 23:37: *"the app loves to send me on borderline illegal u-turns. On my last drive tonight it
   tried to make me do two u turns that weren't safe. Something I haven't experience with waze or gmaps"*; 23:46, after a week

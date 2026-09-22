@@ -3334,7 +3334,8 @@ export default function MapScreen() {
 
   // ----- Saved places: long-press the map to save Home / Work -----
   // Long-press anywhere on the map. Home / Work / Custom save the spot; "Add stop"
-  // puts it on the CURRENT drive (Jeff, 2026-08-27).
+  // puts it on the CURRENT drive (Jeff, 2026-08-27); "Route here" plots to it when there
+  // is no drive yet (Jeff, 2026-09-22).
   //
   // ⚠ ADD STOP GOES THROUGH `setStops` AND NOTHING ELSE — the same single line the
   // double-tap gesture uses. That is what keeps it inside the build-74 visited-stops
@@ -3385,13 +3386,28 @@ export default function MapScreen() {
         text: "Custom…",
         onPress: () => { setSavePlaceName(""); setSavePlaceModal({ lat: c.lat, lng: c.lng }); },
       },
-      { text: "Cancel", style: "cancel" },
     );
+    // ROUTE HERE (Jeff, 2026-09-22: "when holding the screen … not routed the 'save a spot'
+    // has 'Route Here' as a option below custom"). Only without a destination — with one,
+    // the hold already offers "Add stop here" above, and a hold must never silently replace
+    // where the driver is going. It is the dropped-pin path verbatim (the double-tap's
+    // `setDestination` with the "Dropped pin" label): routes fetch, the Drive shelf opens
+    // with Start, nothing auto-starts. Not offered mid-guidance, same rule as pin-drop.
+    if (!destination && navMode !== "turn-by-turn") {
+      buttons.push({
+        text: "Route here",
+        onPress: () => {
+          try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+          setDestination({ lat: c.lat, lng: c.lng, label: "Dropped pin" });
+        },
+      });
+    }
+    buttons.push({ text: "Cancel", style: "cancel" });
     Alert.alert(
       destination ? "This spot" : "Save this spot",
       destination
         ? "Add it to the drive you're on, or save it as a quick destination."
-        : "Set it as a quick destination for predictions and your Scout greeting.",
+        : "Set it as a quick destination for predictions and your Scout greeting — or route to it now.",
       buttons,
     );
   };

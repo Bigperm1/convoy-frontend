@@ -266,18 +266,41 @@ export default function CarDriveList(props: {
             end/arrived/shop map/add stop to the bottom replacing the current full width show
             map"). End and Arrived used to float as 50x50 squares up under the logo — two
             thumb-stretches from where the hand actually rests — and Add stop had no home on
-            this face at all. Four equal buttons in Jeff's stated order, same candy
-            construction the squares carried, so nothing new had to be invented. */}
+            this face at all. Four equal buttons, same candy construction the squares
+            carried, so nothing new had to be invented. Order + colours re-cut 2026-09-22 to
+            mirror the map drawer — see the note inside the row. */}
         <View style={styles.footerRow}>
+          {/* SAME SEQUENCE AS THE MAP DRAWER (Jeff, 2026-09-22: "match the map drawer setup …
+              far right -> end, next -> arrived, next -> add stop, far left -> show map"). The
+              drawer reads blue · green · orange · red left to right; so does this row now, so
+              the two faces of the same drive are one picture. The only swap is which job the
+              blue and the green carry: here the go-to-the-other-face button is BLUE and Add
+              stop is GREEN (his colours), on the drawer it is the reverse. End stays hard
+              right under the thumb on both. */}
           <FooterBtn
-            label="End"
-            ramp={["#FF3B5C", "#E4002B", "#B00020"]}
-            tint="#E4002B"
-            border="rgba(255,90,120,0.9)"
+            label="Show map"
+            // Blue: the middle stop is COLORS.primary so the app gains no second blue (theme.ts's
+            // ACTION discipline: one red, one green). Not a tier colour either (DESIGN.md).
+            ramp={["#4AA8FF", COLORS.primary, "#0A4DA0"]}
+            tint={COLORS.primary}
+            border="rgba(120,190,255,0.9)"
             textColor="#FFFFFF"
-            onPress={props.onEnd}
-            accessibilityLabel="End navigation"
+            onPress={props.onShowMap}
+            accessibilityLabel="Show map"
           />
+          {props.onAddStop && (
+            <FooterBtn
+              label="Add stop"
+              // The SAME green as StepDrawer's "directions" tile — one green, one blue, one
+              // orange, one red across both faces.
+              ramp={["#3DFF9A", "#1FC96E", "#0E8F4C"]}
+              tint="#1FC96E"
+              border="rgba(120,255,180,0.9)"
+              textColor="#04150B"
+              onPress={props.onAddStop}
+              accessibilityLabel="Add a stop"
+            />
+          )}
           {props.onArrived && (
             <FooterBtn
               label="Arrived"
@@ -290,34 +313,14 @@ export default function CarDriveList(props: {
             />
           )}
           <FooterBtn
-            label="Show map"
-            // The SAME green as StepDrawer's "directions" tile — one green for "go look at
-            // the map", both directions of that trip.
-            ramp={["#3DFF9A", "#1FC96E", "#0E8F4C"]}
-            tint="#1FC96E"
-            border="rgba(120,255,180,0.9)"
-            textColor="#04150B"
-            onPress={props.onShowMap}
-            accessibilityLabel="Show map"
+            label="End"
+            ramp={["#FF3B5C", "#E4002B", "#B00020"]}
+            tint="#E4002B"
+            border="rgba(255,90,120,0.9)"
+            textColor="#FFFFFF"
+            onPress={props.onEnd}
+            accessibilityLabel="End navigation"
           />
-          {props.onAddStop && (
-            <FooterBtn
-              label="Add stop"
-              // THE FOURTH COLOUR IS BLUE, and the middle stop is COLORS.primary so the app
-              // gains no second blue (same discipline as ACTION in theme.ts: one red, one
-              // green). Blue is the only hue left that a driver cannot confuse with the other
-              // three at a glance — red/orange/green are three steps along one ramp and are
-              // exactly the trio red-green colour blindness collapses, while blue separates
-              // from all of them for both protan and deutan vision. It is also not a tier
-              // colour (gold/silver are entitlements — DESIGN.md), so it costs nothing.
-              ramp={["#4AA8FF", COLORS.primary, "#0A4DA0"]}
-              tint={COLORS.primary}
-              border="rgba(120,190,255,0.9)"
-              textColor="#FFFFFF"
-              onPress={props.onAddStop}
-              accessibilityLabel="Add a stop"
-            />
-          )}
         </View>
         {hasMusic && (
           <View style={styles.musicRow}>

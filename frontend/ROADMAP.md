@@ -1071,6 +1071,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **UI, same day ~16:45 PDT (Jeff): the written-directions face's footer now mirrors the map drawer — Show map (BLUE) · Add stop
+  (GREEN) · Arrived · End, left to right (`src/CarDriveList.tsx`); and holding the map with NO route offers "Route here" under
+  Custom… (`map.tsx` handleMapLongPress, outside every locked region — it is the dropped-pin `setDestination` verbatim; not offered
+  mid-guidance, and with a destination the hold still offers "Add stop here").** Sim: the hold sheet shows Home · Work · Custom… ·
+  Route here · Cancel, and Route here plotted a 592 m route with the Drive shelf + Start. The list-face footer could NOT be rendered
+  on this bench (it needs a head unit: `carListMode = headUnitHere && …`) — same construction as 09-20, only order and paint moved.
+  Rides in tonight's publish (HEAD). Jeff's OK on the footer colours still wanted from a real CarPlay drive.
 - **FIXES 2 + 3 BUILT ON JEFF'S "do 1-3" (2026-09-22 ~14:30 PDT) — the two nav-locked items held back above; relocked on his words; OTA with `3d725053` as ONE update.**
   Workflow `fix-0922b-locked` (2 investigators → 2 builders → corners-first review + 2 adversarial refuters, 7 agents), then the
   refuters' two majors applied by the architect. **Corners: 10 locked files 0 diff, every corner gate PASS, nav_lock relocked with

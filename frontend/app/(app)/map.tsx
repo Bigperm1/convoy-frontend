@@ -40,7 +40,7 @@ import ShareSheet from "../../src/ShareSheet";
 import {
   fetchRoutes, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
-  useRouteTrafficRefresh, fetchRouteViaStops, arriveNow, countRouteUturns,
+  useRouteTrafficRefresh, fetchRouteViaStops, arriveNow, countRouteUturns, fmtUturnAt,
 } from "../../src/nav";
 import { getDepartureBearing, departureBearingSource, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot } from "../../src/locationPrivacy";
@@ -62,6 +62,7 @@ import { useVoice } from "../../src/useVoice";
 import WeatherHUD from "../../src/components/WeatherHUD";
 import { useWeatherLayer, useDestinationWeather, useDailyForecast, pickForecastAt, weatherKind } from "../../src/weatherLayer";
 import { useSpeedCameras } from "../../src/speedCameras";
+import { useAheadAlerts, resetAheadAlerts } from "../../src/aheadAlerts";
 import { useDriveBcEvents } from "../../src/driveBcEvents";
 import { useSpeedLimit, getSpeedLimitDebug } from "../../src/speedLimit";
 import { playSpeedDing } from "../../src/speedDing";
@@ -430,13 +431,10 @@ function shareRelTime(ms?: number): string {
   return `${Math.round(s / 86400)} d ago`;
 }
 
-const SPEED_CAMERA_LINES = [
-  "Speed camera ahead.",
-  "Heads up, speed camera coming up.",
-  "Speed camera ahead, watch your speed.",
-  "Camera ahead — ease off a touch.",
-  "Speed camera just ahead, keep it legal.",
-];
+// (The five SPEED_CAMERA_LINES that stood here went with the fixed-100 m camera effect on
+// 2026-09-21. A pool of variations earns its keep for a line the driver hears several times a
+// drive; the camera line is now spoken ONCE per trip and carries the live distance, so there is
+// one line and it lives with the rest of them in src/aheadAlertRules.ts — aheadLine().)
 
 // Hazard-ahead callouts keyed by hazard kind, so the phrasing fits each kind,
 // with a generic fallback for anything else.
@@ -1006,6 +1004,20 @@ export default function MapScreen() {
   // Drives both the map pins and the Nova proximity voice alert below.
   const speedCamerasEnabled = (settings as any).speedCameras !== false;
   const speedCameras = useSpeedCameras(coords?.lat ?? null, coords?.lng ?? null, speedCamerasEnabled);
+  // ── AHEAD-ALERTS (2026-09-21) ─────────────────────────────────────────────────────────────
+  // Jeff: "Yes build them and stage 2 for 80. Make the chime the same as the speed ding but 1
+  // ding. Give the speed cameras and playground/school zones a good heads up for distance and
+  // time." Railway crossings, school zones and playground zones — plus the cameras above, which
+  // this hook took over from the old fixed-100 m effect that used to live further down this file
+  // (its `map-speedcam-voice-alert` NAV-LOCK region is gone with it; the logic is now pure, in
+  // src/aheadAlertRules.ts, gated by tools/sim-qc/ahead_alerts_test.mts).
+  //
+  // ⛔ THIS HOOK LIVES HERE, beside the camera feed it consumes and far above
+  // `if (!coords) return <Locating…>`. Below that guard it would change the hook count the moment
+  // the first fix lands — "Rendered more hooks than during the previous render", two seconds after
+  // launch. The zone data rides src/speedLimit.ts's existing Overpass round trip, so there is no
+  // fetch to mount here.
+  useAheadAlerts(coords?.lat ?? null, coords?.lng ?? null, coords?.course ?? null, coords?.speed ?? null, speedCameras, navMuted);
   // Official BC road events (DriveBC Open511) — accidents/construction/closures.
   const roadIncidentsEnabled = (settings as any).roadIncidents !== false;
   const roadEventsAll = useDriveBcEvents(coords?.lat ?? null, coords?.lng ?? null, roadIncidentsEnabled);
@@ -1451,7 +1463,13 @@ export default function MapScreen() {
           const d = r?.duration_in_traffic_s ?? r?.duration_s;
           return `${b != null ? Math.round(b) : '?'}/${typeof d === 'number' ? Math.round(d) : '?'}s/u${countRouteUturns(r)}`;
         }).join(',');
-        logEvent(`depart-rank constrained=${constrained} fsrc=${departureBearingSource()} n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} uturns=${countRouteUturns(sorted[0])} cands=${_cands}`);
+        // uAt= is the distance to the chosen route's FIRST U-turn, "-" when it has none
+        // (2026-09-21). uturns= alone cannot separate the two cases this ranker treats
+        // completely differently: a U-turn inside EARLY_UTURN_M loses the route its forward
+        // status outright, while one further out only pays UTURN_PENALTY_S. Reading uAt
+        // against 600 says which rule was in play on any row, Rodrigo's 400 m reversal
+        // included.
+        logEvent(`depart-rank constrained=${constrained} fsrc=${departureBearingSource()} n=${raw.length} facing=${typeof facing === 'number' ? Math.round(facing) : 'null'} chosenBr=${_b0 != null ? Math.round(_b0) : 'null'} off=${_off} uturns=${countRouteUturns(sorted[0])} uAt=${fmtUturnAt(sorted[0])} cands=${_cands}`);
       } catch {}
       // Color-rank: green (fastest) → orange (mid) → red (slowest). Cast to
       // any so we can attach an extra `color` field without modifying the
@@ -3020,6 +3038,15 @@ export default function MapScreen() {
   // TRUE, and this only disarms on the false edge.
   useEffect(() => { if (!carListMapOverride) setStopPinMode(false); }, [carListMapOverride]);
 
+  // ── A NEW DRIVE IS A NEW SET OF ALERTS (review, 2026-09-21) ──────────────────────
+  // The ahead-alert state — which features have been called out, and which KINDS have had
+  // their spoken introduction — only cleared itself on a 10-minute gap between fixes
+  // (src/aheadAlerts.ts TRIP_GAP_MS). So End, then a new destination five minutes later,
+  // carried the old trip's memory forward: a school zone you were told about on the way out
+  // only dinged on the way back, with no words. Every mode change is a new drive's worth of
+  // alerts. It is exported for exactly this and was wired to nothing.
+  useEffect(() => { resetAheadAlerts(); }, [navMode]);
+
   // HEAT PROBE — one row per 60 s of guidance. Jeff's 2-hour drive on build 73 ended
   // with the phone too hot to charge, and the analysis that followed is arithmetic, not
   // measurement: it assumes rAF runs at 60 Hz, when app.json sets
@@ -4286,26 +4313,16 @@ export default function MapScreen() {
   useEffect(() => () => { if (passPromptTimer.current) clearTimeout(passPromptTimer.current); }, []);
 
   // ----- Speed-camera proximity voice alert (Nova) -----
-  // Announce ONCE when we come within ~100 m of a fixed speed camera while
-  // actually moving (>= 25 km/h); re-arm a camera only after we've left a wider
-  // ~600 m radius so a return trip past it can alert again. Respects the nav
-  // mute toggle and the Speed Cameras setting.
-  const announcedCamsRef = useRef<Set<string>>(new Set());
-  // 🔒 NAV-LOCK begin map-speedcam-voice-alert — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
-  useEffect(() => {
-    if (!coords || !speedCamerasEnabled || speedCameras.length === 0) return;
-    const kmh = (coords.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
-    const announced = announcedCamsRef.current;
-    for (const c of speedCameras) {
-      const dM = distanceKm(coords.lat, coords.lng, c.lat, c.lng) * 1000;
-      if (dM > 600) { announced.delete(c.id); continue; }   // re-arm once well past
-      if (dM <= 100 && kmh >= 25 && !announced.has(c.id)) {
-        announced.add(c.id);
-        if (!navMuted) { try { announce(pick(SPEED_CAMERA_LINES)); } catch {} }
-      }
-    }
-  }, [coords?.lat, coords?.lng, speedCameras, speedCamerasEnabled, navMuted]);
-  // 🔒 NAV-LOCK end map-speedcam-voice-alert
+  // ⛔ GONE FROM THIS FILE, 2026-09-21, WITH JEFF'S SAY-SO: "Give the speed cameras and
+  // playground/school zones a good heads up for distance and time."
+  //
+  // What stood here (inside the `map-speedcam-voice-alert` NAV-LOCK region, now removed with it)
+  // announced a camera at a FIXED 100 m with a 600 m re-arm — 7.2 seconds of warning at 50 km/h
+  // and 3.6 at 100, which is the complaint. Cameras now go through useAheadAlerts (mounted beside
+  // the useSpeedCameras feed near the top of this component) on the same speed-scaled 20-second
+  // lead as the new railway / school / playground alerts, and the decision itself is pure code in
+  // src/aheadAlertRules.ts under tools/sim-qc/ahead_alerts_test.mts — a better home for it than an
+  // inline effect in a 6,300-line file.
 
   // ----- Hazard / police proximity voice alert (Nova) -----
   // Mirror of the speed-camera alert, but for community hazards: announce ONCE

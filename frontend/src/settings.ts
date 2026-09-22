@@ -120,6 +120,18 @@ widebodyRetiredMigrated?: boolean;
 // "on by default, off only if explicitly turned off" AFTER this flag is stored.
 alertDefaultsMigrated?: boolean;
 speedCameras: boolean;
+// ── AHEAD-ALERTS (2026-09-21, Jeff: "Yes build them and stage 2 for 80") ────────────────────
+// Railway crossings, school zones and playground zones called out ahead of the car by
+// src/aheadAlerts.ts. Each kind is SPOKEN the first time it is met in a trip and is a single
+// speed-ding after that, so these toggles are about whether a kind is interesting at all, not
+// about how loud it is. undefined → ON.
+// NO MIGRATION FLAG NEEDED, and that is not an oversight: load() does
+// `{ ...DEFAULT_SETTINGS, ...parsed }` (see below), so a key an existing install has never
+// stored takes its default on the next launch. weatherOnMigrated / alertDefaultsMigrated exist
+// because those keys ALREADY had a stored value that had to be overwritten once.
+alertRailway?: boolean;
+alertSchoolZones?: boolean;
+alertPlaygroundZones?: boolean;
 // Official BC road events (DriveBC Open511): accidents, construction, closures,
 // weather. Map pins + a Scout callout for major/moderate. BC-only; auto-gated by
 // location. undefined → on.
@@ -303,6 +315,14 @@ widebodyRetiredMigrated: undefined,
 alertDefaultsMigrated: true,
 speedAlertMode: 'ding',   // speed dings ON at first launch (Jeff, 2026-09-17) — see the type comment
 speedCameras: true,   // speed cameras ON at first launch (Jeff, 2026-09-17)
+// All three ON at first launch (Jeff, 2026-09-21: "Yes build them"). Railway is the one he named
+// as needing the anti-nagging rule — ~4 crossings on his commute, ~8 on a day — and it stays on
+// because a crossing you did not expect is the whole point. School and playground are quieter than
+// that by construction: playground only speaks between dawn and dusk, school only Mo-Fr inside the
+// BC school-year table, and each kind speaks once per trip and dings after.
+alertRailway: true,
+alertSchoolZones: true,
+alertPlaygroundZones: true,
 roadIncidents: false,  // OFF at first launch (Jeff, 2026-07-25)
 showPlacePins: true,
 showNearby: true,

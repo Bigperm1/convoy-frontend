@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { snapSpeedLimit, SNAP_TOLERANCE_M, type LimitWay, type SnapResult } from "./speedLimitSnap";
 import { logEvent } from "./crashBreadcrumb";
+import { ingestAheadElements } from "./aheadAlertStore";
 // ── THE ROAD YOU ARE ON RUNS THE WAY YOU ARE GOING (2026-09-10) ──────────────────────────
 // Jeff's 09:01:55 double ding at 95 km/h: `speed-alert tier=2 over=45 limit=50` under the Clearbrook
 // Road overpass on the Trans-Canada. The nearest tagged way by flat distance at a crossing IS the
@@ -112,8 +113,31 @@ export async function fetchSpeedLimitWaysAround(
   lng: number,
   radiusM = FETCH_RADIUS_M
 ): Promise<LimitWay[] | null> {
+  // ── ONE ROUND TRIP, FOUR ANSWERS (2026-09-21) ──────────────────────────────────────────────
+  // This used to be the bare `way(around:R)[maxspeed][highway]`. Jeff asked for railway-crossing,
+  // school-zone and playground-zone heads-ups ("Yes build them and stage 2 for 80"), and the
+  // honest place to get them is the query that is ALREADY going out on every drive — Overpass is
+  // free, shared and rate-limited, and this app already runs three feeds against it. So the query
+  // became a union of four clauses; the three new ones cost no extra request, no extra connection
+  // and no extra JSON parse worth measuring.
+  //
+  // MEASURED 2026-09-21, live, at Jeff's 09-20 departure point (49.242496,-123.003784), r=1500:
+  // the old query returned 190 ways; the union returns 192 elements. Two. (25 school-zone ways
+  // there already carried a plain `maxspeed` and were in the payload all along.)
+  //
+  // ⛔ IT CANNOT BREAK THE LIMIT PARSE, by construction: the loop below runs parseMaxspeedKmh on
+  // each element's `maxspeed` and `continue`s when it does not yield a number, so a level-crossing
+  // NODE or a school-zone way with only `maxspeed:conditional` is skipped exactly the way an
+  // untagged way always was. The new data is taken out through ingestAheadElements(), which
+  // swallows its own errors.
+  const around = `around:${Math.round(radiusM)},${lat},${lng}`;
   const query =
-    `[out:json][timeout:25];way(around:${Math.round(radiusM)},${lat},${lng})[maxspeed][highway];out tags geom;`;
+    `[out:json][timeout:25];(` +
+    `way(${around})[maxspeed][highway];` +
+    `way(${around})["maxspeed:conditional"];` +
+    `way(${around})[hazard=school_zone];` +
+    `node(${around})[railway=level_crossing];` +
+    `);out tags geom;`;
   const body = "data=" + encodeURIComponent(query);
   let lastStatus = "";
   // Try each Overpass mirror in turn. overpass-api.de intermittently rejects
@@ -140,8 +164,16 @@ export async function fetchSpeedLimitWaysAround(
       if (!res.ok) { continue; }                          // this mirror rejected — try the next
       const json: any = await res.json();
       const els: any[] = Array.isArray(json?.elements) ? json.elements : [];
+      // The ahead-alerts half of the union (src/aheadAlertStore.ts). Runs before the limit parse so
+      // a mirror that answers slowly still populates both; it never throws, so the posted-limit
+      // sign cannot be taken down by an alert feature.
+      ingestAheadElements(els);
       const ways: LimitWay[] = [];
       for (const e of els) {
+        // The union's three extra clauses do not filter on [highway], so this restores the exact
+        // set the old `way(around)[maxspeed][highway]` query returned — the limit path sees the
+        // same ways it always did, element for element.
+        if (e?.type !== "way" || typeof e?.tags?.highway !== "string") continue;
         const sp = parseMaxspeedKmh(e?.tags?.maxspeed);
         if (sp == null) continue;
         const geom = Array.isArray(e.geometry)

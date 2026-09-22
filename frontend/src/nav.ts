@@ -192,6 +192,34 @@ export function countRouteUturns(r: any): number {
   return n;
 }
 
+// HOW FAR AHEAD IS IT? — metres from the route's start to the first U-turn, null when there
+// is none (2026-09-21). The count alone cannot tell a 400 m reversal, which is what
+// EARLY_UTURN_M in departureBearing.ts exists to demote, from a U-turn 5 km down an
+// otherwise sensible line — Jeff's 08:09 reroute installed `uturns=1` and the row could not
+// say which kind it was. Same NavStep shape and the same "<type>|<modifier>" key as the
+// counter above, so it lives here for the same import-cycle reason; departureBearing.ts's
+// hasEarlyUturn is now a threshold on this, not a third walker.
+export function firstUturnMeters(r: any): number | null {
+  const steps = r?.steps;
+  if (!Array.isArray(steps)) return null;
+  let run = 0;
+  for (const s of steps) {
+    const k = typeof s?.maneuver === "string" ? s.maneuver.toLowerCase() : "";
+    if (k === "uturn" || k.endsWith("|uturn")) return run;
+    const d = s?.distance_m;
+    run += typeof d === "number" && Number.isFinite(d) ? d : 0;
+  }
+  return null;
+}
+
+// The `uAt=` field these breadcrumbs print (src/nav.ts route-swap, map.tsx depart-rank):
+// rounded metres, or "-" for "this route asks for no U-turn at all" — the house sentinel,
+// as on ribbon-trim's lag=/hint=. Never 0 or -1, which read as distances.
+export function fmtUturnAt(r: any): string {
+  const m = firstUturnMeters(r);
+  return m == null ? "-" : String(Math.round(m));
+}
+
 // ---- Route preferences ----
 export type AvoidPrefs = {
   tolls?: boolean;
@@ -1211,7 +1239,10 @@ export function useTurnByTurn(
           // in these rows to one that went straight on — steps/coords/carSeg/anchored are the
           // same either way. Now a `uturns=1` here can be matched against the depart-rank
           // cands= list to say whether WE chose it or Mapbox gave us no choice.
-          logEvent(`route-swap steps=${steps.length} coords=${coords.length} carSeg=${a.carSeg} onRoute=${a.onRoute ? 1 : 0} anchored=${idx} uturns=${countRouteUturns(route)}`);
+          // uAt= is how far ahead the first one sits (2026-09-21): Jeff's 08:09 reroute
+          // installed `uturns=1` and nothing in the row said whether that was an immediate
+          // reversal off the mark or a legitimate turnaround kilometres down the route.
+          logEvent(`route-swap steps=${steps.length} coords=${coords.length} carSeg=${a.carSeg} onRoute=${a.onRoute ? 1 : 0} anchored=${idx} uturns=${countRouteUturns(route)} uAt=${fmtUturnAt(route)}`);
         }
       } catch {}
       const reAnchored: TbtState = { ...stateRef.current, active: true, stepIndex: idx };
@@ -2076,26 +2107,31 @@ function scrubDoubledInstruction(text: string): string {
   return head || text;
 }
 
-function speak(text: string, opts?: { priority?: boolean }) {
-  if (!text || !text.trim()) return;
+// Returns TRUE only when the line actually reached the queue. There are five silent drop paths
+// below (empty, Nova off, greeting in flight, the 1.5 s rate gate, same-text dedupe) and until
+// 2026-09-21 none of them told the caller anything — so a caller that latches "I have said this"
+// could latch on a line the driver never heard. The ahead-alert introduction does exactly that
+// (src/aheadAlerts.ts), so it needs the answer. Every existing caller ignores the return.
+function speak(text: string, opts?: { priority?: boolean }): boolean {
+  if (!text || !text.trim()) return false;
   text = scrubDoubledInstruction(text);
   // Master Nova voice switch (settings). Off → nothing speaks at all.
-  if (getSettings().novaVoice === false) return;
+  if (getSettings().novaVoice === false) return false;
   // While the route-start greeting is in flight, park the latest turn callout
   // so the greeting always leads (it's replayed once the greeting + pause end).
-  if (_greetingInFlight) { _heldSpeech = text; return; }
+  if (_greetingInFlight) { _heldSpeech = text; return false; }
   const now = Date.now();
   // The 1.5 s rate gate protects against callout spam; the ARRIVAL line is the one
   // sentence that must never lose to it (2026-09-03: it did, 1.013 s after the prepare
   // line). `priority` skips only this gate.
-  if (speakRateSkips(now, _lastSpoke, !!opts?.priority)) { try { logEvent(`tts-skip why=rate len=${text.length}`); } catch {} return; }
+  if (speakRateSkips(now, _lastSpoke, !!opts?.priority)) { try { logEvent(`tts-skip why=rate len=${text.length}`); } catch {} return false; }
   // Same-phrase dedupe: kills the "Turn left, turn left" double that happens when
   // the Routes API splits one maneuver into two adjacent same-direction steps and
   // each fires the identical bare verb a couple seconds apart. Only EXACT repeats
   // within the window are dropped — prepare callouts ("In 300 m, turn left onto X")
   // and opposite turns differ as strings, so real guidance is untouched. Window is
   // short enough that two genuinely distinct identical turns can't fall inside it.
-  if (text === _lastText && now - _lastTextAt < SAME_TEXT_DEDUPE_MS) return;
+  if (text === _lastText && now - _lastTextAt < SAME_TEXT_DEDUPE_MS) return false;
   _lastText = text;
   _lastTextAt = now;
   _lastSpoke = now;
@@ -2106,6 +2142,7 @@ function speak(text: string, opts?: { priority?: boolean }) {
   // tts-cut / tts-skip make each utterance's fate a one-query answer.
   try { logEvent(`tts-say len=${text.length} q=${ttsQueue.length} playing=${ttsPlaying ? 1 : 0}`); } catch {}
   if (!ttsPlaying) drainTtsQueue();
+  return true;
 }
 
 let _arrivalDrainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2168,8 +2205,9 @@ function resetSpeakGate() {
 
 // General-purpose Nova announcement (e.g. hazard-report confirmations) — uses
 // the same queue as turn instructions so nothing ever talks over anything else.
-export function announce(text: string) {
-  speak(text);
+/** Speak a non-maneuver line. Returns TRUE only if it reached the queue — see speak(). */
+export function announce(text: string): boolean {
+  return speak(text);
 }
 
 // Stop nav speech immediately — clears the queue AND the in-flight playback so

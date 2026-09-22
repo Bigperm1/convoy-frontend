@@ -50,7 +50,7 @@
 // timeout or a throw all return null, and a null simply means "rank by ETA alone",
 // i.e. exactly today's behaviour.
 import * as Location from "expo-location";
-import { haversineMeters, countRouteUturns } from "./nav";
+import { haversineMeters, countRouteUturns, firstUturnMeters } from "./nav";
 import { carSpot } from "./locationPrivacy";
 import { spotFacing } from "./carSpotTrust";
 
@@ -214,20 +214,17 @@ export const UTURN_PENALTY_S = 120;
 // can easily go forward") — a clean forward route still beats a clean backward one every time.
 export const EARLY_UTURN_M = 600;
 
-// Does the route ask for a U-turn inside the first EARLY_UTURN_M metres? Walks NavStep
-// distances in order and stops at the first U-turn key.
+// Does the route ask for a U-turn inside the first EARLY_UTURN_M metres? Nothing but a
+// threshold on firstUturnMeters (src/nav.ts), which walks the NavStep distances in order and
+// stops at the first U-turn key. It was this file's own inline walk until 2026-09-21, when
+// the `uAt=` breadcrumb needed the same number on the route-swap row and there was no way to
+// import it back out without closing a cycle — so the walk moved next to countRouteUturns,
+// where the NavStep shape is already documented, and this became the one-line caller. No
+// behaviour change: the old loop's `if (run > EARLY_UTURN_M) return false` was an early exit,
+// not a rule, and a later U-turn already returned false through the same comparison.
 export function hasEarlyUturn(r: any): boolean {
-  const steps = r?.steps;
-  if (!Array.isArray(steps)) return false;
-  let run = 0;
-  for (const s of steps) {
-    const k = typeof s?.maneuver === "string" ? s.maneuver.toLowerCase() : "";
-    if (k === "uturn" || k.endsWith("|uturn")) return run <= EARLY_UTURN_M;
-    const d = s?.distance_m;
-    run += typeof d === "number" && Number.isFinite(d) ? d : 0;
-    if (run > EARLY_UTURN_M) return false;
-  }
-  return false;
+  const m = firstUturnMeters(r);
+  return m != null && m <= EARLY_UTURN_M;
 }
 
 // Order routes so the FASTEST one heading roughly the way the car already faces comes

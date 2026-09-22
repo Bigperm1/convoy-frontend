@@ -175,6 +175,17 @@
         "src/nav.ts: code bf6dc1895f38 → e347421e1a21",
         "app/(app)/map.tsx#map-plot-depart-facing-pick region 215b808ef63d → 5c45515974f5"
       ]
+    },
+    {
+      "at": "2026-09-21",
+      "quote": "Jeff, 2026-09-21: Yes build them and stage 2 for 80. Make the chime the same as the speed ding but 1 ding. Give the speed cameras and playground/school zones a good heads up for distance and time.",
+      "changes": [
+        "src/departureBearing.ts: code 046873f65e90 → 9487637a1eaf",
+        "src/nav.ts: code e347421e1a21 → ffbc1be136f8",
+        "src/speedLimit.ts: code 990694b1094e → 20f8e441db31",
+        "app/(app)/map.tsx#map-plot-depart-facing-pick region 5c45515974f5 → 3aa8ba0dbe1e",
+        "app/(app)/map.tsx#map-speedcam-voice-alert REGION REMOVED"
+      ]
     }
   ],
   "files": {
@@ -223,7 +234,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/departureBearing.ts": {
-      "hash": "sha256:046873f65e9067a9194a668f46b51d65666fbcde4e59412e14dcc508cc0895de",
+      "hash": "sha256:9487637a1eafea05ab432c30dcf1ed19c0de04d670e3a23e0cbfdc510a8ae901",
       "why": "pure drive-engine module: code-locked"
     },
     "src/carSpotTrust.ts": {
@@ -271,7 +282,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/nav.ts": {
-      "hash": "sha256:e347421e1a21d5365d60e8769259c11510354ae31d18160cb0f275f9f069ee75",
+      "hash": "sha256:ffbc1be136f8d2b7df93ff92f9312650e7a5c3908634b41d71e4671fd8db60ce",
       "why": "pure drive-engine module: code-locked"
     },
     "src/navNotification.ts": {
@@ -279,7 +290,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/speedLimit.ts": {
-      "hash": "sha256:990694b1094ebf7b7ecad802546e7ad92303bf05f9059bb9d1794f746b6ea9a0",
+      "hash": "sha256:20f8e441db315d2c9a5404caf619bbcb79b95c699a93613e248c2b33b88cd370",
       "why": "pure drive-engine module: code-locked"
     },
     "src/pitstop.ts": {
@@ -632,7 +643,7 @@
         "map-route-round-trip": "sha256:c50538752c6cbcec2bd08c49acd252524f1b2b9acd4a3ba8fd45778a97e10f85",
         "map-plot-clear-no-dest": "sha256:0e9cc2362c4d793d2a43847dafca0a34f8c5f94ec8151b166cf507d0298a830d",
         "map-plot-via-stops": "sha256:1da71459cf26aa6c6113a0aa6fbed98d1ff9dd737facb391d20d8225b203de46",
-        "map-plot-depart-facing-pick": "sha256:5c45515974f589ff2ba05c95a0c25f1953f9830fca6fc628c0cb96ed4315f3d4",
+        "map-plot-depart-facing-pick": "sha256:3aa8ba0dbe1efc2e4641bd3e2ae782b29b89e909479ae1c48cda29f0aec54a2b",
         "map-plot-scenic-alternate": "sha256:ffd22eab074b49cbc809b8f18cbc6136612eb32e46b2be2adb65c3d9a062cbf0",
         "map-plot-announce-options": "sha256:24bacbe734a4b07b5497c37c2108f765c8aa511f75428bd70b1c590051fd1ab4",
         "map-plot-cruise-autoselect": "sha256:8cef7ddb16e615068dedbc0bd03e123a6832c3454542b089b444a9e8ec1674a4",
@@ -669,7 +680,6 @@
         "map-fgwatch-fix-ingest": "sha256:490f7e229d35579fff52fe11496dc8bd54e3a1caa8c5cf6488fd1db2fc84106e",
         "map-speed-unit-border-detect": "sha256:b14515d3b1cc07d251e79265c2cd86295646a2943d5a1a2ba37aef5f7f3b067a",
         "map-refresh-fix-into-coords": "sha256:1af81bcb14f048c7e3e323665d07c6ede8ead4a0012bf8e7e5df8a2e8e08a867",
-        "map-speedcam-voice-alert": "sha256:58f277226f4033155b9752d327c1cfb909c32104409d1f0d3f82a9aed9d68d7f",
         "map-selfcar-pin-separation": "sha256:ac3e8b6fd7520da91cff696ed881cd6919bfae48b0a5eb673742fe9479db835e",
         "map-carspot-driving-feed": "sha256:2ce5364599c6285c40c7b4043bddc422ca075d8e5a651e704caacdbf4f1870c0",
         "map-selfcar-share-decision": "sha256:74598d647643ac051e174942d4cd381ccf9d0a145427dda1fe4f624589fae745",

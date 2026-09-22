@@ -36,7 +36,19 @@ export default function MapLayersPage() {
               3.1× over, and the exact behaviour they block for. */}
         <ToggleRow icon="cloudy" iconColor="#5AC8FA" title="Weather" subtitle="Current conditions in the map HUD — temperature, wind & precipitation" value={settings.showWeatherLayer} onChange={(v) => setSettings({ showWeatherLayer: v })} />
         <Divider />
-        <ToggleRow icon="camera" iconColor="#FF453A" title="Speed cameras" subtitle="Show fixed speed cameras and get a Scout voice alert as you approach (OpenStreetMap)" value={settings.speedCameras !== false} onChange={(v) => setSettings({ speedCameras: v })} feature="speed_cameras" />
+        <ToggleRow icon="camera" iconColor="#FF453A" title="Speed cameras" subtitle="Show fixed speed cameras and get a Scout heads-up about 20 seconds before you reach one (OpenStreetMap)" value={settings.speedCameras !== false} onChange={(v) => setSettings({ speedCameras: v })} feature="speed_cameras" />
+        <Divider />
+        {/* AHEAD-ALERTS (2026-09-21, Jeff: "Yes build them and stage 2 for 80. … Give the speed
+            cameras and playground/school zones a good heads up for distance and time."). Same
+            20-second lead as the cameras above, same single speed-ding after the first time a kind
+            comes up in a trip — see src/aheadAlerts.ts. The school subtitle says "when school's in"
+            for the same reason the spoken line does: there is no machine-readable BC school
+            calendar, so the app must not claim the limit is in force. */}
+        <ToggleRow icon="train" iconColor="#FFD60A" title="Railway crossings" subtitle="Scout calls out a level crossing ahead — spoken the first time each drive, a single ding after that" value={settings.alertRailway !== false} onChange={(v) => setSettings({ alertRailway: v })} />
+        <Divider />
+        <ToggleRow icon="school" iconColor="#FF9F0A" title="School zones" subtitle="Heads-up for a marked school zone ahead, weekdays 8am–5pm during the school year (OpenStreetMap)" value={settings.alertSchoolZones !== false} onChange={(v) => setSettings({ alertSchoolZones: v })} />
+        <Divider />
+        <ToggleRow icon="happy" iconColor="#30D158" title="Playground zones" subtitle="Heads-up for a playground zone ahead — 30 km/h dawn to dusk in BC, worked out on the phone from the sun" value={settings.alertPlaygroundZones !== false} onChange={(v) => setSettings({ alertPlaygroundZones: v })} />
         <Divider />
         <ToggleRow icon="warning" iconColor="#FF9F0A" title="Road incidents" subtitle="Official BC accidents, construction & closures with a Scout callout for major ones (DriveBC). British Columbia only." value={settings.roadIncidents !== false} onChange={(v) => setSettings({ roadIncidents: v })} feature="road_incidents" />
         {settings.roadIncidents !== false && (

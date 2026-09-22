@@ -86,6 +86,33 @@ async function saveTrips(list: Trip[]): Promise<void> {
   }
 }
 
+// ── THE ROUTE AS PLANNED AT START (2026-09-22) ───────────────────────────────────────
+// `routeKm=` on the trip-record row was read off the CURRENT route object at bank time.
+// Jeff's 31 km drive today logged `trip-record km=31.21 src=odo routeKm=1.63`: a reroute
+// near arrival had swapped in its 1.6 km remnant, and the remnant was printed as "the
+// route". Credited distance is the odometer, so the club board was right — the receipt
+// was lying. The planned length is captured here instead, once per drive, keyed by the
+// same start stamp recordDriveNow (app/(app)/map.tsx) banks under: the FIRST route seen
+// for a stamp wins, a reroute's replacement is ignored, and a new drive (new stamp)
+// simply supersedes the slot. Keyed rather than cleared because there is no unlocked
+// hook to clear it on a drive that ends without banking, and a stale entry can never
+// match a later drive's stamp. Module state, so a drive that began in another JS context
+// (CarPlay-first) has no capture and falls back to the caller's route — as before.
+let _plannedRoute: { startedAt: number; distanceM: number } | null = null;
+
+/** The route a drive STARTED on. First call per startedAt wins; later ones (reroutes) are ignored. */
+export function notePlannedRoute(startedAt: number, distanceM: number): void {
+  if (!(Number.isFinite(startedAt) && startedAt > 0)) return;
+  if (!(Number.isFinite(distanceM) && distanceM > 0)) return;
+  if (_plannedRoute && _plannedRoute.startedAt === startedAt) return;
+  _plannedRoute = { startedAt, distanceM };
+}
+
+/** Planned metres captured for this stamp, or 0 when nothing was (the drive began elsewhere). */
+function plannedRouteM(startedAt: number): number {
+  return _plannedRoute && _plannedRoute.startedAt === startedAt ? _plannedRoute.distanceM : 0;
+}
+
 /**
  * Record a completed drive. Called on ARRIVAL, from the map's onArrive.
  *
@@ -99,7 +126,11 @@ async function saveTrips(list: Trip[]): Promise<void> {
  */
 export async function recordTrip(input: {
   startedAt: number;
-  /** The ROUTE's planned distance. Used only when no odometer reading is available. */
+  /**
+   * The CURRENT route's distance at bank time — after a reroute, only the remaining leg.
+   * Used only when no odometer reading is available; the `routeKm=` receipt prefers the
+   * length captured by notePlannedRoute() at nav start.
+   */
   distanceM: number;
   /**
    * Metres the car actually COVERED, from src/tripOdometer.ts. When present this wins:
@@ -120,7 +151,13 @@ export async function recordTrip(input: {
   try {
     const endedAt = Date.now();
     const startedAt = Number.isFinite(input.startedAt) && input.startedAt > 0 ? input.startedAt : endedAt;
-    const routeM = Number.isFinite(input.distanceM) && input.distanceM > 0 ? input.distanceM : 0;
+    const routeNowM = Number.isFinite(input.distanceM) && input.distanceM > 0 ? input.distanceM : 0;
+    // The receipt's `routeKm=`: the route as PLANNED at start when this context saw it
+    // (notePlannedRoute, 2026-09-22), else the caller's route. The CREDIT below still runs
+    // on routeNowM + the odometer exactly as before — this changes what is printed, not
+    // what is banked.
+    const plannedM = plannedRouteM(startedAt);
+    const routeM = plannedM > 0 ? plannedM : routeNowM;
     // >= 0, NOT > 0 (Codex review 2026-09-09). Treating a measured ZERO as "no reading"
     // fell straight back to the planned route distance — so a driver who plots a 5 km route,
     // never moves, and presses End was still credited 5 km, at an average of 150 km/h that
@@ -135,7 +172,7 @@ export async function recordTrip(input: {
     // 445 km/h, 68.9 km he never covered, all of it on the club leaderboard. The headless
     // route figure is used ONLY when no reading exists at all (a drive that began in another
     // JS context), and the plausibility guard below still covers that case.
-    const { m: distanceM, src } = creditedDistanceM(routeM, input.travelledM);
+    const { m: distanceM, src } = creditedDistanceM(routeNowM, input.travelledM);
     const durationS = Number.isFinite(input.durationS) && input.durationS > 0
       ? input.durationS
       : Math.max(0, (endedAt - startedAt) / 1000);

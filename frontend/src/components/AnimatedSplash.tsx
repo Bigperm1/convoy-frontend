@@ -10,6 +10,7 @@
 // (with the new splash baked in) removes that first frame entirely.
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, Easing, StyleSheet } from 'react-native';
+import { logEvent } from '../crashBreadcrumb';
 
 // The animation, in one place so the safety timeout below can do arithmetic against it.
 const HOLD_MS = 1300;
@@ -46,19 +47,30 @@ export default function AnimatedSplash({ onDone }: { onDone?: () => void }) {
   // Two ways out now, and they race: whichever arrives second must be a no-op. A ref, not
   // state, because the loser reads it in the same tick the winner set it.
   const doneRef = useRef(false);
+  // When this mount began, so the receipt below can say how long the splash actually stood.
+  const mountedAtRef = useRef(Date.now());
 
   useEffect(() => {
-    const dismiss = () => {
+    // ── ONE RECEIPT PER MOUNT, NAMING WHICH EXIT WON (2026-09-22) ──────────────────────
+    // The safety timer went in blind on 09-21: nothing in the field says whether it has EVER
+    // fired, so "the black screen is not the splash" stays an argument instead of a count.
+    // `why=anim` at ~1750 ms is a normal boot; `why=safety` at ~3000 ms is the stuck case the
+    // timer exists for. doneRef bounds it to one row per mount however many times the effect
+    // re-runs (onDone is an inline arrow in app/_layout.tsx, so it re-runs on every root
+    // render). Plain logEvent, not the reliable twin: the row is emitted on EVERY launch, so a
+    // missing row means the insert was dropped, never that a path was silently skipped.
+    const dismiss = (why: 'anim' | 'safety') => {
       if (doneRef.current) return;
       doneRef.current = true;
+      logEvent(`splash-done why=${why} ms=${Date.now() - mountedAtRef.current}`);
       setGone(true);
       onDone?.();
     };
     Animated.sequence([
       Animated.delay(HOLD_MS),
       Animated.timing(fade, { toValue: 0, duration: FADE_MS, easing: Easing.in(Easing.ease), useNativeDriver: true }),
-    ]).start(({ finished }) => { if (finished) dismiss(); });
-    const safety = setTimeout(dismiss, SAFETY_MS);
+    ]).start(({ finished }) => { if (finished) dismiss('anim'); });
+    const safety = setTimeout(() => dismiss('safety'), SAFETY_MS);
     return () => clearTimeout(safety);
   }, [fade, onDone]);
 

@@ -347,13 +347,37 @@ export const AHEAD_MIN_SPEED_KMH = 15;
 // a road that never touches the tracks. The existing hazard alert even says so in its own comment
 // ("distance-only (no heading cone yet) … a forward-cone filter can be added later").
 //
-// So: along-track must be ahead and inside the lead, and cross-track must be inside a cone that
-// opens at 12° from a 30 m half-width at the bumper — 30 m matches speedLimitSnap's
-// SNAP_TOLERANCE_M ("how close a road must be to count as the road you're on"), and 12° over 450 m
-// is ±126 m, i.e. the road you are on plus its immediate frontage, not the next street over. That
-// is ~1/15th the area of the circle.
-export const CONE_HALF_MIN_M = 30;
-export const CONE_TAN = 0.2126;   // tan(12°)
+// ⛔ THE 12° CONE WAS THE NEXT STREET OVER (2026-09-22, this feature's first field day, OTA
+// 01a0c6c4). It opened at 30 m + along × tan 12°: a 73 m half-width at 200 m, 94 m at 300, 126 m
+// at 450 — and a Burnaby block is 100–200 m. Measured from crash_reports that day: 21 alerts on
+// two drives (Olaf f1gdt9 13, Say Phin zziett 8), 21/21 kind=railway, `off=` mean 62 m / median 58
+// / max 109, only 4 of 21 within 30 m of the driving line. Four fit an exact OSM node to 1–10 m
+// once the fix is moved along its heading to the alert instant: a rail spur across a service road
+// (n3423769912, off 57), a MINIATURE TOURIST railway over a service path (n12960108594, off 105 —
+// Olaf was chimed at for a model railway), Wood Street (n6179357475, off 48) and Robson Road
+// (n976349382, off 94). The road each car was actually on, map-matched from its own fixes, never
+// came within 25 m of any of them. Rate: Olaf one chime per 90 s, Say Phin four in 37 s. Jeff:
+// "FIX ALL ISSUES". The fixtures are the 21 real rows, in tools/sim-qc/ahead_alerts_test.mts.
+//
+// So the corridor is now TWO rules, and the route one wins whenever there is a route:
+//   • THE ROUTE GATE — the feature must lie within ROUTE_GATE_M of the active route's polyline and
+//     its along-ROUTE distance from the car must be inside the lead. The route is the road the
+//     driver is about to be on: a crossing on the next street over is never within 25 m of it, and
+//     a crossing 450 m ahead round a bend is exactly on it where any tangent cone misses. 25 m
+//     because speedLimitSnap's SNAP_TOLERANCE_M is 30 for "the road you're on" and offRouteGate's
+//     ONROUTE_M is 25 for "on the line" — the tighter one, since a false alert is the complaint.
+//     Read-only: the feed consumes NavRoute.coordinates and writes nothing back.
+//   • THE FREE-DRIVE CONE — no route (or the car has left it): 25 m at the bumper opening at 5°
+//     (tan 0.0875): 42.5 m at 200, 51 m at 300, 64 m at 450. Against the same 21 rows it keeps 6, not
+//     21 (the gate pins that). It stays a cone at all because a genuine crossing 450 m ahead on a
+//     curve is legitimately off the instantaneous tangent; narrower would lose those.
+export const CONE_HALF_MIN_M = 25;
+export const CONE_TAN = 0.0875;   // tan(5°)
+export const ROUTE_GATE_M = 25;
+// The route describes the road under the car only while the car is on it. Past this the app is
+// about to reroute anyway (src/offRouteGate.ts REROUTE_DISTANCE_M = 80) and the old polyline says
+// nothing about where the car is going, so the cone takes over until the new route lands.
+export const ROUTE_CAR_MAX_M = 80;
 
 const EARTH_R = 6371000;
 
@@ -385,6 +409,115 @@ export function inCorridor(alongM: number, crossM: number, leadM: number): boole
 /** How far past the thing we must get before it can alert again (a return trip re-arms it). */
 export function rearmM(leadM: number): number { return leadM * 2; }
 
+// ── THE ROUTE GATE ───────────────────────────────────────────────────────────────────────────
+// The active route's decoded geometry, [lng, lat] pairs exactly as NavRoute.coordinates carries
+// them (src/mapboxDirections.ts decodePolyline5LngLat, GeoJSON order). Consumed, never mutated.
+export type RouteLine = readonly (readonly [number, number])[];
+
+type RouteSeg = { ax: number; ay: number; bx: number; by: number; len: number; cum: number; hdgOk: boolean };
+/** The part of the route that can matter this tick, in metres east/north of the car. */
+export type RouteWindow = {
+  segs: RouteSeg[];
+  lat: number; lng: number; kx: number; ky: number;   // the car, and degrees → local metres
+  carAlong: number;                                   // route metres at the car's own projection
+  carCross: number;                                   // metres from the car to the route
+};
+
+// Route metres at every vertex, computed ONCE per polyline object. A route's coordinates never
+// change for its life and a reroute is a new array, so identity is the cache key — a 300 km drive
+// is tens of thousands of vertices and this must not be walked per fix on four surfaces.
+const _cumCache = new WeakMap<object, Float64Array>();
+function cumulativeM(poly: RouteLine): Float64Array {
+  const hit = _cumCache.get(poly);
+  if (hit) return hit;
+  const cum = new Float64Array(poly.length);
+  let acc = 0;
+  for (let i = 1; i < poly.length; i++) {
+    const a = poly[i - 1], b = poly[i];
+    const cl = Math.cos(((a[1] + b[1]) / 2) * RAD);
+    acc += Math.hypot((b[0] - a[0]) * RAD * cl * EARTH_R, (b[1] - a[1]) * RAD * EARTH_R);
+    cum[i] = acc;
+  }
+  _cumCache.set(poly, cum);
+  return cum;
+}
+
+function projectOnSeg(s: RouteSeg, x: number, y: number): { t: number; d: number } {
+  const dx = s.bx - s.ax, dy = s.by - s.ay;
+  const l2 = dx * dx + dy * dy;
+  const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - s.ax) * dx + (y - s.ay) * dy) / l2)) : 0;
+  return { t, d: Math.hypot(x - (s.ax + t * dx), y - (s.ay + t * dy)) };
+}
+
+/**
+ * The route segments within `reachM` of the car and the car's own place on the route. null when
+ * there is no usable route here — fewer than two vertices, nothing within reach, or the car more
+ * than ROUTE_CAR_MAX_M off the line — and the caller falls back to the free-drive cone.
+ * One pass over the polyline: four comparisons per segment, trigonometry only for the kept few.
+ */
+export function buildRouteWindow(
+  poly: RouteLine | null | undefined, lat: number, lng: number,
+  courseDeg: number | null | undefined, reachM: number,
+): RouteWindow | null {
+  if (!poly || poly.length < 2) return null;
+  const cum = cumulativeM(poly);
+  const kx = RAD * Math.cos(lat * RAD) * EARTH_R, ky = RAD * EARTH_R;
+  const course = typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0 ? courseDeg * RAD : null;
+  const segs: RouteSeg[] = [];
+  for (let i = 0; i + 1 < poly.length; i++) {
+    const a = poly[i], b = poly[i + 1];
+    const ax = (a[0] - lng) * kx, ay = (a[1] - lat) * ky, bx = (b[0] - lng) * kx, by = (b[1] - lat) * ky;
+    // Keep any segment whose box touches the reach box — a long rural straight can cross the box
+    // with BOTH ends outside it, and dropping that one would drop the road under the car.
+    if (Math.max(ax, bx) < -reachM || Math.min(ax, bx) > reachM || Math.max(ay, by) < -reachM || Math.min(ay, by) > reachM) continue;
+    const len = cum[i + 1] - cum[i];
+    // Does this leg run the way the car is going? The return carriageway of a divided road, or the
+    // homeward leg of a loop, passes within metres and is NOT the leg the car is on.
+    let hdgOk = true;
+    if (course != null && len > 0) {
+      let diff = Math.abs(Math.atan2(bx - ax, by - ay) - course);
+      if (diff > Math.PI) diff = 2 * Math.PI - diff;
+      hdgOk = diff <= Math.PI / 2;
+    }
+    segs.push({ ax, ay, bx, by, len, cum: cum[i], hdgOk });
+  }
+  if (!segs.length) return null;
+  // The car's own place: nearest segment, with a leg running against the course pushed back by
+  // ROUTE_GATE_M so the same-direction leg wins any near tie.
+  let bi = -1, bt = 0, bScore = Infinity, bd = Infinity;
+  for (let k = 0; k < segs.length; k++) {
+    const { t, d } = projectOnSeg(segs[k], 0, 0);
+    const score = d + (segs[k].hdgOk ? 0 : ROUTE_GATE_M);
+    if (score < bScore) { bScore = score; bd = d; bi = k; bt = t; }
+  }
+  if (bi < 0 || bd > ROUTE_CAR_MAX_M) return null;
+  return { segs, lat, lng, kx, ky, carAlong: segs[bi].cum + bt * segs[bi].len, carCross: bd };
+}
+
+/**
+ * Along-ROUTE metres from the car to a point (positive = further along the route) and the point's
+ * perpendicular distance to the route. Where the route passes a point more than once, the nearest
+ * pass AHEAD of the car inside the gate wins — a loop route must call the crossing at 300 m, not
+ * at the 5 km return. With no such pass, the nearest pass is reported so the receipt can say why.
+ */
+export function routeOffsets(win: RouteWindow, lat: number, lng: number): { alongM: number; crossM: number } {
+  const x = (lng - win.lng) * win.kx, y = (lat - win.lat) * win.ky;
+  let best: { alongM: number; crossM: number } | null = null;
+  let nearest: { alongM: number; crossM: number } | null = null;
+  for (const s of win.segs) {
+    const { t, d } = projectOnSeg(s, x, y);
+    const alongM = s.cum + t * s.len - win.carAlong;
+    if (!nearest || d < nearest.crossM) nearest = { alongM, crossM: d };
+    if (d <= ROUTE_GATE_M && alongM > 0 && (!best || alongM < best.alongM)) best = { alongM, crossM: d };
+  }
+  return best ?? (nearest as { alongM: number; crossM: number });
+}
+
+/** The route gate itself: on the line, and ahead of the car inside the lead. */
+export function inRouteGate(alongM: number, crossM: number, leadM: number): boolean {
+  return alongM > 0 && alongM <= leadM && crossM <= ROUTE_GATE_M;
+}
+
 // ── PICKING THE ONE THING TO CALL OUT ────────────────────────────────────────────────────────
 // A feature is a point (a camera, a level crossing) or a road segment (a school/playground zone,
 // which is tagged on the WAY, so its nearest vertex is where the zone starts from here). One hit
@@ -403,7 +536,20 @@ export type AheadFeature = {
   when?: ZoneWhen;
 };
 
-export type AheadHit = { feature: AheadFeature; lat: number; lng: number; alongM: number; crossM: number; leadM: number };
+export type AheadHit = { feature: AheadFeature; lat: number; lng: number; alongM: number; crossM: number; leadM: number; via: "route" | "cone" };
+
+/**
+ * What one scan looked at and threw away — the receipt that lets the next drive prove a crossing
+ * was NOT missed. Until 2026-09-22 there was a row only when a hit was picked, so a silent drive
+ * past a real crossing and a drive with no crossings near it looked identical.
+ */
+export type AheadScanStats = {
+  considered: number;                 // features inside the lead box, switched on, in force
+  rejected: number;                   // of those, thrown out by the corridor
+  via: "route" | "cone" | "none";     // which corridor ran ("none": no route and no course — nothing can be aimed)
+  rejects: { id: string; kind: AheadKind; alongM: number; crossM: number }[];   // closest to the corridor first
+};
+export const REJECTS_PER_SCAN = 8;
 
 /** Straight-line metres to the nearest point of a feature — used for the re-arm test, not for the alert. */
 export function featureDistM(f: AheadFeature, lat: number, lng: number): number {
@@ -416,9 +562,12 @@ export function featureDistM(f: AheadFeature, lat: number, lng: number): number 
 }
 
 /**
- * The nearest feature inside the forward corridor that is switched on and (for a zone) actually in
- * force right now. Returns null when there is nothing to say — including when the car is too slow
- * for the callout to mean anything, or has no course for the cone.
+ * The nearest feature inside the corridor that is switched on and (for a zone) actually in force
+ * right now. With a route, and the car on it, the corridor is THE ROUTE GATE and `alongM` is
+ * along-route metres — the distance the spoken line then says; otherwise it is the free-drive cone
+ * off the car's course. Returns null when there is nothing to say — including when the car is too
+ * slow for the callout to mean anything, or has neither a route nor a course to aim with. `stats`,
+ * when given, is filled with what the scan considered and rejected: the receipt.
  */
 export function pickAheadHit(
   features: AheadFeature[],
@@ -427,10 +576,16 @@ export function pickAheadHit(
   speedMs: number | null | undefined,
   now: Date, nowMs: number,
   isOn: (kind: AheadKind) => boolean,
+  route?: RouteLine | null,
+  stats?: AheadScanStats,
 ): AheadHit | null {
   const kmh = (speedMs ?? 0) * 3.6;
   if (!(kmh >= AHEAD_MIN_SPEED_KMH)) return null;
   const leadM = aheadLeadM(speedMs);
+  const win = buildRouteWindow(route, lat, lng, courseDeg, leadM + ROUTE_GATE_M);
+  const via: "route" | "cone" = win ? "route" : "cone";
+  const hasCourse = typeof courseDeg === "number" && Number.isFinite(courseDeg) && courseDeg >= 0;
+  if (stats) { stats.via = win ? "route" : hasCourse ? "cone" : "none"; stats.considered = 0; stats.rejected = 0; stats.rejects = []; }
   // Cheap bounding reject before any trigonometry. The cache holds thousands of features and this
   // runs per fix on four surfaces; a degree box costs two subtractions and throws away everything
   // that is not within the lead in either axis.
@@ -441,12 +596,30 @@ export function pickAheadHit(
     if (!isOn(f.kind)) continue;
     if (f.when && !zoneActive(f.when, now, nowMs, lat, lng)) continue;
     const pts = f.geom && f.geom.length ? f.geom : [{ lat: f.lat, lng: f.lng }];
+    let seen = false;
+    let keep: { lat: number; lng: number; alongM: number; crossM: number } | null = null;
+    let nearestRej: { alongM: number; crossM: number } | null = null;
     for (const p of pts) {
       if (Math.abs(p.lat - lat) > dLat || Math.abs(p.lng - lng) > dLng) continue;
-      const o = forwardOffsets(lat, lng, courseDeg, p.lat, p.lng);
-      if (!o || !inCorridor(o.alongM, o.crossM, leadM)) continue;
-      if (!best || o.alongM < best.alongM) best = { feature: f, lat: p.lat, lng: p.lng, alongM: o.alongM, crossM: o.crossM, leadM };
+      seen = true;
+      const o = win ? routeOffsets(win, p.lat, p.lng) : forwardOffsets(lat, lng, courseDeg, p.lat, p.lng);
+      if (!o) continue;
+      const ok = win ? inRouteGate(o.alongM, o.crossM, leadM) : inCorridor(o.alongM, o.crossM, leadM);
+      if (ok) { if (!keep || o.alongM < keep.alongM) keep = { lat: p.lat, lng: p.lng, alongM: o.alongM, crossM: o.crossM }; }
+      else if (!nearestRej || o.crossM < nearestRej.crossM) nearestRej = o;
     }
+    if (!seen) continue;
+    if (stats) stats.considered += 1;
+    if (keep) {
+      if (!best || keep.alongM < best.alongM) best = { feature: f, lat: keep.lat, lng: keep.lng, alongM: keep.alongM, crossM: keep.crossM, leadM, via };
+    } else if (stats) {
+      stats.rejected += 1;
+      if (nearestRej) stats.rejects.push({ id: f.id, kind: f.kind, alongM: nearestRej.alongM, crossM: nearestRej.crossM });
+    }
+  }
+  if (stats && stats.rejects.length > 1) {
+    stats.rejects.sort((a, b) => a.crossM - b.crossM);
+    if (stats.rejects.length > REJECTS_PER_SCAN) stats.rejects.length = REJECTS_PER_SCAN;
   }
   return best;
 }

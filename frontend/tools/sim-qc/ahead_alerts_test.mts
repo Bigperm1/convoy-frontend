@@ -13,10 +13,20 @@
 // spellings. The counts in the comments are that query's, not estimates. The junk fixture
 // ('r 08:00-17:00)') is a real tag too — one way in the corridor carries it truncated.
 //
+// 2026-09-22, the feature's FIRST FIELD DAY (OTA 01a0c6c4): 21 chimes on two drives, 17 of them for
+// a crossing on the next street over — the 12° nose-cone swallowed a Burnaby block. Jeff: "FIX ALL
+// ISSUES". Sections 6b/6c below hold that day's 21 real `ahead-alert` rows as the fixtures (Olaf
+// f1gdt9-450034 ×13, Say Phin zziett-040354 ×8 — crash_reports, verbatim `d=`/`off=`), and the four
+// alerts that fit an exact OSM node, each against the road that car was ACTUALLY on (its own
+// draw-cmp fixes map-matched by OSRM, no key, OSM data). The corridor became a ROUTE GATE with a 5°
+// cone as the free-drive fallback; the field rows pin both.
+//
 // src/aheadAlertRules.ts imports NOTHING, so this gate needs no stub harness (contrast
 // uturn_rank_test.mts, which has to fake out react-native) and no explicit process.exit for a
-// timer pump — but it still exits explicitly on failure so the shell sees a non-zero status.
+// timer pump — but it still exits explicitly on failure so the shell sees a non-zero status. The one
+// thing read from src/aheadAlerts.ts (which does reach react/nav) is its SOURCE TEXT, for MIN_GAP_MS.
 const R = await import("../../src/aheadAlertRules.ts");
+import { readFileSync } from "node:fs";
 
 let fails = 0;
 const ok = (name: string, cond: boolean, detail = "") => { console.log(`${cond ? "  ok  " : "  FAIL"} ${name} ${detail}`); if (!cond) fails++; };
@@ -236,10 +246,12 @@ ok("L3  the cap only binds above 81 km/h — the speed at which school and playg
 ok("L4  a stationary or speedless fix falls to the floor, never NaN",
   R.aheadLeadM(0) === R.AHEAD_LEAD_MIN_M && R.aheadLeadM(null) === R.AHEAD_LEAD_MIN_M && R.aheadLeadM(NaN) === R.AHEAD_LEAD_MIN_M);
 
-// ─── 6 · THE FORWARD CORRIDOR ────────────────────────────────────────────────────────────────
+// ─── 6 · THE FORWARD CORRIDOR (free-drive cone) ──────────────────────────────────────────────
 // Why this exists: 277 `railway=level_crossing` nodes sit within 8 km of Jeff's 09-20 departure
 // point (measured 2026-09-21). A plain radius test would alert on crossings he never drives over.
-console.log("\nForward corridor — ahead, and on the road you are on");
+// Since 2026-09-22 the cone is 25 m at the bumper opening at 5° (was 30 m / 12°) and only runs with
+// no route; C1–C9 are the same shapes as before and still hold at the narrower cone.
+console.log("\nForward corridor — ahead, and on the road you are on (the 5° free-drive cone)");
 {
   // 300 m due north of the car, heading north.
   const N = (m: number) => 49.2 + m / 111320;
@@ -259,6 +271,190 @@ console.log("\nForward corridor — ahead, and on the road you are on");
   ok("C8  a negative course (iOS's 'no heading' sentinel) → null", R.forwardOffsets(49.2, -123.0, -1, N(300), -123.0) === null);
   ok("C9  the cone widens with distance: 40 m off is in at 300 m, out at 30 m",
     R.inCorridor(300, 40, 450) && !R.inCorridor(30, 40, 450));
+}
+
+// ─── 6b · THE FIELD TABLE: 2026-09-22, all 21 real (along, cross) pairs ─────────────────────
+// Every row is a real `ahead-alert kind=railway d=… off=… lead=… spd=…` breadcrumb from
+// crash_reports that day; `d` is the along-track metres and `off` the cross-track metres the
+// corridor accepted. The old cone (30 m + d·tan 12°) is reproduced inline as the NEGATIVE CONTROL,
+// because it is what shipped: it kept 21 of 21. The new free-drive cone must keep at most 6.
+console.log("\nThe 2026-09-22 field table — 21 real alerts through the old cone and the new one");
+const FIELD_0922 = [
+  { who: "Olaf", t: "14:19:48", d: 398, off: 100, lead: 415, spd: 75 },
+  { who: "Olaf", t: "14:22:26", d: 225, off: 58, lead: 233, spd: 42 },
+  { who: "Olaf", t: "14:23:03", d: 170, off: 66, lead: 249, spd: 45 },
+  { who: "Olaf", t: "14:23:46", d: 353, off: 53, lead: 366, spd: 66 },
+  { who: "Olaf", t: "14:25:01", d: 152, off: 55, lead: 200, spd: 31 },
+  { who: "Olaf", t: "14:27:56", d: 330, off: 68, lead: 341, spd: 61 },
+  { who: "Olaf", t: "14:28:35", d: 110, off: 51, lead: 224, spd: 40 },
+  { who: "Olaf", t: "14:28:45", d: 309, off: 95, lead: 325, spd: 58 },
+  { who: "Olaf", t: "14:30:51", d: 432, off: 94, lead: 434, spd: 78 },
+  { who: "Olaf", t: "14:33:25", d: 436, off: 109, lead: 450, spd: 81 },
+  { who: "Olaf", t: "14:36:23", d: 444, off: 18, lead: 450, spd: 95 },
+  { who: "Olaf", t: "14:52:05", d: 372, off: 57, lead: 392, spd: 71 },
+  { who: "Olaf", t: "14:52:31", d: 431, off: 105, lead: 431, spd: 78 },
+  { who: "SayPhin", t: "14:17:43", d: 401, off: 27, lead: 403, spd: 73 },
+  { who: "SayPhin", t: "14:23:22", d: 362, off: 26, lead: 363, spd: 65 },
+  { who: "SayPhin", t: "14:25:38", d: 354, off: 57, lead: 372, spd: 67 },
+  { who: "SayPhin", t: "14:25:54", d: 198, off: 5, lead: 373, spd: 67 },
+  { who: "SayPhin", t: "14:26:02", d: 230, off: 75, lead: 345, spd: 62 },
+  { who: "SayPhin", t: "14:26:15", d: 215, off: 67, lead: 344, spd: 62 },
+  { who: "SayPhin", t: "14:27:31", d: 247, off: 48, lead: 272, spd: 49 },
+  { who: "SayPhin", t: "14:28:34", d: 203, off: 73, lead: 204, spd: 37 }
+];
+{
+  const oldCone = (d: number, off: number) => off <= 30 + d * 0.2126;
+  let oldKept = 0, newKept = 0, within30 = 0;
+  console.log("      who      t         d   off | old 12° cone | new 5° cone");
+  for (const r of FIELD_0922) {
+    const o = oldCone(r.d, r.off), n = R.inCorridor(r.d, r.off, r.lead);
+    oldKept += o ? 1 : 0; newKept += n ? 1 : 0; within30 += r.off <= 30 ? 1 : 0;
+    console.log(`      ${r.who.padEnd(8)} ${r.t}  ${String(r.d).padStart(3)}  ${String(r.off).padStart(3)} |    ${o ? "KEPT  " : "reject"}    |   ${n ? "KEPT" : "reject"}`);
+  }
+  ok("F1  21 rows, 21/21 railway, only 4 within 30 m of the driving line (the day's measurement)",
+    FIELD_0922.length === 21 && within30 === 4, `within30=${within30}`);
+  ok("F2  NEGATIVE CONTROL — the old 30 m / 12° cone kept every one of them", oldKept === 21, `old kept ${oldKept}`);
+  ok(`F3  the new 25 m / 5° cone keeps at most 6 of the 21 (keeps ${newKept})`, newKept <= 6);
+  ok("F4  …and the new cone's half-width is 42.5 m @200, 51 m @300, 64 m @450 — a lane, not a block",
+    Math.abs(R.CONE_HALF_MIN_M + 200 * R.CONE_TAN - 42.5) < 0.01 && Math.abs(R.CONE_HALF_MIN_M + 300 * R.CONE_TAN - 51.25) < 0.01 &&
+    Math.abs(R.CONE_HALF_MIN_M + 450 * R.CONE_TAN - 64.375) < 0.01);
+  ok("F5  the old cone was 73 / 94 / 126 m at the same distances — the next street over",
+    Math.round(30 + 200 * 0.2126) === 73 && Math.round(30 + 450 * 0.2126) === 126);
+}
+
+// ─── 6c · THE ROUTE GATE ─────────────────────────────────────────────────────────────────────
+// With a route, a crossing has to lie within ROUTE_GATE_M of the route's polyline and inside the
+// lead ALONG the route. The four fixtures are the day's four alerts that fit an exact OSM
+// `railway=level_crossing` node (the draw-cmp fix moved along its heading to the alert instant,
+// then the node whose (along, cross) reproduces the logged (d, off); fit = residual metres). Each
+// is paired with the road that car was actually on: its own draw-cmp fixes over ±90 s, map-matched
+// by the keyless OSRM demo router (OSM data, polyline5, confidence A 0.98 / B 0.98 / C 0.31 — C's
+// last fix, 60 s AFTER the alert, is 88 m off the match; the five fixes bracketing the alert are
+// 0.2–6 m on it). Every car position below is within 13 m of its line — that is the fixture's own
+// proof the car was on that road. The gate must reject ALL FOUR; the cone alone does not.
+console.log("\nThe route gate — the four verified false positives, against the road actually driven");
+// OSRM map-matched geometry (polyline5) of the fixes: A Olaf 14:29:12→14:32:12, B Olaf 14:50:32→14:53:32, C Say Phin 14:26:07→14:28:38.
+const LINES: Record<string, string> = {
+  A: "iqhkH|s`mVxBfCv@z@tBpB~AxAx@v@v@r@pApAzAnAhD~CRNvC~CvB`CrCjDtFtHvB`ChBjBrHvHpMfNvEzE`@b@fIpIxC`DvIrJ`AbAbA`AvHfHfBfB`CdCzBdCdDbEn@v@X\`CnCTVfBhBdBzAhJ`IjB~A|AtAZZj@l@l@p@dArAbArArAfB",
+  B: "ylwjH~bcnViDlEqBlCKNeCfD{DfFoFfHyAnBiDpEwRhWeLhO{ElGsAdByC~DMNeIdKq@v@}CxDsCjDsA`BuAtAoBx@a@Ds@HyBBwG?eCBe@BwCDcDCiG?sGA",
+  C: "wqgkHt}mmVq@}Ba@wAOm@Qy@McAMqAIoAGaAC_@E]Ig@Ke@Qm@Ug@Wc@Y[OMOM_@SuB}@[MSMQMQQMUKUI[EWC[AY@[BYBUDSHSHQJQLOTWTUt@w@~DkEbPkQv@y@bHwHZW^[POd@YXMTIPGVERCZCR?R?TB\Dx@Vb@Vv@n@^`@FFRp@Zp@^pAt@hDhAxGf@jE"
+};
+/** Polyline5 → [lng, lat] pairs, the order NavRoute.coordinates carries (src/mapboxDirections.ts decodePolyline5LngLat). */
+function decode5(s: string): [number, number][] {
+  const out: [number, number][] = []; let i = 0, lat = 0, lng = 0;
+  while (i < s.length) {
+    for (const which of [0, 1]) {
+      let res = 0, sh = 0, b: number;
+      do { b = s.charCodeAt(i++) - 63; res |= (b & 0x1f) << sh; sh += 5; } while (b >= 0x20);
+      const d = res & 1 ? ~(res >> 1) : res >> 1;
+      if (which === 0) lat += d; else lng += d;
+    }
+    out.push([lng / 1e5, lat / 1e5]);
+  }
+  return out;
+}
+const FALSE_POSITIVES = [
+  { n: 9, who: "Olaf", t: "14:30:51", node: "n976349382", what: "Robson Road — a rail spur over an unclassified road", nLat: 49.1830003, nLng: -122.9087913, car: { lat: 49.185837, lng: -122.904380 }, hdg: 214, spd: 78, d: 432, off: 94, fit: 9.9, line: "A" },
+  { n: 12, who: "Olaf", t: "14:52:05", node: "n3423769912", what: "a rail spur across a service road (highway=service ×2)", nLat: 49.1254069, nLng: -123.0787578, car: { lat: 49.122480, lng: -123.076138 }, hdg: 321, spd: 71, d: 372, off: 57, fit: 1.0, line: "B" },
+  { n: 13, who: "Olaf", t: "14:52:31", node: "n12960108594", what: "a MINIATURE TOURIST railway (railway=miniature, usage=tourism) over a service path", nLat: 49.1299265, nLng: -123.0834654, car: { lat: 49.126331, lng: -123.080889 }, hdg: 321, spd: 78, d: 431, off: 105, fit: 2.5, line: "B" },
+  { n: 20, who: "SayPhin", t: "14:27:31", node: "n6179357475", what: "Wood Street — a branch line over an unclassified road", nLat: 49.1935463, nLng: -122.9434044, car: { lat: 49.195173, lng: -122.945959 }, hdg: 145, spd: 49, d: 247, off: 48, fit: 7.7, line: "C" }
+];
+{
+  const now = new Date("2026-09-22T07:30:00"); const nowMs = now.getTime(); const all = () => true;
+  let gateRejects = 0, coneRejects = 0, oldRejects = 0;
+  for (const f of FALSE_POSITIVES) {
+    const route = decode5(LINES[f.line]);
+    const spd = f.spd / 3.6, lead = R.aheadLeadM(spd);
+    const win = R.buildRouteWindow(route, f.car.lat, f.car.lng, f.hdg, lead + R.ROUTE_GATE_M);
+    ok(`G${f.n}a ${f.who} ${f.t} ${f.node}: the car is ON its map-matched road (${win ? win.carCross.toFixed(1) : "no window"} m off it)`,
+      !!win && win.carCross <= 13);
+    if (!win) continue;
+    const o = R.routeOffsets(win, f.nLat, f.nLng);
+    const gate = R.inRouteGate(o.alongM, o.crossM, lead);
+    if (!gate) gateRejects++;
+    ok(`G${f.n}b   ${f.what}: ${o.crossM.toFixed(0)} m from the road (logged off=${f.off}, fit ${f.fit} m) → route gate ${gate ? "KEPT" : "rejects"}`, !gate);
+    const feat = { id: f.node, kind: "railway" as const, lat: f.nLat, lng: f.nLng };
+    const stats = { considered: 0, rejected: 0, via: "none" as const, rejects: [] as any[] };
+    const hit = R.pickAheadHit([feat], f.car.lat, f.car.lng, f.hdg, spd, now, nowMs, all, route, stats);
+    ok(`G${f.n}c   pickAheadHit with the route says nothing — and the receipt shows it was considered and rejected via=route`,
+      hit === null && stats.via === "route" && stats.considered === 1 && stats.rejected === 1 && stats.rejects[0]?.id === f.node,
+      JSON.stringify(stats));
+    // Which rule would have caught it WITHOUT a route: the logged (d, off) through each cone.
+    const cone = R.inCorridor(f.d, f.off, f.lead ?? lead) ? "KEPT" : "rejects";
+    const old = f.off <= 30 + f.d * 0.2126 ? "KEPT" : "rejects";
+    if (cone === "rejects") coneRejects++; if (old === "rejects") oldRejects++;
+    console.log(`         (without a route: new 5° cone ${cone}, old 12° cone ${old})`);
+  }
+  ok("G0  the route gate rejects all four; the cone alone does not (that is why the route beats the cone)",
+    gateRejects === 4 && coneRejects < 4 && oldRejects === 0, `gate=${gateRejects} cone=${coneRejects} old=${oldRejects}`);
+}
+
+// A route ahead, in local metres, so the positives are exact. [lng, lat] like NavRoute.coordinates.
+console.log("\nThe route gate keeps what it must — on the line, and round the bend the cone cannot see");
+{
+  const N = (m: number) => 49.2 + m / 111320;
+  const E = (m: number) => -123.0 + m / (111320 * Math.cos(49.2 * Math.PI / 180));
+  const pt = (x: number, y: number): [number, number] => [E(x), N(y)];
+  const now = new Date("2026-10-06T10:00:00"); const nowMs = now.getTime(); const all = () => true;
+  const rail = (id: string, x: number, y: number) => ({ id, kind: "railway" as const, lat: N(y), lng: E(x) });
+  const spd60 = 60 / 3.6;   // lead 333 m
+
+  // (c) a straight route north, a crossing ON it 300 m ahead → kept, and the distance is 300.
+  const straight: [number, number][] = []; for (let k = 0; k <= 10; k++) straight.push(pt(0, k * 100));
+  const hitC = R.pickAheadHit([rail("on", 0, 300)], 49.2, -123.0, 0, spd60, now, nowMs, all, straight);
+  ok("R1  a crossing ON the route 300 m ahead is KEPT, via=route, at 300 m",
+    !!hitC && hitC.via === "route" && Math.abs(hitC.alongM - 300) < 3, `${hitC?.via} ${hitC?.alongM.toFixed(1)}`);
+
+  // (d) north 150 m, then a 45° bend for 300 m. The crossing sits 250 m into the bend (route metres
+  // 400) and 20 m off the line. The tangent cone from the car's heading sees it at along 313 /
+  // cross 191 and misses; the route gate keeps it, at its ROAD distance.
+  const bend: [number, number][] = [pt(0, 0), pt(0, 150)];
+  for (let k = 1; k <= 6; k++) bend.push(pt(k * 50 * Math.SQRT1_2, 150 + k * 50 * Math.SQRT1_2));
+  const cx = 250 * Math.SQRT1_2 + 20 * Math.SQRT1_2, cy = 150 + 250 * Math.SQRT1_2 - 20 * Math.SQRT1_2;
+  const spd80 = 80 / 3.6;   // lead 444 m
+  const tangent = R.forwardOffsets(49.2, -123.0, 0, N(cy), E(cx))!;
+  ok("R2  the tangent cone MISSES a crossing 20 m off the route round a 45° bend (along 313, cross 191)",
+    !R.inCorridor(tangent.alongM, tangent.crossM, R.aheadLeadM(spd80)) && Math.round(tangent.crossM) === 191, `${tangent.alongM.toFixed(0)}/${tangent.crossM.toFixed(0)}`);
+  const hitD = R.pickAheadHit([rail("bend", cx, cy)], 49.2, -123.0, 0, spd80, now, nowMs, all, bend);
+  ok("R3  …and the route gate KEEPS it — 20 m off the line, 400 m along the ROAD (not the 313 m tangent)",
+    !!hitD && hitD.via === "route" && Math.abs(hitD.alongM - 400) < 4 && hitD.crossM < 21, `${hitD?.via} along=${hitD?.alongM.toFixed(1)} cross=${hitD?.crossM.toFixed(1)}`);
+  ok("R4  a crossing 40 m off that same route is rejected (ROUTE_GATE_M = 25)",
+    R.pickAheadHit([rail("far", cx + 20 * Math.SQRT1_2, cy - 20 * Math.SQRT1_2)], 49.2, -123.0, 0, spd80, now, nowMs, all, bend) === null);
+
+  // The car OFF the route (100 m east of it, beyond ROUTE_CAR_MAX_M) → the cone takes over.
+  const hitOff = R.pickAheadHit([rail("ahead", 100, 300)], 49.2, E(100), 0, spd60, now, nowMs, all, straight);
+  ok("R5  the car 100 m off its route falls back to the free-drive cone (via=cone), never to silence",
+    !!hitOff && hitOff.via === "cone", hitOff?.via);
+  ok("R6  …and ROUTE_CAR_MAX_M is offRouteGate's own REROUTE_DISTANCE_M (80): the app is about to reroute anyway",
+    R.ROUTE_CAR_MAX_M === 80);
+  // No course at all (a fix Android reports with bearing 0 → dropped): the route still aims the corridor.
+  const hitNoCourse = R.pickAheadHit([rail("on", 0, 300)], 49.2, -123.0, null, spd60, now, nowMs, all, straight);
+  ok("R7  with a route, a fix with NO course still gets the alert (the cone alone could not)",
+    !!hitNoCourse && hitNoCourse.via === "route" &&
+    R.pickAheadHit([rail("on", 0, 300)], 49.2, -123.0, null, spd60, now, nowMs, all, null) === null);
+  // A loop route: north 300 m, 10 m east, back south. The crossing at 200 m north is on BOTH legs
+  // (route metres 200 and 410). The car is 6 m east of the outbound leg — 4 m from the return leg.
+  const loop: [number, number][] = [pt(0, 0), pt(0, 300), pt(10, 300), pt(10, 0)];
+  const hitLoop = R.pickAheadHit([rail("loop", 0, 200)], 49.2, E(6), 0, spd60, now, nowMs, all, loop);
+  ok("R8  a loop route calls the crossing at 200 m (the outbound pass), not at the 410 m return — and the car's own leg is the one running its way, not the nearer return leg",
+    !!hitLoop && Math.abs(hitLoop.alongM - 200) < 4, `${hitLoop?.alongM.toFixed(1)}`);
+  // The receipt: two crossings 250 m ahead, one on the route and one 60 m off it.
+  const stats = { considered: 0, rejected: 0, via: "none" as const, rejects: [] as any[] };
+  const hitS = R.pickAheadHit([rail("off", 60, 250), rail("on", 0, 250)], 49.2, -123.0, 0, spd60, now, nowMs, all, straight, stats);
+  ok("R9  the scan receipt: considered 2, rejected 1, the reject named with its along/cross, via=route",
+    hitS?.feature.id === "on" && stats.considered === 2 && stats.rejected === 1 && stats.via === "route" &&
+    stats.rejects.length === 1 && stats.rejects[0].id === "off" && Math.abs(stats.rejects[0].crossM - 60) < 2 && Math.abs(stats.rejects[0].alongM - 250) < 3,
+    JSON.stringify(stats));
+  const statsNone = { considered: 0, rejected: 0, via: "none" as const, rejects: [] as any[] };
+  R.pickAheadHit([rail("on", 0, 250)], 49.2, -123.0, null, spd60, now, nowMs, all, null, statsNone);
+  ok("R10 no route and no course → via=none (nothing could be aimed; the caller writes no reject row)", statsNone.via === "none");
+  ok("R11 a route with one vertex, or none, is no route (window null → cone)",
+    R.buildRouteWindow([pt(0, 0)], 49.2, -123.0, 0, 400) === null && R.buildRouteWindow([], 49.2, -123.0, 0, 400) === null && R.buildRouteWindow(null, 49.2, -123.0, 0, 400) === null);
+  // The cooldown backstop lives in src/aheadAlerts.ts, which reaches react/nav — read its text.
+  const src = readFileSync(new URL("../../src/aheadAlerts.ts", import.meta.url), "utf8");
+  ok("R12 MIN_GAP_MS stays 8 s — a 45 s cross-kind gap (tried 09-22) silenced a camera 10-44 s after a school zone; the route gate is the fix, not a cooldown", /const MIN_GAP_MS = 8000;/.test(src));
+  ok("R13 the feed hands the route to pickAheadHit and writes the `ahead-reject` receipt",
+    /pickAheadHit\([\s\S]*?route, _stats\)/.test(src) && /ahead-reject id=/.test(src));
 }
 
 // ─── 7 · PICKING ONE THING TO SAY ────────────────────────────────────────────────────────────

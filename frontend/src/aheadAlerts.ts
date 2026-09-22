@@ -22,10 +22,17 @@
 // The price of riding along is the speed-limit pipeline's tighter radius (FETCH_RADIUS_M 1500,
 // REFETCH_MOVE_M 1000 → 500 m of GUARANTEED forward coverage). AHEAD_LEAD_MAX_M is 450 m for
 // exactly that reason; the arithmetic is in aheadAlertRules.ts.
+//
+// ── THE ROUTE IS THE CORRIDOR (2026-09-22, first field day) ──────────────────────────────────
+// 21 chimes on two drives, 17 of them for a crossing on the next street over — the 12° nose-cone
+// swallowed a Burnaby block (the measurement is in aheadAlertRules.ts, THE FORWARD CORRIDOR). So
+// the feed now also takes the active route's decoded polyline, READ-ONLY, and a feature has to lie
+// on that line to be called out; the cone only runs with no route, and it is a 5° cone now. Jeff:
+// "FIX ALL ISSUES". Nothing in this file writes nav state — it consumes NavRoute.coordinates.
 
 import { useEffect, useRef } from "react";
 import {
-  type AheadFeature, type AheadKind,
+  type AheadFeature, type AheadKind, type AheadScanStats, type RouteLine,
   aheadLeadM, aheadLine, featureDistM, pickAheadHit, rearmM,
 } from "./aheadAlertRules";
 import { aheadFeatures } from "./aheadAlertStore";
@@ -40,8 +47,13 @@ import { logEvent } from "./crashBreadcrumb";
 // chime. Ten minutes is longer than a fuel stop and shorter than an errand. Deriving the trip
 // boundary from the fix gap keeps this module out of map.tsx's nav-session lifecycle entirely.
 const TRIP_GAP_MS = 10 * 60 * 1000;
-// A hard floor between any two ahead-alerts of any kind. The forward corridor already makes them
-// rare, but two crossings 60 m apart are ONE piece of news to a driver.
+// A hard floor between any two ahead-alerts of any kind. The corridor is what makes them rare; this
+// is the backstop for the day the data is wrong. 8 s bound exactly ONCE on 2026-09-22 (Say Phin's
+// four chimes in 37 s were 16, 8 and 13 s apart), and a cooldown alone would have removed only 29%
+// of that day's 21 — the fix is the route gate above, not this number. A 45 s gap was tried the
+// same day and rejected in review: cross-kind, it would have silenced a speed camera 10–44 s after a
+// school zone or crossing, for good. So 8 s stays: two features 60 m apart are one piece of news
+// (CLUSTER_M already merges them); anything further apart is its own.
 const MIN_GAP_MS = 8000;
 // ONE PHYSICAL THING, SEVERAL OSM NODES. Measured 2026-09-21 in New Westminster: nodes 974279915,
 // 974279920 and 974279930 are the same double-track crossing, four metres apart, one node per
@@ -54,18 +66,26 @@ const CLUSTER_M = 60;
 // against a 450 m lead, invisible.
 const RESCAN_MOVE_M = 10;
 const RECEIPTS_MAX = 60;     // logEvent is a Supabase INSERT; a drive must not write hundreds
+// One `ahead-reject` row per feature the corridor threw away, the first time it is seen inside the
+// lead box, so a drive that passed a real crossing in silence can be told apart from a drive that
+// never had one near it. Bounded like the others.
+const REJECT_RECEIPTS_MAX = 40;
 
 const _announced = new Set<string>();      // features already called out this trip
 const _spokenKinds = new Set<AheadKind>(); // kinds that have had their full spoken line this trip
+const _rejectLogged = new Set<string>();   // features already given their `ahead-reject` row this trip
 let _lastFixMs = 0;
 let _lastAlertMs = 0;
 let _scannedAt: { lat: number; lng: number } | null = null;
 let _receipts = 0;
+let _rejectRows = 0;
+const _stats: AheadScanStats = { considered: 0, rejected: 0, via: "none", rejects: [] };
 
 /** Trip/session reset — also reached automatically after TRIP_GAP_MS without a fix. */
 export function resetAheadAlerts(): void {
   _announced.clear();
   _spokenKinds.clear();
+  _rejectLogged.clear();
   _lastAlertMs = 0;
   _scannedAt = null;
 }
@@ -108,6 +128,7 @@ export function feedAheadAlerts(
   speedMs: number | null | undefined,
   extra: AheadFeature[],
   muted: boolean,
+  route: RouteLine | null = null,
 ): void {
   const nowMs = Date.now();
   if (_lastFixMs && nowMs - _lastFixMs > TRIP_GAP_MS) resetAheadAlerts();
@@ -125,7 +146,20 @@ export function feedAheadAlerts(
     }
   }
 
-  const hit = pickAheadHit(features, lat, lng, courseDeg, speedMs, new Date(nowMs), nowMs, isOnFor);
+  const hit = pickAheadHit(features, lat, lng, courseDeg, speedMs, new Date(nowMs), nowMs, isOnFor, route, _stats);
+  // The rejection receipt — see REJECT_RECEIPTS_MAX. `via` says which corridor ran, `seen`/`rej`
+  // are this scan's totals, `d`/`off` the feature's own along/cross the first time it was thrown out.
+  if (_stats.via !== "none" && _rejectRows < REJECT_RECEIPTS_MAX) {
+    for (const r of _stats.rejects) {
+      if (_rejectLogged.has(r.id)) continue;
+      _rejectLogged.add(r.id);
+      if (_rejectRows >= REJECT_RECEIPTS_MAX) break;
+      _rejectRows += 1;
+      try {
+        logEvent(`ahead-reject id=${r.id} kind=${r.kind} d=${Math.round(r.alongM)} off=${Math.round(r.crossM)} lead=${Math.round(leadM)} via=${_stats.via} seen=${_stats.considered} rej=${_stats.rejected}`);
+      } catch {}
+    }
+  }
   if (!hit || _announced.has(hit.feature.id)) return;
   if (nowMs - _lastAlertMs < MIN_GAP_MS) return;
   _announced.add(hit.feature.id);
@@ -149,7 +183,7 @@ export function feedAheadAlerts(
   if (_receipts < RECEIPTS_MAX) {
     _receipts += 1;
     try {
-      logEvent(`ahead-alert kind=${kind} d=${Math.round(hit.alongM)} off=${Math.round(hit.crossM)} lead=${Math.round(leadM)} spd=${Math.round((speedMs ?? 0) * 3.6)} say=${wantVoice ? "voice" : muted ? "ding-muted" : "ding"}`);
+      logEvent(`ahead-alert kind=${kind} d=${Math.round(hit.alongM)} off=${Math.round(hit.crossM)} lead=${Math.round(leadM)} spd=${Math.round((speedMs ?? 0) * 3.6)} via=${hit.via} say=${wantVoice ? "voice" : muted ? "ding-muted" : "ding"}`);
     } catch {}
   }
   if (wantVoice) {
@@ -181,16 +215,20 @@ export function useAheadAlerts(
   speedMs: number | null | undefined,
   cameras: { id: string; lat: number; lng: number }[],
   muted: boolean,
+  route: RouteLine | null | undefined,
 ): void {
   // The camera list is a fresh array identity on every Overpass pull; holding it in a ref means
-  // this effect fires on FIXES, not on that feed's churn.
+  // this effect fires on FIXES, not on that feed's churn. The route rides the same way: a reroute
+  // swaps the array, and the next fix simply reads the new one — no effect, no state, no write.
   const camsRef = useRef(cameras);
   camsRef.current = cameras;
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
+  const routeRef = useRef<RouteLine | null>(route ?? null);
+  routeRef.current = route ?? null;
   useEffect(() => {
     if (typeof lat !== "number" || typeof lng !== "number") return;
     const cams: AheadFeature[] = camsRef.current.map((c) => ({ id: "cam" + c.id, kind: "camera", lat: c.lat, lng: c.lng }));
-    feedAheadAlerts(lat, lng, courseDeg, speedMs, cams, mutedRef.current);
+    feedAheadAlerts(lat, lng, courseDeg, speedMs, cams, mutedRef.current, routeRef.current);
   }, [lat, lng, courseDeg, speedMs]);
 }

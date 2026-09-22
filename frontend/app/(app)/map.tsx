@@ -52,7 +52,7 @@ import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
 import { takeIntent, subscribeIntent } from "../../src/deepLinks";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
 import { usePitstop } from "../../src/pitstop";
-import { recordTrip, consumeTakeAgain, cachePeerPbs } from "../../src/trips";
+import { recordTrip, consumeTakeAgain, cachePeerPbs, notePlannedRoute } from "../../src/trips";
 import { feedOdo, odoNowM } from "../../src/driveOdometer";
 import PitstopCard from "../../src/components/PitstopCard";
 import { useConvoyCarPlay } from "../../src/carplay/ConvoyCarPlay";
@@ -1017,7 +1017,13 @@ export default function MapScreen() {
   // the first fix lands — "Rendered more hooks than during the previous render", two seconds after
   // launch. The zone data rides src/speedLimit.ts's existing Overpass round trip, so there is no
   // fetch to mount here.
-  useAheadAlerts(coords?.lat ?? null, coords?.lng ?? null, coords?.course ?? null, coords?.speed ?? null, speedCameras, navMuted);
+  //
+  // THE ROUTE IS THE CORRIDOR (2026-09-22, the feature's first field day): the active route's
+  // decoded [lng,lat] polyline goes in too, READ-ONLY, so a crossing has to lie on the road the
+  // driver is about to be on — the nose-cone alone chimed 21 times that day, 17 of them for the
+  // next street over (src/aheadAlertRules.ts, THE FORWARD CORRIDOR). Nothing here writes nav
+  // state: the feed consumes `activeRoute.coordinates` and hands nothing back.
+  useAheadAlerts(coords?.lat ?? null, coords?.lng ?? null, coords?.course ?? null, coords?.speed ?? null, speedCameras, navMuted, activeRoute?.coordinates ?? null);
   // Official BC road events (DriveBC Open511) — accidents/construction/closures.
   const roadIncidentsEnabled = (settings as any).roadIncidents !== false;
   const roadEventsAll = useDriveBcEvents(coords?.lat ?? null, coords?.lng ?? null, roadIncidentsEnabled);
@@ -3204,6 +3210,19 @@ export default function MapScreen() {
     };
   }, [navMode, activeRoute]);
   // 🔒 NAV-LOCK end map-car-nav-adopt
+
+  // The route as PLANNED, for the trip receipt (2026-09-22). `trip-record … routeKm=` was
+  // read off the CURRENT route at bank time, so after a reroute near arrival Jeff's 31 km
+  // drive printed `km=31.21 src=odo routeKm=1.63` — the 1.6 km remnant, not the route he
+  // set out on. Same shape as the baseline-fill effect above, keyed by the same start stamp
+  // recordDriveNow banks under; src/trips.ts keeps the FIRST route it sees for that stamp,
+  // so the reroutes that re-run this effect change nothing. Outside the locked region on
+  // purpose: this is the receipt, not drive logic, and it writes no nav state.
+  useEffect(() => {
+    if (navMode !== "turn-by-turn" || !activeRoute) return;
+    const startedAt = driveStartedAtRef.current || getNavStartedAt() || tripBaselineRef.current?.startedAt || 0;
+    if (startedAt > 0) notePlannedRoute(startedAt, activeRoute.distance_m);
+  }, [navMode, activeRoute]);
 
   // CarPlay ⇄ "Always" location CTA (CarPlay-standalone). Drive-tested ground truth
   // (2026-07-14): with only "While Using", iOS freezes GPS the moment the screen

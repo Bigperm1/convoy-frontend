@@ -71,8 +71,9 @@ CAR_BANDS = {"hatchback": car_bands_for(0.45, 0.62), "supercar": car_bands_for(0
 
 jobs = [("arrow-top", "garage-arrow-2d", 540, arrow_bands),
         ("arrow-chase", "garage-arrow-3d", 540, arrow_bands)]
-for c in ["hatchback", "supercar", "exotic", "muscle"]:
-    jobs.append((c, f"garage-class-{c}", 900, CAR_BANDS[c]))
+# 3/4 class-car stills (CAR_BANDS) were shipped for Silver's class car on 2026-09-22 and pulled the same night:
+# Silver's car is the flat top-down 2D sprite (Jeff). To render one again: add (<class>, "garage-class-<class>",
+# 900, CAR_BANDS[<class>]) and its r() line in render.sh.
 only = sys.argv[3:] or None
 for src, name, width, bands in jobs:
     if only and src not in only: continue

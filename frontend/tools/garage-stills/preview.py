@@ -18,10 +18,6 @@ rows=[]
 for name,bands,sets in [
   ('garage-arrow-2d',['body','rim'],[(None,None),('#FF3B30',None),('#0A84FF','#FFD60A')]),
   ('garage-arrow-3d',['body','rim'],[(None,None),('#FF3B30',None),('#0A84FF','#FFD60A')]),
-  ('garage-class-hatchback',['pri'],[(None,),('#D2042D',),('#0A84FF',)]),
-  ('garage-class-supercar',['pri'],[(None,),('#D2042D',),('#1D3557',)]),
-  ('garage-class-exotic',['pri'],[(None,),('#FFD60A',),('#0B0B0C',)]),
-  ('garage-class-muscle',['pri'],[(None,),('#FF9500',),('#14532D',)]),
 ]:
     ims=[Image.fromarray(comp(name,bands,s)) for s in sets]
     h=220; ims=[i.resize((int(i.width*h/i.height),h)) for i in ims]

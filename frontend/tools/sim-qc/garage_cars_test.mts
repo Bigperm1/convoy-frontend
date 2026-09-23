@@ -58,8 +58,8 @@ await resetAll();
 const ids = (t: string) => gc.ownedCars(t, settings.getSettings(), gs.getGarage()).map((c: any) => c.id + (c.building ? "(b)" : ""));
 ok("B1 free", eq(ids("free"), ["arrow"]));
 ok("B2 silver", eq(ids("silver"), ["arrow", "class"]));
-ok("B3 gold", eq(ids("gold"), ["arrow", "arrow3d", "class", "class3d"]));
-ok("B4 ultra, no scans", eq(ids("ultra"), ["arrow", "arrow3d", "class", "class3d"]));
+ok("B3 gold — rung order: Free's car, Silver's, then Gold's two (Jeff 2026-09-22)", eq(ids("gold"), ["arrow", "class", "arrow3d", "class3d"]));
+ok("B4 ultra, no scans", eq(ids("ultra"), ["arrow", "class", "arrow3d", "class3d"]));
 await resetAll({ carScanId: "c", carScanStatus: "submitted", carScanSubmittedAt: "2026-09-22T10:00:00Z" }, {
   scans: [
     { scanId: "b", status: "generating", createdAt: "2026-09-21T00:00:00Z" },
@@ -71,9 +71,9 @@ await resetAll({ carScanId: "c", carScanStatus: "submitted", carScanSubmittedAt:
   completeScanIds: ["a", "legacy"],
 });
 ok("B5 ultra: done+verified a, building b, the phone's submitted c; failed/unknown out; unlisted legacy kept",
-  eq(ids("ultra"), ["arrow", "arrow3d", "class", "class3d", "scan:legacy", "scan:c(b)", "scan:a", "scan:b(b)"]),
+  eq(ids("ultra"), ["arrow", "class", "arrow3d", "class3d", "scan:legacy", "scan:c(b)", "scan:a", "scan:b(b)"]),
   JSON.stringify(ids("ultra")));
-ok("B6 gold never lists scans", eq(ids("gold"), ["arrow", "arrow3d", "class", "class3d"]));
+ok("B6 gold never lists scans", eq(ids("gold"), ["arrow", "class", "arrow3d", "class3d"]));
 
 console.log("C · today's car = what the phone map draws");
 const act = (s: any, g: any = {}) => gc.activeCarId(s, { ...gs.getGarage(), ...g });

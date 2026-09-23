@@ -91,10 +91,12 @@ ring, page dots, plate rim, "Drive this today", the quiet actions, Customize). T
 OWN artwork colours — a green arrow on a gold stage is the arrow's identity, not a stray accent.
 Their stills are RENDERS of the map's own models (model-viewer headless, keyed; `src/components/showroom/CarArt.tsx`),
 each with the class-sprite paint layers so any paint hex shows: the 2D arrow straight down (green, white rim —
-exactly the 2D map's arrow), the 3D arrow from the chase cam (behind and above at the map's 48°), and the Silver
-class car as a 3/4 render of its class's white 3D model where one exists (hatch, supercar, exotic, muscle; the
-top-down sprite for the rest). Jeff, 2026-09-22: "fix the 2d arrow so its top view 2d with a white outline / fix
-the 3d silver car so it look 3d … / fix the 3d arrow so its chase cam view".
+exactly the 2D map's arrow) and the 3D arrow from the chase cam (behind and above at the map's 48°). Jeff,
+2026-09-22: "fix the 2d arrow so its top view 2d with a white outline / … fix the 3d arrow so its chase cam view".
+**2D cars are flat, 3D cars are 3D:** Silver's class car is the map's top-down sprite drawn flat like the 2D arrow
+(a 3/4 render went in and came out the same night — Jeff: "the … class car need to be 2D top down version and in
+2nd slot (silver) then this makes sense"). **The stage runs in rung order** — Free's 2D arrow · Silver's 2D class
+car · Gold's 3D arrow · Gold's 3D car of your class (the GR Corolla, the one car) · Ultra's scans.
 
 `accent` is the mid-tone for text/icons on a DARK ground (`#2DEC86` / `#C9D2D8` /
 `#E0A93E`); `ink` is for glyphs riding ON the fill. Never use `ink` on black.

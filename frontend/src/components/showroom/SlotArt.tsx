@@ -16,7 +16,7 @@ import { ScanCountdown, ScanPlaceholder } from "../../ScanHero";
 import { identityFor, type GarageCar, type GarageTier } from "../../garageCars";
 import type { GarageState } from "../../garageStore";
 import { CarBox } from "./Stage";
-import { Arrow2D, Arrow3D, Car3DStill, ClassCar, GRC_ASPECT, LiveCar, ScanStill, classStillAspect, stillHeight } from "./CarArt";
+import { Arrow2D, Arrow3D, Car3DStill, ClassCar, GRC_ASPECT, LiveCar, ScanStill, stillHeight } from "./CarArt";
 
 /** The GLB the live view and the 360° spin load for a car, or null when it has none on this screen
  *  (arrows: the arrow GLB is bundled-only; building scans: not published yet). */
@@ -28,19 +28,19 @@ export function carGlbUrl(car: GarageCar, s: Settings, g: GarageState): string |
 
 const STILL_W = 330;
 const ARROW_2D_W = 136;
-const ARROW_3D_W = 230;
-/** The class still is drawn a little under STILL_W: at full width its tail reached the next spot's peek. */
-const CLASS_W = 300;
+/** Shrunk from 230 (Jeff, 2026-09-22: "shrink the 3d arrow down a bit"). */
+const ARROW_3D_W = 180;
+/** The top-down class sprite's square: the car stands ~180 pt tall on it, clear of the words above. */
+const CLASS_2D = 190;
 
-/** The class car in its class paint — the 3D still where the class has one, else the laid-back sprite. */
+/** The class car in its class paint — flat and straight down, hovering over the turntable like the 2D arrow. */
 function ClassSlot({ s }: { s: Settings }) {
   const p = getClassPaint(s);
-  const cls = getVehicleClass(s);
-  const aspect = classStillAspect(cls);
-  const car = <ClassCar width={CLASS_W} spriteSize={240} vehicleClass={cls} primary={p.primary} secondary={p.secondary} />;
-  return aspect
-    ? <CarBox width={CLASS_W} height={Math.round(CLASS_W * aspect)}>{car}</CarBox>
-    : <CarBox width={240} height={240} lift={-24}>{car}</CarBox>;
+  return (
+    <CarBox width={CLASS_2D} height={CLASS_2D} lift={22}>
+      <ClassCar size={CLASS_2D} vehicleClass={getVehicleClass(s)} primary={p.primary} secondary={p.secondary} />
+    </CarBox>
+  );
 }
 
 /** Live 3D box: taller than the car so model-viewer's framing leaves it standing on the turntable. */

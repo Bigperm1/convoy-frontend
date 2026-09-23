@@ -8,9 +8,10 @@
 //             outline")
 //   arrow3d   the same GLB from the chase cam — behind and above at the map's 48° pitch
 //             (chasePitch.ts), nose away from you (Jeff: "the 3d arrow so its chase cam view")
-//   class     the class car in the member's class paint: a 3/4 render of the class's white 3D model
-//             where one exists (hatchback GRC, supercar GT3 RS, exotic LFA, muscle coupe — Jeff: "make
-//             it look 3d, there are 3d renderings of it"); the top-down map sprite for the rest
+//   class     the class car in the member's class paint: the map's own top-down class sprite (ClassSprite),
+//             FLAT and straight down like the 2D arrow — Silver's car is a 2D-map car (Jeff, 2026-09-22:
+//             "the … class car need to be 2D top down version and in 2nd slot (silver)"; the 3/4 renders
+//             tried an hour earlier came from a mix-up he corrected, and are gone)
 //   class3d   still: a render of GRC2.glb, the stock car's default bake (assets/images/garage/grc-3d.png);
 //             live: the full GR Corolla bake for the chosen paint (getVehicleModelUrl — the map loads the
 //             decimated twin of the same car)
@@ -19,8 +20,7 @@
 //
 // Every rendered still carries the class-sprite paint layers (src/classLayers.tsx): a black floor with
 // alpha = the band, then a white mask with alpha = band x shading, tinted at runtime — so any paint hex
-// works with no per-colour bake. The arrow's bands are body (primary) and rim (secondary); a class
-// still has the body band only, so a class's secondary paint shows on the map sprite, not here.
+// works with no per-colour bake. The arrow's bands are body (primary) and rim (secondary).
 // Renders: model-viewer 4.0 headless on magenta, keyed — regenerate with tools/garage-stills/render.sh.
 
 import React, { useState } from "react";
@@ -45,30 +45,6 @@ const ARROW_3D: Still = {
   pri: { black: require("../../../assets/images/garage/garage-arrow-3d_bodyblack.png"), mask: require("../../../assets/images/garage/garage-arrow-3d_bodymask.png") },
   sec: { black: require("../../../assets/images/garage/garage-arrow-3d_rimblack.png"), mask: require("../../../assets/images/garage/garage-arrow-3d_rimmask.png") },
 };
-/** The classes that have a 3D model (src/classModels.ts CLASS_MODEL_3D), rendered from their white bake. */
-const CLASS_3D: Partial<Record<string, Still>> = {
-  hatchback: {
-    base: require("../../../assets/images/garage/garage-class-hatchback.png"),
-    aspect: 467 / 900,
-    pri: { black: require("../../../assets/images/garage/garage-class-hatchback_priblack.png"), mask: require("../../../assets/images/garage/garage-class-hatchback_primask.png") },
-  },
-  supercar: {
-    base: require("../../../assets/images/garage/garage-class-supercar.png"),
-    aspect: 439 / 900,
-    pri: { black: require("../../../assets/images/garage/garage-class-supercar_priblack.png"), mask: require("../../../assets/images/garage/garage-class-supercar_primask.png") },
-  },
-  exotic: {
-    base: require("../../../assets/images/garage/garage-class-exotic.png"),
-    aspect: 403 / 900,
-    pri: { black: require("../../../assets/images/garage/garage-class-exotic_priblack.png"), mask: require("../../../assets/images/garage/garage-class-exotic_primask.png") },
-  },
-  muscle: {
-    base: require("../../../assets/images/garage/garage-class-muscle.png"),
-    aspect: 421 / 900,
-    pri: { black: require("../../../assets/images/garage/garage-class-muscle_priblack.png"), mask: require("../../../assets/images/garage/garage-class-muscle_primask.png") },
-  },
-};
-
 export const GRC_3D = require("../../../assets/images/garage/grc-3d.png");
 /** grc-3d.png is 479×251 — keep every box at that aspect or the car squashes. */
 export const GRC_ASPECT = 251 / 479;
@@ -76,7 +52,6 @@ export const GRC_ASPECT = 251 / 479;
 /** Height a still takes at `width`, so the stage can size its box. */
 export const stillHeight = (still: "arrow" | "arrow3d", width: number) =>
   Math.round(width * (still === "arrow" ? ARROW_2D : ARROW_3D).aspect);
-export const classStillAspect = (vehicleClass: string): number | null => CLASS_3D[vehicleClass]?.aspect ?? null;
 
 /** A rendered still with its paint layers: photo → [black + tinted mask] per painted band. */
 function PaintedStill({ still, width, primary, secondary }: {
@@ -110,19 +85,12 @@ export function Arrow3D({ width, primary, secondary }: { width: number; primary?
   return <PaintedStill still={ARROW_3D} width={width} primary={primary} secondary={secondary} />;
 }
 
-/** The class car in its class paint: the 3D render where the class has a model, else the map's own
- *  top-down sprite, nose away from you, laid back onto the turntable. `width` is the 3D still's width;
- *  the sprite fallback takes `spriteSize`. */
-export function ClassCar({ width, spriteSize, vehicleClass, primary, secondary }: {
-  width: number; spriteSize: number; vehicleClass: string; primary?: string | null; secondary?: string | null;
+/** The class car in its class paint — the map's own top-down sprite, flat, nose up (the car fills ~95% of
+ *  the square's height and ~45% of its width). */
+export function ClassCar({ size, vehicleClass, primary, secondary }: {
+  size: number; vehicleClass: string; primary?: string | null; secondary?: string | null;
 }) {
-  const still = CLASS_3D[vehicleClass];
-  if (still) return <PaintedStill still={still} width={width} primary={primary} />;
-  return (
-    <View style={{ width: spriteSize, height: spriteSize, transform: [{ perspective: 600 }, { rotateX: "52deg" }] }}>
-      <ClassSprite vehicleClass={vehicleClass} primary={primary} secondary={secondary} size={spriteSize} />
-    </View>
-  );
+  return <ClassSprite vehicleClass={vehicleClass} primary={primary} secondary={secondary} size={size} />;
 }
 
 /** The stock 3D car still. `silhouette` = the locked "your own car" teaser (no paint, just the shape). */

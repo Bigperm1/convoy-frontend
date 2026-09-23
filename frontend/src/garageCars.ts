@@ -94,13 +94,15 @@ export type GarageCar = {
   createdAt?: string | null;
 };
 
-/** What each view owns before scans. Each rung includes everything below it (pricing.ts ladder):
- *  Free = the 2D arrow · Silver + your class car · Gold + the 3D arrow and the 3D car of your class. */
+/** What each view owns before scans. Each rung includes everything below it (pricing.ts ladder), and the
+ *  stage runs in RUNG ORDER — Free's car, then Silver's, then Gold's two — so swiping right climbs the ladder
+ *  (Jeff, 2026-09-22: "move [the 3D arrow] to slot 3 (gold) and the … class car … in 2nd slot (silver) then
+ *  this makes sense"): the 2D arrow · the 2D class car · the 3D arrow · the 3D car of your class. */
 const BASE_CARS: Record<GarageTier, CarKind[]> = {
   free: ["arrow"],
   silver: ["arrow", "class"],
-  gold: ["arrow", "arrow3d", "class", "class3d"],
-  ultra: ["arrow", "arrow3d", "class", "class3d"],
+  gold: ["arrow", "class", "arrow3d", "class3d"],
+  ultra: ["arrow", "class", "arrow3d", "class3d"],
 };
 
 export const scanCarId = (scanId: string): string => `scan:${scanId}`;

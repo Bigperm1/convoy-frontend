@@ -66,7 +66,9 @@ function Reveal({ wave, y, children }: { wave: SkinWave; y: number; children: Re
     if (wave.phase === "settle") return;
     const delay = Math.max(0, wave.t0 - Date.now()) + waveReachMs(y, wave.reduce);
     const duration = wave.reduce ? WAVE.reduceReveal : WAVE.reveal;
-    op.set(withDelay(delay, withTiming(1, { duration, easing: MOTION.ease.out, reduceMotion: ReduceMotion.Never })));
+    // Never on the wrapper too: withDelay defaults to the OS setting read at launch and would skip the delay (review of
+    // 84dccea4). Reduce Motion is handled here, explicitly, through wave.reduce.
+    op.set(withDelay(delay, withTiming(1, { duration, easing: MOTION.ease.out, reduceMotion: ReduceMotion.Never }), ReduceMotion.Never));
     // Mount-once by design (keyed by wave.id): the phase change must not restart the fade.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -117,7 +119,7 @@ function WipeIn({ wave, children }: { wave: SkinWave; children: ReactNode }) {
       duration: wave.reduce ? WAVE.reduceReveal : WAVE.sweep,
       easing: wave.reduce ? MOTION.ease.out : Easing.linear,
       reduceMotion: ReduceMotion.Never,
-    })));
+    }), ReduceMotion.Never));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const outer = useAnimatedStyle(() => (wave.reduce

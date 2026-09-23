@@ -9,7 +9,7 @@
 //      entitlements on.
 //   H  the unlock hold — the old metal stays on every surface until the wave releases it; stale holds and holds that
 //      change nothing are not shown; an account claim drops it; repaints fire only when the metal actually changes.
-//   W  the wave engine — cannot play → applied at once; plays → run, apply, settle, done, in that order; never two at once.
+//   W  the wave engine — cannot play → applied at once; plays → run, apply, settle, done, in that order; the newest change wins.
 // Run: node --experimental-strip-types tools/sim-qc/skin_unlock_test.mts
 
 import { register } from "node:module";
@@ -99,6 +99,15 @@ const firstAt = gs.getGarage().skinHold?.at;
 await new Promise((r) => setTimeout(r, 5));
 await as.holdSkinForUnlock("first-scan");
 ok("H7 a second hold keeps the first (its `from` is what the member last saw)", gs.getGarage().skinHold?.at === firstAt);
+// Review of 84dccea4: a hold that now resolves DOWN (a Garage pick of the arrow while it waited) is no unlock.
+await reset({ appSkin: "brand" }, { completeScanIds: ["s1"], skinHold: { key: "first-scan", from: "ultra", at: new Date().toISOString() } });
+ok("H9 a first-scan hold that now resolves to green (the member picked the arrow) is no unlock — no 'GREEN UNLOCKED'",
+  as.pendingUnlock() === null);
+await reset({ appSkin: "ultra" }, { completeScanIds: ["s1"], skinHold: { key: "first-scan", from: "premium", at: new Date().toISOString() } });
+ok("H10 the first scan's only unlock is Diamond: a hold resolving silver → gold is not announced as the scan's unlock",
+  as.pendingUnlock() === null);
+await reset({}, { completeScanIds: ["s1"], skinHold: { key: "tier", from: "premium", at: new Date().toISOString() } });
+ok("H11 a tier unlock going UP is one (silver → diamond with a scan on Automatic)", eq(as.pendingUnlock(), { key: "tier", from: "premium", to: "diamond" }));
 // Repaints: the garage and settings stores notify on every write; the skin must only repaint when the metal changes.
 await reset();
 let paints = 0;
@@ -135,14 +144,28 @@ ok("W2 the whole wave is about a second — UI motion stays short (DESIGN.md §1
     apply: () => { appliedAt = Date.now() - t0; seen.push("apply"); },
   });
   const during = wv.getSkinWave();
-  let second = 0;
-  const how2 = await wv.playSkinWave({ from: "ultra", to: "premium", reduce: false, canPlay: true, apply: () => { second++; } });
   const how = await p;
   off2();
   ok("W5 plays: run → apply → settle → done, in that order", how === "played" && eq(seen, ["run", "apply", "settle", "done"]), seen.join(","));
   ok("W6 the skin is changed only after the band and the last reveal", appliedAt >= wv.waveRunMs(false) - 5, `apply at ${appliedAt} ms`);
   ok("W7 the running wave carries from, to and the badge", during?.from === "ultra" && during?.to === "diamond" && during?.badge?.title === "DIAMOND UNLOCKED");
-  ok("W8 a second wave while one runs is applied at once, never stacked", how2 === "applied" && second === 1);
+}
+{
+  // Codex review of 84dccea4: Silver then Green inside one wave saved Silver (the older wave's delayed apply landed last).
+  const applied: string[] = [];
+  const p1 = wv.playSkinWave({ from: "ultra", to: "premium", reduce: false, canPlay: true, apply: () => { applied.push("premium"); } });
+  await new Promise((r) => setTimeout(r, 300));
+  const p2 = wv.playSkinWave({ from: "ultra", to: "brand", reduce: false, canPlay: true, apply: () => { applied.push("brand"); } });
+  const [h1, h2] = await Promise.all([p1, p2]);
+  ok("W8 a newer change supersedes a running wave: its apply never runs, the newest pick is the one saved",
+    h1 === "superseded" && h2 === "played" && eq(applied, ["brand"]) && wv.getSkinWave() === null, `${h1}/${h2} applied=${applied.join(",")}`);
+  const applied2: string[] = [];
+  const q1 = wv.playSkinWave({ from: "ultra", to: "diamond", reduce: false, canPlay: true, apply: () => { applied2.push("diamond"); } });
+  await new Promise((r) => setTimeout(r, 200));
+  const q2 = wv.playSkinWave({ from: "ultra", to: "premium", reduce: false, canPlay: false, apply: () => { applied2.push("premium"); } });
+  await Promise.all([q1, q2]);
+  ok("W9 …also when the newer change cannot animate (applied at once): the older wave still never applies",
+    eq(applied2, ["premium"]) && wv.getSkinWave() === null, applied2.join(","));
 }
 
 console.log(failed ? `\nFAIL skin_unlock (${failed})` : "\nPASS skin_unlock");

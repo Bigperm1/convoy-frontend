@@ -154,13 +154,18 @@ export function appSkinNow(): VisualTier {
   return ORDER[Math.min(ORDER.indexOf(h.from), ORDER.indexOf(entitledSkin()))];
 }
 
-/** The unlock waiting to be shown, if it changes what is worn: from → to. */
+/** The unlock waiting to be shown: from → to, and only when it is one — a step UP the ladder (the first scan's only
+ *  unlock is Diamond). A hold that now resolves sideways or down (the member picked the arrow in the Garage while it
+ *  waited) is no unlock: null, and the host releases it without a wave — never a "GREEN UNLOCKED" for a downgrade the
+ *  member chose (review of 84dccea4). */
 export function pendingUnlock(): { key: SkinHold["key"]; from: VisualTier; to: VisualTier } | null {
   const h = activeHold();
   if (!h) return null;
   const from = appSkinNow();
   const to = appSkinUnheld();
-  return from === to ? null : { key: h.key, from, to };
+  if (ORDER.indexOf(to) <= ORDER.indexOf(from)) return null;
+  if (h.key === "first-scan" && to !== "diamond") return null;
+  return { key: h.key, from, to };
 }
 
 /** Hold the metal worn NOW while an unlock lands, so it can be shown (src/skinWave.ts). Call BEFORE the write that

@@ -10,6 +10,7 @@ import Animated, {
   Easing, ReduceMotion, useAnimatedStyle, useSharedValue, withDelay, withSequence, withTiming,
 } from "react-native-reanimated";
 import { getGarage, subscribeGarage } from "../garageStore";
+import { subscribeSettings } from "../settings";
 import { pendingUnlock, releaseSkinHold } from "../appSkin";
 import { skin, type VisualTier } from "../tierTheme";
 import { MOTION } from "../motion";
@@ -52,11 +53,14 @@ function Band({ wave }: { wave: SkinWave }) {
   useEffect(() => {
     const delay = Math.max(0, wave.t0 - Date.now());
     const cfg = { reduceMotion: ReduceMotion.Never } as const;
-    p.set(withDelay(delay, withTiming(1, { duration: WAVE.sweep, easing: Easing.linear, ...cfg })));
-    op.set(withDelay(delay, withSequence(
+    // ReduceMotion.Never on EVERY wrapper, not only the timings: withDelay / withSequence default to the OS setting read at
+    // launch and then skip their delays (review of 84dccea4). This component only mounts when wave.reduce is false.
+    const N = ReduceMotion.Never;
+    p.set(withDelay(delay, withTiming(1, { duration: WAVE.sweep, easing: Easing.linear, ...cfg }), N));
+    op.set(withDelay(delay, withSequence(N,
       withTiming(1, { duration: 120, easing: MOTION.ease.out, ...cfg }),
-      withDelay(WAVE.sweep - 240, withTiming(0, { duration: 120, easing: MOTION.ease.out, ...cfg })),
-    )));
+      withDelay(WAVE.sweep - 240, withTiming(0, { duration: 120, easing: MOTION.ease.out, ...cfg }), N),
+    ), N));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const st = useAnimatedStyle(() => ({
@@ -88,9 +92,11 @@ function Badge({ to, badge, reduce, onDone }: { to: VisualTier; badge: WaveBadge
   const sc = useSharedValue(reduce ? 1 : MOTION.popover.fromScale);
   useEffect(() => {
     const cfg = { reduceMotion: ReduceMotion.Never } as const;
-    op.set(withSequence(
+    // Never on the wrappers as well (see Band): with the OS default, Reduce Motion skipped the 1.5 s hold and the badge
+    // flashed for ~0.2 s. Reduce Motion here means no scale, not no badge.
+    op.set(withSequence(ReduceMotion.Never,
       withTiming(1, { duration: WAVE.badgeIn, easing: MOTION.ease.out, ...cfg }),
-      withDelay(WAVE.badgeHold, withTiming(0, { duration: WAVE.badgeOut, easing: MOTION.ease.out, ...cfg })),
+      withDelay(WAVE.badgeHold, withTiming(0, { duration: WAVE.badgeOut, easing: MOTION.ease.out, ...cfg }), ReduceMotion.Never),
     ));
     if (!reduce) sc.set(withTiming(1, { duration: WAVE.badgeIn, easing: MOTION.ease.out, ...cfg }));
     // Unmount after it has faded (JS timer: the badge is not interactive, and a stuck badge must still go).
@@ -167,6 +173,7 @@ export function SkinUnlockHost() {
   const playing = useRef(false);
 
   useEffect(() => subscribeGarage(() => setTick((n) => n + 1)), []);
+  useEffect(() => subscribeSettings(() => setTick((n) => n + 1)), []);
   useEffect(() => subscribeSplashLifted(() => setTick((n) => n + 1)), []);
   useEffect(() => {
     const sub = AppState.addEventListener("change", (s) => { if (s === "active") setTick((n) => n + 1); });

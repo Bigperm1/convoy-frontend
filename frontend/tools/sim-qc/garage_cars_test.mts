@@ -401,8 +401,12 @@ const bList = gc.refreshScanList();
 await bList;
 rel4();
 await aList;
+// ≥ 2 requests since 84dccea4's review fix: besides A's list and B's list, claimGarageFor now starts a scan restore for
+// the account signing in (and earlier tests' claims leave theirs in flight), so the count is no longer exact — the
+// property is the answer: B's own list, A's late one discarded.
 ok("K4 B gets its own /scan/mine answer; A's late answer is discarded",
-  calls4 === 2 && gs.getGarage().scans.length === 1 && gs.getGarage().scans[0].scanId === "B1");
+  calls4 >= 2 && gs.getGarage().scans.length === 1 && gs.getGarage().scans[0].scanId === "B1",
+  `calls=${calls4} scans=${JSON.stringify(gs.getGarage().scans.map((x: any) => x.scanId))}`);
 // K5: a park made offline stays pending and is retried until acknowledged.
 await resetAll({ selfMarkerType: "car", carScanId: "a", carScanStatus: "ready", carScanMapUrl: `${MODELS}/scan_a_map.glb`, carScanModelUrl: `${MODELS}/scan_a.glb`, carScanBackendId: "a" });
 const realPut = apiStub.api.put;
@@ -795,6 +799,52 @@ console.log("P · the 3D class car");
   ok("P44 the 1st finished scan holds the metal for the unlock wave; the 2nd does not",
     firstHow === "active" && eq(heldFirst, ["first-scan"]) && eq(skinStub.holds, ["first-scan"]),
     `first=${firstHow} holds=${JSON.stringify(skinStub.holds)}`);
+  // P45 Codex's repro on 84dccea4: A has a finished scan, B signs in (claim → B), then A signs back in and stays on the
+  // Map. The shell's claim must bring A's own scan back without the Garage, so A's Diamond (owner A + completeScanIds)
+  // returns — it used to wait for Garage focus, with A's restored scan filed under B.
+  publish("a1");
+  await resetAll({ selfMarkerType: "car" }, { ownerId: "userA", completeScanIds: ["a1"] });
+  apiStub.routes.get["/scan/mine"] = async () => ({ status: 200, data: { scans: [] } });
+  await gc.claimGarageFor("userB", {});
+  await new Promise((r) => setTimeout(r, 30));
+  apiStub.routes.get["/scan/mine"] = async () => ({ status: 200, data: { scans: [{ scanId: "a1", status: "done", createdAt: "2026-09-02T00:00:00Z" }] } });
+  await gc.claimGarageFor("userA", {});
+  for (let k = 0; k < 50 && !G().completeScanIds.includes("a1"); k++) await new Promise((r) => setTimeout(r, 10));
+  ok("P45 A back after B: the sign-in claim restores A's own finished scan under A (its Diamond comes back on the Map)",
+    G().ownerId === "userA" && G().completeScanIds.includes("a1"), JSON.stringify({ owner: G().ownerId, ids: G().completeScanIds }));
+  // P46–P48 review of 84dccea4
+  // P46 the Garage's list refresh can record the phone's SUBMITTED scan before the return leg delivers it (they race on
+  // focus): it must hold too, or Diamond flips with no wave (reproduced ~50% of focus trials)
+  publish("L1");
+  await resetAll({ selfMarkerType: "car", carScanId: "L1", carScanStatus: "submitted", carScanSubmittedAt: new Date().toISOString() }, { ownerId: "u1" });
+  skinStub.holds.length = 0;
+  apiStub.routes.get["/scan/mine"] = async () => ({ status: 200, data: { scans: [{ scanId: "L1", status: "done", createdAt: null }] } });
+  await gc.refreshScanList();
+  ok("P46 the list refresh recording the phone's submitted scan first holds the metal for the unlock wave",
+    eq(skinStub.holds, ["first-scan"]) && G().completeScanIds.includes("L1"), JSON.stringify(skinStub.holds));
+  // P47 …but a finished scan that merely reappears (reinstall: nothing on this phone was waiting for it) unlocks silently
+  publish("R1");
+  await resetAll({ selfMarkerType: "arrow" }, { ownerId: "u1" });
+  skinStub.holds.length = 0;
+  apiStub.routes.get["/scan/mine"] = async () => ({ status: 200, data: { scans: [{ scanId: "R1", status: "done", createdAt: null }] } });
+  await gc.refreshScanList();
+  ok("P47 a finished scan coming back after a reinstall is recorded with NO hold — no 'Your 1st 3D scan' replay",
+    skinStub.holds.length === 0 && G().completeScanIds.includes("R1"), JSON.stringify(skinStub.holds));
+  // P48 a Garage pick while the unlock waits: the choice first, then the hold released (the pick shows at once); driving
+  // the scan (Diamond) keeps the hold — that is the unlock
+  await resetAll({ selfMarkerType: "car" }, { ownerId: "u1" });
+  skinStub.skins.length = 0; skinStub.releases.length = 0;
+  await gc.driveToday({ id: "arrow", kind: "arrow" });
+  await new Promise((r) => setTimeout(r, 20));
+  const arrowRel = [...skinStub.releases];
+  publish("D1");
+  await resetAll({ selfMarkerType: "arrow" }, { ownerId: "u1", completeScanIds: ["D1"] });
+  skinStub.skins.length = 0; skinStub.releases.length = 0;
+  await gc.driveToday({ id: "scan:D1", kind: "scan", scanId: "D1" });
+  await new Promise((r) => setTimeout(r, 20));
+  ok("P48 a Garage pick releases a pending unlock hold AFTER setting its choice; driving the scan keeps it",
+    eq(arrowRel, [1]) && skinStub.releases.length === 0 && eq(skinStub.skins, ["diamond"]),
+    `arrow=${JSON.stringify(arrowRel)} scan=${JSON.stringify(skinStub.releases)}`);
 }
 
 console.log(fails ? `\nFAIL garage_logic (${fails})` : "\nPASS garage_logic");

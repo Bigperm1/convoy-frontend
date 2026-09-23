@@ -37,14 +37,15 @@ import {
 } from "./settings";
 import { CLASS_MODEL_3D, type ClassPaletteEntry } from "./classModels";
 import { getVehicleModelKey, resolveGRCKey, type GRCColorKey } from "./vehicleAssets";
-import { checkScanReady, scanHeroUrl, scanMapUrl, scanSyncSettled } from "./carScan";
-import { setSkinChoice } from "./appSkin";
+import { checkScanReady, reconcileScanState, scanHeroUrl, scanMapUrl, scanSyncSettled } from "./carScan";
+import { holdSkinForUnlock, releaseSkinHold, setSkinChoice } from "./appSkin";
 import { ENTITLEMENTS_ENFORCED, getDevTier, getTier, type Tier } from "./entitlements";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import {
   claimGarage,
   ensureGarageLoaded,
   getGarage,
+  hasCompletedScan,
   ownIdentityBack,
   updateGarage,
   SKIN_FOR_MARKER,
@@ -407,7 +408,15 @@ function identityPatch(id: CarIdentity): Pick<Settings, "carYear" | "carMake" | 
 function afterMarkerWrite(type: MarkerType, scan: boolean) {
   api.put("/auth/profile", { avatar_type: type }).catch(() => {});
   const metal = scan ? SKIN_FOR_SCAN : SKIN_FOR_MARKER[type];
-  if (metal) void setSkinChoice(metal);
+  if (!metal) return;
+  // A car picked while the first-scan unlock waits to be shown (the Garage wears its own metal, so the wave waits for
+  // the next page): the pick is the member's word and shows at once — the choice first, then the hold released, so no
+  // surface flashes the metal in between. Driving the scan itself (Diamond) keeps the hold: that IS the unlock, and it
+  // plays on the next page (review of 84dccea4).
+  void (async () => {
+    await setSkinChoice(metal);
+    if (metal !== SKIN_FOR_SCAN) await releaseSkinHold();
+  })();
 }
 
 const add = (xs: string[], x: string) => (xs.includes(x) ? xs : [...xs, x]);
@@ -530,6 +539,23 @@ export async function driveToday(car: GarageCar): Promise<DriveResult> {
 // ── The inventory ───────────────────────────────────────────────────────────────────────────────────
 let listBusy: { owner: string | undefined; p: Promise<void>; token: object } | null = null;
 
+/** A scan this phone watched being made: the one it submitted, or one the Garage listed while it was still building. Only
+ *  such a scan finishing is the member's FIRST-SCAN moment. A finished scan that merely reappears (a reinstall, an
+ *  account switch — nothing on this phone was waiting for it) unlocks Diamond silently: no "Your 1st 3D scan" replay. */
+function watchedBuilding(id: string): boolean {
+  const s = getSettings();
+  if (s.carScanId === id && s.carScanStatus === "submitted") return true;
+  return getGarage().scans.some((sc) => sc.scanId === id && !["done", "failed", "skipped"].includes(sc.status));
+}
+
+/** Hold the metal before the account's FIRST finished scan is recorded here, so Diamond arrives as the unlock wave.
+ *  Every path that can record it first calls this (the list refresh races the return leg's delivery on Garage focus —
+ *  review of 84dccea4: about half the time the list won and Diamond flipped with no wave). */
+async function holdIfFirstScan(ids: string[]): Promise<void> {
+  if (!ids.length || hasCompletedScan(getSettings()) || !ids.some(watchedBuilding)) return;
+  await holdSkinForUnlock("first-scan");
+}
+
 /** GET /scan/mine → the store. Done scans are HEAD-checked once (both GLBs) and remembered as complete.
  *  Offline / 503 keeps the last good list — the Garage never empties itself because the server blinked. */
 export function refreshScanList(): Promise<void> {
@@ -559,6 +585,7 @@ export function refreshScanList(): Promise<void> {
       }
       // Another account signed in while this was in flight: the answer is not this garage's.
       if (getGarage().ownerId !== owner) return;
+      await holdIfFirstScan(fresh);
       await updateGarage((cur) => ({
         scans,
         completeScanIds: fresh.reduce(add, cur.completeScanIds),
@@ -587,6 +614,7 @@ export async function checkBuildingScans(ids: string[]): Promise<string[]> {
   // Another account claimed the garage while the checks ran: these are not its cars.
   if (getGarage().ownerId !== owner) return [];
   if (done.length) {
+    await holdIfFirstScan(done);
     await updateGarage((cur) => ({
       completeScanIds: done.reduce(add, cur.completeScanIds),
       scans: cur.scans.map((sc) => (done.includes(sc.scanId) ? { ...sc, status: "done" } : sc)),
@@ -692,6 +720,9 @@ export async function claimGarageFor(
   });
   if (profile) await hydrateCarFromProfile(profile);
   try { logEventReliable(`garage-owner-changed scan-pointer=cleared identity=${profile ? "profile" : "cleared"}`); } catch {}
+  // Bring this account's own finished scans back now — they unlock its Diamond (appSkin.diamondUnlocked) — instead of
+  // waiting for the Garage or the next launch. A run already in flight for the previous account re-runs itself.
+  void reconcileScanState();
 }
 
 /** The garage store belongs to the signed-in account — or predates owners (the first claim adopts it). False while

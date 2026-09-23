@@ -708,8 +708,11 @@ let _reconcileBusy = false;
 export async function reconcileScanState(): Promise<"restored" | "failed" | "noop"> {
   if (_reconcileBusy) return "noop";
   _reconcileBusy = true;
+  // The account whose garage this run started on (null until the store has loaded).
+  let startOwner: string | undefined | null = null;
   try {
     await ensureGarageLoaded();
+    startOwner = getGarage().ownerId;
     const cur = getSettings();
     if (cur.carScanStatus === "ready" && cur.carScanId) return "noop";
     const rev = getGarage().chosenAt;
@@ -786,6 +789,11 @@ export async function reconcileScanState(): Promise<"restored" | "failed" | "noo
     return "noop";
   } finally {
     _reconcileBusy = false;
+    // Another account claimed the garage while this run was in flight (the app shell claims it at sign-in —
+    // garageCars.claimGarageFor): this run bailed as superseded, so run once more for the account now signed in, or
+    // its own finished scan — and the Diamond it unlocks — would wait for the Garage or the next launch (Codex review
+    // of 84dccea4: A → B → A left A on Gold with its scan restored under B).
+    if (startOwner !== null && getGarage().ownerId !== startOwner) setTimeout(() => { void reconcileScanState(); }, 0);
   }
 }
 

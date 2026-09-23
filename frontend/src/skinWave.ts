@@ -103,8 +103,13 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * Carry the app from `from` to `to` as a wave, then run `apply` — the write that makes `to` the metal in force
- * (setSkinChoice, releaseSkinHold). If the wave cannot be shown (another is running, nothing changes, the app is not in
- * front, a drive is on), `apply` runs at once and nothing animates. Resolves when the wave is over.
+ * (setSkinChoice, releaseSkinHold). If the wave cannot be shown (nothing changes, the app is not in front, a drive is
+ * on), `apply` runs at once and nothing animates. Resolves when the wave is over.
+ *
+ * The NEWEST change always wins: a wave still running when another change arrives is superseded — its layers drop and
+ * its `apply` never runs — so tapping Silver then Green inside one wave can never leave Silver saved under a Green
+ * radio (Codex review of 84dccea4, reproduced: the older wave's delayed apply landed last). `from` must be the metal in
+ * force when called (appSkinNow), which a superseded wave never changed.
  */
 export async function playSkinWave(opts: {
   from: VisualTier;
@@ -114,17 +119,20 @@ export async function playSkinWave(opts: {
   canPlay: boolean;
   apply: () => unknown;
   badge?: WaveBadge;
-}): Promise<"played" | "applied"> {
+}): Promise<"played" | "applied" | "superseded"> {
   const { from, to, reduce, canPlay, apply, badge } = opts;
-  if (wave || from === to || !canPlay) {
+  const id = ++seq;
+  // Anything running is now stale: end its layers here; its own loop sees the new id and skips its apply.
+  if (wave) publish(null);
+  if (from === to || !canPlay) {
     await apply();
     return "applied";
   }
-  const id = ++seq;
   const t0 = Date.now() + WAVE.arm;
   publish({ id, from, to, t0, reduce, phase: "run", badge });
   try {
     await sleep(waveRunMs(reduce));
+    if (seq !== id) return "superseded";
     await apply();
     const cur = getSkinWave();
     if (cur?.id === id) publish({ ...cur, phase: "settle" });

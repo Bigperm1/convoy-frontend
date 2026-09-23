@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { setSkinAccount } from "../../src/appSkin";
+import { claimGarageFor } from "../../src/garageCars";
 import { skin } from "../../src/tierTheme";
 import { SkinFade, useWaveMetal } from "../../src/ui/SkinWave";
 import { SkinUnlockHost, SkinWaveOverlay } from "../../src/ui/SkinUnlock";
@@ -151,8 +152,13 @@ export default function AppLayout() {
   // The label turns with its glyph: the old metal until the unlock wave's band crosses the bar.
   const tabAccent = skin(useWaveMetal(TAB_BAR_Y)).accent;
   const { user } = useAuth();
-  // Diamond is unlocked per ACCOUNT (the first 3D scan): tell the skin who is signed in (appSkin.setSkinAccount).
-  useEffect(() => { setSkinAccount(user?.id); }, [user?.id]);
+  // Diamond is unlocked per ACCOUNT (the first 3D scan): tell the skin who is signed in (appSkin.setSkinAccount), and
+  // claim this phone's garage store for that account now — not only when the Garage opens — so a returning account's
+  // own scans (and Diamond) come back on the Map (Codex review of 84dccea4). "same" on every normal launch: a no-op.
+  useEffect(() => {
+    setSkinAccount(user?.id);
+    if (user?.id) void claimGarageFor(user.id, user);
+  }, [user]);
   const router = useRouter();
   const [settings] = useSettings();
   const insets = useSafeAreaInsets();

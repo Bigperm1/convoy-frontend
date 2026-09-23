@@ -27,6 +27,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type ScrollView,
+  type ViewStyle,
 } from "react-native";
 import Svg, { Defs, Ellipse, LinearGradient as SvgLinearGradient, Polygon, RadialGradient, Rect, Stop } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
@@ -38,10 +39,21 @@ import { skin, type VisualTier } from "../../tierTheme";
 import SkinSheen from "../SkinSheen";
 import { MOTION } from "../../motion";
 import { useReduceMotion } from "../../motionPrefs";
+import type { GarageTier } from "../../garageCars";
+import { garageMetal, TIER_WORD } from "./tier";
 
 export const STAGE_H = 400;
 /** Where the turntable sits (its centre line) — every car is placed to stand on it. */
 export const TURNTABLE_Y = 332;
+/** The turntable's half-width and half-height, about (W / 2, TURNTABLE_Y). The light cone's foot is its
+ *  widest points. */
+const TABLE_RX = 150;
+const TABLE_RY = 32;
+/** The overhead light — the SOURCE the cone hangs from: half the approved design's 220 pt bar (Jeff,
+ *  2026-09-23: "make the light source smaller"). Round-ended, radius LIGHT_H / 2. */
+const LIGHT_W = 110;
+const LIGHT_H = 6;
+const LIGHT_TOP = 10;
 
 export type StageSlot = {
   key: string;
@@ -49,12 +61,15 @@ export type StageSlot = {
   type: "car" | "locked" | "add";
 };
 
-export type StageLabels = {
-  pill: string;
-  pillMetal: VisualTier;
-  name: string;
-  sub: string;
-};
+type StageWords = { pill: string; pillMetal: VisualTier; name: string; sub: string };
+type NoWords = { pill?: undefined; pillMetal?: undefined; name?: undefined; sub?: undefined };
+
+/** What the stage says about the centred spot. `tier` is always there: the chip at top-RIGHT naming the
+ *  rung the spot belongs to, in that rung's metal (Jeff, 2026-09-23: "on the right side of the screen
+ *  (across from 'in your garage') should have the tier with matching colour. so we know what tier it
+ *  is"). The words — the top-left pill, the name, the line under it — are left out on a spot whose art
+ *  carries its own ("+ Scan a car", a scan still building). */
+export type StageLabels = { tier: GarageTier } & (StageWords | NoWords);
 
 /** Stand a car on the turntable: a box of the given size whose bottom edge sits `lift` above the
  *  turntable's centre line, centred across the stage. */
@@ -101,7 +116,7 @@ export default function Stage({
   centreTappable?: boolean;
   /** The page metal: light, cone, turntable ring, the active dot. */
   metal: VisualTier;
-  /** Top-left words for the centred slot; null hides them (a full-stage state carries its own). */
+  /** The words and the tier chip for the centred slot; null hides them all. */
   labels: StageLabels | null;
   /** The slot's visual. `centred` is true only for the settled slot — the only one allowed to go live. */
   renderSlot: (slot: StageSlot, i: number, centred: boolean) => React.ReactNode;
@@ -148,11 +163,20 @@ export default function Stage({
   // out (0.48 of the width), drawn at ~60% size and ~35% opacity; two out it is gone.
   const PEEK = W * 0.48;
 
-  // The cone: the approved design's trapezoid (18%–82% across the top, full width at the foot).
-  const coneL = W * 0.064;
-  const coneR = W - coneL;
-  const coneW = coneR - coneL;
-  const cone = `${coneL + coneW * 0.18},16 ${coneL + coneW * 0.82},16 ${coneR},326 ${coneL},326`;
+  // The light (Jeff, 2026-09-23: "make the light source smaller and the light fan out to the edges of the
+  // circle. make sure the light effect is not outside the light source when it touches the light like it
+  // currently is"). ONE shape carries all of it — the cone — hung from the bar and fanned out to the
+  // turntable; the glow is painted inside that shape only, and the bar has no halo, so nothing lights the
+  // stage above or beside the source.
+  //   top  — the bar's straight bottom edge. Its ends are round, so on y = barBottom it is LIGHT_W − LIGHT_H
+  //          wide; a cone any wider would show beside the round ends, right where the light leaves the bar.
+  //   foot — the turntable's widest points, W / 2 ± TABLE_RX on TURNTABLE_Y.
+  const cx = W / 2;
+  const barBottom = LIGHT_TOP + LIGHT_H;
+  const coneTopHalf = (LIGHT_W - LIGHT_H) / 2;
+  const cone =
+    `${cx - coneTopHalf},${barBottom} ${cx + coneTopHalf},${barBottom} ` +
+    `${cx + TABLE_RX},${TURNTABLE_Y} ${cx - TABLE_RX},${TURNTABLE_Y}`;
 
   return (
     <View style={[styles.stage, { height: STAGE_H }]}>
@@ -160,13 +184,17 @@ export default function Stage({
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <Svg width={W} height={STAGE_H}>
         <Defs>
-          <RadialGradient id="stageGlow" cx={W / 2} cy={100} r={240} gradientUnits="userSpaceOnUse">
+          {/* Centred on the source and reaching the turntable, so the light is brightest where it leaves
+              the bar; it only ever fills the cone. */}
+          <RadialGradient id="stageGlow" cx={cx} cy={barBottom} r={TURNTABLE_Y - barBottom} gradientUnits="userSpaceOnUse">
             <Stop offset="0" stopColor={glowHex} stopOpacity={0.14} />
             <Stop offset="0.55" stopColor={glowHex} stopOpacity={0} />
           </RadialGradient>
+          {/* objectBoundingBox: bar → turntable. It ends faint, not at nothing, so the cone's edges still
+              read where they meet the table's rim. */}
           <SvgLinearGradient id="stageCone" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor={sk.accent} stopOpacity={0.1} />
-            <Stop offset="1" stopColor={sk.accent} stopOpacity={0} />
+            <Stop offset="1" stopColor={sk.accent} stopOpacity={0.035} />
           </SvgLinearGradient>
           {/* objectBoundingBox (the default): the gradient stretches to the ellipse it fills */}
           <RadialGradient id="stageTable" cx="50%" cy="50%" r="50%">
@@ -179,19 +207,16 @@ export default function Stage({
           </RadialGradient>
         </Defs>
         <Rect x={0} y={0} width={W} height={STAGE_H} fill="#0B0C0E" />
-        <Rect x={0} y={0} width={W} height={STAGE_H} fill="url(#stageGlow)" />
         <Polygon points={cone} fill="url(#stageCone)" />
+        <Polygon points={cone} fill="url(#stageGlow)" />
+        {/* the light source: its bottom edge is the cone's top */}
+        <Rect x={cx - LIGHT_W / 2} y={LIGHT_TOP} width={LIGHT_W} height={LIGHT_H} rx={LIGHT_H / 2} fill="#F4FDFF" fillOpacity={0.8} />
         {/* the turntable's soft glow, then the table, then the shadow the car throws on it */}
         <Ellipse cx={W / 2} cy={TURNTABLE_Y} rx={156} ry={37} fill="none" stroke={sk.accent} strokeOpacity={0.08} strokeWidth={8} />
-        <Ellipse cx={W / 2} cy={TURNTABLE_Y} rx={150} ry={32} fill="url(#stageTable)" stroke={sk.accent} strokeOpacity={0.55} strokeWidth={1} />
+        <Ellipse cx={W / 2} cy={TURNTABLE_Y} rx={TABLE_RX} ry={TABLE_RY} fill="url(#stageTable)" stroke={sk.accent} strokeOpacity={0.55} strokeWidth={1} />
         <Ellipse cx={W / 2} cy={TURNTABLE_Y - 3} rx={130} ry={13} fill="url(#stageShadow)" />
       </Svg>
       </View>
-      {/* the light bar */}
-      <View
-        pointerEvents="none"
-        style={[styles.lightBar, { left: (W - 220) / 2, shadowColor: sk.accent }]}
-      />
 
       {/* 2 · the cars — the centred one drawn LAST, so it sits over its neighbours (in list order the next
           spot painted across a wide car's tail — the 3D class still, 2026-09-22); then the lock marks, over
@@ -303,16 +328,17 @@ export default function Stage({
       {/* the words for the centred car */}
       {labels ? (
         <View style={styles.labels} pointerEvents="none">
-          <LinearGradient
-            colors={skin(labels.pillMetal).colors}
-            locations={skin(labels.pillMetal).locations}
-            style={[styles.pill, { borderColor: skin(labels.pillMetal).rim }]}
-          >
-            <SkinSheen sk={skin(labels.pillMetal)} />
-            <Text style={[styles.pillText, { color: skin(labels.pillMetal).ink }]}>{labels.pill}</Text>
-          </LinearGradient>
-          <Text style={styles.name} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{labels.name}</Text>
-          <Text style={styles.sub} numberOfLines={2}>{labels.sub}</Text>
+          {/* one row: the pill at left, the spot's tier across from it at right */}
+          <View style={styles.pillRow}>
+            {labels.pill !== undefined ? <MetalPill text={labels.pill} metal={labels.pillMetal} /> : null}
+            <MetalPill text={TIER_WORD[labels.tier]} metal={garageMetal(labels.tier)} style={styles.tierPill} />
+          </View>
+          {labels.name !== undefined ? (
+            <>
+              <Text style={styles.name} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{labels.name}</Text>
+              <Text style={styles.sub} numberOfLines={2}>{labels.sub}</Text>
+            </>
+          ) : null}
         </View>
       ) : null}
 
@@ -339,6 +365,18 @@ export default function Stage({
   );
 }
 
+/** A pill in a metal. The stage's two pills are this one component, so they share one height, one
+ *  gradient and one sheen (the diamond's facets included). */
+function MetalPill({ text, metal, style }: { text: string; metal: VisualTier; style?: ViewStyle }) {
+  const pk = skin(metal);
+  return (
+    <LinearGradient colors={pk.colors} locations={pk.locations} style={[styles.pill, { borderColor: pk.rim }, style]}>
+      <SkinSheen sk={pk} />
+      <Text style={[styles.pillText, { color: pk.ink }]}>{text}</Text>
+    </LinearGradient>
+  );
+}
+
 // MOTION.press on the centred car: the transition from the one table, the origin on the turntable.
 // Outside StyleSheet.create, whose types do not know Reanimated's CSS transition keys.
 const pressLayer = {
@@ -350,19 +388,10 @@ const pressLayer = {
 
 const styles = StyleSheet.create({
   stage: { width: "100%", backgroundColor: "#0B0C0E", overflow: "hidden" },
-  lightBar: {
-    position: "absolute",
-    top: 10,
-    width: 220,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#F4FDFF",
-    opacity: 0.8,
-    shadowOpacity: 0.35,
-    shadowRadius: 11,
-    shadowOffset: { width: 0, height: 0 },
-  },
   labels: { position: "absolute", left: 20, top: 26, right: 20, alignItems: "flex-start", gap: 6 },
+  pillRow: { alignSelf: "stretch", flexDirection: "row", alignItems: "center" },
+  // Pushed to the row's right end whether or not a pill sits at its left.
+  tierPill: { marginLeft: "auto" },
   pill: {
     height: 22,
     paddingHorizontal: 10,

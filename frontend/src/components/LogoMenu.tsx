@@ -30,24 +30,14 @@ type Item = {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   route: string;
-  /**
-   * Push the target's layout anchor (its `unstable_settings.initialRouteName`)
-   * underneath it. Only matters for a route INSIDE a nested stack: without it,
-   * React Navigation builds that stack from the target alone, so Back has nowhere
-   * inside the stack to go.
-   */
-  withAnchor?: boolean;
 };
 
 // ON THE ROAD — things a driver flips from the map without digging through
-// Settings (Jeff, 2026-09-23: menu reorganization). Ghost mode is not a route, so
-// it renders as its own switch row (GhostRow) under this one.
-// Map Layers lives inside the Settings stack: withAnchor puts the Settings index
-// beneath it (app/(app)/settings/_layout.tsx declares index as the anchor), so
-// Back from Map Layers lands on the Settings menu.
-const MAP_LAYERS: Item = {
-  label: 'Map Layers', icon: 'layers', route: '/(app)/settings/map-layers', withAnchor: true,
-};
+// Settings (Jeff, 2026-09-23: menu reorganization). Its one row is Ghost mode,
+// which is not a route, so it renders as its own switch row (GhostRow).
+// Map Layers was here too until Jeff took it back out the same day ("i dont like
+// the new map layers when pressing H. remove that and keep it in the settings") —
+// it lives in Settings › MAP only.
 
 // PLACES — the global destinations behind the logo. Club is the /(app)/hub route
 // (clubs, meets and cruises); the row was labelled "Hub" until the 2026-09-23 menu
@@ -58,10 +48,6 @@ const PLACES: Item[] = [
   { label: 'Drives',    icon: 'navigate',         route: '/(app)/trips' },
   { label: 'Settings',  icon: 'settings-sharp',   route: '/(app)/settings' },
 ];
-
-// logo-menu-<label>, lowercased, spaces → dashes: "Map Layers" → logo-menu-map-layers.
-// Single-word labels keep the ids they always had (logo-menu-garage, -settings, …).
-const testIdFor = (label: string) => `logo-menu-${label.toLowerCase().replace(/\s+/g, '-')}`;
 
 type Props = {
   /** Logo button size in px. Defaults to 32. */
@@ -79,8 +65,8 @@ type Props = {
 };
 
 /**
- * Global brand-logo button that opens the H menu: ON THE ROAD (Map Layers, the
- * Ghost-mode switch) and PLACES (Garage, Club, Drives, Settings, owner-only Admin).
+ * Global brand-logo button that opens the H menu: ON THE ROAD (the Ghost-mode
+ * switch) and PLACES (Garage, Club, Drives, Settings, owner-only Admin).
  * On open it measures the logo's on-screen position and drops the dropdown just
  * beneath it — so the menu's top lines up with the header's divider line — then
  * anchors it to the left or right edge per `align`. Self-contained: renders in a
@@ -152,8 +138,7 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
   // anything moved. The Modal is animationType="none", so it is gone on this commit. No haptic: a
   // row is a navigate tap, not a value changing.
   const go = (item: Item) => {
-    const opts = item.withAnchor ? { withAnchor: true } : undefined;
-    router.push(item.route as any, opts);
+    router.push(item.route as any);
     setOpen(false);
   };
 
@@ -163,7 +148,7 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
       style={[styles.row, last && styles.rowLast]}
       activeOpacity={0.7}
       onPress={() => go(item)}
-      testID={testIdFor(item.label)}
+      testID={`logo-menu-${item.label.toLowerCase()}`}
     >
       <View style={[styles.rowIcon, { backgroundColor: iconWell }]}>
         <Ionicons name={item.icon} size={20} color={accent} />
@@ -222,7 +207,6 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
           >
             <Pressable onPress={() => {}}>
               <Text style={styles.sectionLabel}>ON THE ROAD</Text>
-              {renderRow(MAP_LAYERS, false)}
               <GhostRow accent={accent} iconWell={iconWell} />
               <View style={styles.sectionDivider} />
               <Text style={styles.sectionLabel}>PLACES</Text>

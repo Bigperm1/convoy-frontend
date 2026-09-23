@@ -10,25 +10,47 @@
 //             (chasePitch.ts), nose away from you (Jeff: "the 3d arrow so its chase cam view")
 //   class     the class car in the member's class paint: the map's own top-down class sprite (ClassSprite),
 //             FLAT and straight down like the 2D arrow — Silver's car is a 2D-map car (Jeff, 2026-09-22:
-//             "the … class car need to be 2D top down version and in 2nd slot (silver)"; the 3/4 renders
-//             tried an hour earlier came from a mix-up he corrected, and are gone)
-//   class3d   still: a render of GRC2.glb, the stock car's default bake (assets/images/garage/grc-3d.png);
-//             live: the full GR Corolla bake for the chosen paint (getVehicleModelUrl — the map loads the
-//             decimated twin of the same car)
+//             "the … class car need to be 2D top down version and in 2nd slot (silver)")
+//   class3d   the member's 3D CLASS car (garageCars.class3dChoice — Jeff, 2026-09-23). Still: the 3/4 render
+//             of that class's white bake (Hot Hatch GRC Icecap White, Supercar GT3 RS Carrara White, Exotic
+//             LFA Whitest White — restored from ab782791) painted in the chosen bake's hex; the GRC2 bake
+//             (heavy_metal) uses its own render, grc-3d.png. Live: that bake's full GLB (getVehicleModelUrl),
+//             standing still — the spin is Ultra's.
 //   scan      still: the scan's hero shot (car-scans/<id>/hero.jpg, taken by this Garage the first time
-//             the car was live) — falls back to the stock still when a scan has none yet; live: its hero GLB
+//             the car was live) as a photo card — the stock still when a scan has none yet; live: its hero
+//             GLB, turning.
+//
+// EVERY 3D STILL STANDS WHERE ITS LIVE CAR WILL BE (Jeff, 2026-09-23: "when swiping to ultra the 3d car has a
+// wierd animation that pops the car into the carasoul, remove that pop and make it smooth"). The live view's
+// box (LIVE_H tall, useLiveFrameWidth wide) is the ONE frame a 3D car has, centred or a neighbour, and each still
+// is placed inside it at the live model's own framing, so going live changes nothing but which of the two is
+// visible — and that is a fade (LiveCar).
+// model-viewer frames by bounding sphere (camera-target = bbox centre, radius R = the farthest vertex, camera
+// distance R / sin 15°, vertical FOV 30° — the width never binds: the cars' ideal aspect is ~1.0 and the frame is
+// wider than that). So a car's size is fixed by the frame HEIGHT and it sits at a fixed offset from the frame's
+// centre, whatever the phone's width. The FITs below are that projection of each bake's vertices at the Garage
+// orbit (325°, 76°), computed from the GLBs 2026-09-23; the same projection reproduces the still renders'
+// measured ink boxes to within 0.3 px, and puts every car inside its frame with room to spare (e.g. the GT3 RS,
+// wing included: 218 × 101 pt in a 366 × 250 frame) — so no framing change was needed for any class.
 //
 // Every rendered still carries the class-sprite paint layers (src/classLayers.tsx): a black floor with
 // alpha = the band, then a white mask with alpha = band x shading, tinted at runtime — so any paint hex
-// works with no per-colour bake. The arrow's bands are body (primary) and rim (secondary).
+// works with no per-colour bake. The arrow's bands are body (primary) and rim (secondary); a class still has
+// the body band only.
 // Renders: model-viewer 4.0 headless on magenta, keyed — regenerate with tools/garage-stills/render.sh.
 
-import React, { useState } from "react";
-import { Image as RNImage, StyleSheet, View, type ViewStyle } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Image as RNImage, StyleSheet, View, useWindowDimensions, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
+import Animated, {
+  ReduceMotion, cancelAnimation, useAnimatedStyle, useSharedValue, withTiming,
+} from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { ClassSprite } from "../../classLayers";
 import { scanHeroImageSource } from "../../carScan";
 import CarHero3D from "../../CarHero3D";
+import { MOTION } from "../../motion";
+import type { Class3dKey } from "../../garageCars";
 
 type Layers = { black: number; mask: number };
 type Still = { base: number; aspect: number; pri?: Layers; sec?: Layers };
@@ -48,6 +70,72 @@ const ARROW_3D: Still = {
 export const GRC_3D = require("../../../assets/images/garage/grc-3d.png");
 /** grc-3d.png is 479×251 — keep every box at that aspect or the car squashes. */
 export const GRC_ASPECT = 251 / 479;
+
+// ── The live 3D frame ─────────────────────────────────────────────────────────────────────────────────
+/** The live view's height — the frame every 3D car stands in (SlotArt Frame3D). The FITs are at this height. */
+export const LIVE_H = 250;
+/** The live view's width on this phone. */
+export function useLiveFrameWidth(): number {
+  const { width } = useWindowDimensions();
+  return Math.min(width - 24, 380);
+}
+
+/** A still's box inside the frame: width, and its top-left as offsets from the frame's centre (pt at LIVE_H). */
+type Fit = { w: number; left: number; top: number };
+
+/** The GR Corolla bakes' 3/4 renders, one per 3D class, from the class's WHITE bake (restored from ab782791;
+ *  tools/garage-stills/build_stills.py CAR_BANDS made their paint bands). Placed over the live framing of the
+ *  bake they were rendered from (out_ice_cap_white · out_gt3rs_carrara_white · out_lfa_whitest_white2 — every
+ *  colour of a class is the same mesh: same vertex count, same 1.9101 × h × w box). */
+const CLASS_3D_STILL: Record<Class3dKey, Still & { fit: Fit }> = {
+  hatchback: {
+    base: require("../../../assets/images/garage/garage-class-hatchback.png"),
+    aspect: 467 / 900,
+    pri: { black: require("../../../assets/images/garage/garage-class-hatchback_priblack.png"), mask: require("../../../assets/images/garage/garage-class-hatchback_primask.png") },
+    fit: { w: 230.7, left: -121.8, top: -49.7 },
+  },
+  supercar: {
+    base: require("../../../assets/images/garage/garage-class-supercar.png"),
+    aspect: 439 / 900,
+    pri: { black: require("../../../assets/images/garage/garage-class-supercar_priblack.png"), mask: require("../../../assets/images/garage/garage-class-supercar_primask.png") },
+    fit: { w: 226.4, left: -114.4, top: -50.3 },
+  },
+  exotic: {
+    base: require("../../../assets/images/garage/garage-class-exotic.png"),
+    aspect: 403 / 900,
+    pri: { black: require("../../../assets/images/garage/garage-class-exotic_priblack.png"), mask: require("../../../assets/images/garage/garage-class-exotic_primask.png") },
+    fit: { w: 232.3, left: -123.3, top: -40.1 },
+  },
+};
+/** grc-3d.png over GRC2.glb's live framing (the heavy_metal bake — a scan-built mesh, a little bigger than the
+ *  authored hatch). Also the stand-in for a scan that has no hero shot yet.
+ *  ⚠ The one still that is NOT an exact match: grc-3d.png predates the Garage orbit renders, and its car's aspect
+ *  (479 × 250 ink, 1.916) is not the live GRC2's at this orbit (228.6 × 115.5 pt, 1.979). Fitted by WIDTH and
+ *  centred, so the still's car stands ~3.8 pt taller than the live one — ~1.9 pt past the roof and under the tyres
+ *  for the 2 × MOTION.duration.fade of a crossfade (fit3d/place.py, 2026-09-23; the class stills are within
+ *  −1.5 … +0.2 pt). Exact needs a re-render at the live framing (orbit 325°/76°, 30° FOV, radius 100%) with
+ *  tools/garage-stills, then this fit re-measured. */
+const GRC2_FIT: Fit = { w: 228.6, left: -118.6, top: -49.2 };
+/** The one hatch bake that is not the authored GR Corolla (vehicleAssets VEHICLE_MODEL_URL.heavy_metal = GRC2). */
+const GRC2_KEY = "heavy_metal";
+
+function AtFit({ fit, aspect, children }: { fit: Fit; aspect: number; children: React.ReactNode }) {
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        marginLeft: fit.left,
+        marginTop: fit.top,
+        width: fit.w,
+        height: Math.round(fit.w * aspect),
+      }}
+    >
+      {children}
+    </View>
+  );
+}
 
 /** Height a still takes at `width`, so the stage can size its box. */
 export const stillHeight = (still: "arrow" | "arrow3d", width: number) =>
@@ -106,19 +194,52 @@ export function Car3DStill({ width, silhouette }: { width: number; silhouette?: 
   );
 }
 
-/** A scan's hero shot, or the stock still when the scan has none yet (only a car that was once live in
- *  this Garage has one — the snapshot is taken here). */
-export function ScanStill({ scanId, width }: { scanId: string; width: number }) {
+/** A 3D class car at `width`, in the bake's paint — the Customize preview. */
+export function Class3DStill({ cls, modelKey, hex, width }: { cls: Class3dKey; modelKey: string; hex: string; width: number }) {
+  if (modelKey === GRC2_KEY) return <Car3DStill width={width} />;
+  return <PaintedStill still={CLASS_3D_STILL[cls]} width={width} primary={hex} />;
+}
+
+/** The 3D class car's still INSIDE the live frame, exactly where its live model will stand. */
+export function Class3DFramed({ cls, modelKey, hex }: { cls: Class3dKey; modelKey: string; hex: string }) {
+  if (modelKey === GRC2_KEY) return <StockFramed />;
+  const st = CLASS_3D_STILL[cls];
+  return (
+    <AtFit fit={st.fit} aspect={st.aspect}>
+      <PaintedStill still={st} width={st.fit.w} primary={hex} />
+    </AtFit>
+  );
+}
+
+/** The stock still (GRC2) inside the live frame, at GRC2's framing. */
+function StockFramed() {
+  return (
+    <AtFit fit={GRC2_FIT} aspect={GRC_ASPECT}>
+      <Car3DStill width={GRC2_FIT.w} />
+    </AtFit>
+  );
+}
+
+// The hero shot is the live canvas itself (model-viewer toDataURL, CarHero3D) — a JPEG, so its transparent
+// background came out black and it is framed as a photo card on purpose (sim render, 2026-09-22). The card is
+// centred on the frame and the photo inside it is drawn at the FRAME's size, 1:1, so the car in the photo lies
+// where the live car will (exactly, when the shot was taken in a frame of this width; a shot from a different
+// width or from the old Garage's hero box is still centred, just not to the point).
+const CARD_W = 300;
+const CARD_H = 180;
+
+/** A scan's hero shot in the live frame, or the stock still when the scan has none yet (only a car that was
+ *  once live in this Garage has one — the snapshot is taken here). */
+export function ScanStill({ scanId }: { scanId: string }) {
+  const fw = useLiveFrameWidth();
   const [failed, setFailed] = useState(false);
   const src = failed ? null : scanHeroImageSource(scanId);
-  if (!src) return <Car3DStill width={width} />;
-  // The hero shot is a JPEG — its background is baked in and never matches the stage, so it is framed
-  // as a photo card on purpose rather than left as a hard-edged box (sim render, 2026-09-22).
+  if (!src) return <StockFramed />;
   return (
-    <View style={[styles.photo, { width, height: Math.round(width * 0.62) }]}>
+    <View style={[styles.photo, styles.card]}>
       <Image
         source={src}
-        style={StyleSheet.absoluteFill}
+        style={{ position: "absolute", left: (CARD_W - fw) / 2, top: (CARD_H - LIVE_H) / 2, width: fw, height: LIVE_H }}
         contentFit="cover"
         cachePolicy="disk"
         transition={180}
@@ -128,28 +249,119 @@ export function ScanStill({ scanId, width }: { scanId: string; width: number }) 
   );
 }
 
-/** The one live 3D view: a transparent model-viewer, with `still` shown underneath until the model is
- *  actually on screen (a failed load simply leaves the still). Never interactive — it sits under the
- *  stage's swipe layer; the full-screen spin is CarViewer3D (the "360° spin" action). */
-export function LiveCar({ glbUrl, still, style, onSnapshot }: {
-  glbUrl: string;
+// ── The live car ──────────────────────────────────────────────────────────────────────────────────────
+// What used to POP (read 2026-09-23, before this change): the centred car rendered a different tree from its
+// neighbour self (SlotArt LiveBox vs CarBox), so going live REMOUNTED the still in another box — a scan's card
+// dropped 34 pt, the 3D class still 18 pt, and its hero photo could fade in again from blank; then the frame
+// model-viewer said 'load', `{!ready ? still : null}` took the still away in one render and the model was just
+// there — ~30% smaller than the 330 pt still (model-viewer's sphere framing puts a car ~220 pt wide in this
+// frame), and in another place.
+// Now: one frame (above), the still under the model at the model's own framing, and FADES — in: the model fades
+// in over the still, and only once it is fully on screen does the still fade out; out: the still fades back in
+// first, then the model fades out under it and unmounts. Opacity only, so they run under Reduce Motion too
+// (DESIGN.md §11.9 — ReduceMotion.Never, as LogoMenu's fade).
+const FADE = { duration: MOTION.duration.fade, easing: MOTION.ease.out, reduceMotion: ReduceMotion.Never };
+/** The model's resting opacity while it is not shown: never 0, so the WebView is always DRAWN and its page keeps
+ *  animation frames (model-viewer's 'load' waits on two of them). 1% over the still is invisible. */
+const DRAWN = 0.01;
+
+/** The one live 3D view: a transparent model-viewer over `still`. `glbUrl` null = the still alone (not centred,
+ *  or something covers the stage); the WebView outlives it by the fade-out — or not at all with `instantExit`.
+ *  A failed load simply leaves the still. Never interactive — it sits under the stage's swipe layer; the
+ *  full-screen spin is CarViewer3D (the "360° spin" action, scans only). */
+export function LiveCar({ glbUrl, still, style, onSnapshot, autoRotate = true, instantExit = false }: {
+  glbUrl: string | null;
   still: React.ReactNode;
   style?: ViewStyle;
   onSnapshot?: (jpegDataUri: string) => void;
+  /** false = the model stands still (the 3D class car); only a scan turns. */
+  autoRotate?: boolean;
+  /** The stage is covered (the 360° viewer, another screen): when `glbUrl` goes null, drop the model at once —
+   *  nobody can see a fade, and the WebView must not live on beside the viewer's. */
+  instantExit?: boolean;
 }) {
-  const [ready, setReady] = useState(false);
+  // The model the WebView is showing, and the one that has reported it is on screen.
+  const [shown, setShown] = useState<string | null>(glbUrl);
+  const [readyUrl, setReadyUrl] = useState<string | null>(null);
+  const model = useSharedValue(DRAWN);
+  const cover = useSharedValue(1);
+  const wantRef = useRef(glbUrl);
+  const shownRef = useRef(shown);
+  useEffect(() => {
+    wantRef.current = glbUrl;
+    shownRef.current = shown;
+  });
+
+  // The model has faded out under the still: unmount it, or swap in the model wanted now. A fade-out that was
+  // reversed in time never gets here (its animation is cancelled) — and if it does, nothing changed.
+  const settle = useCallback(() => {
+    if (wantRef.current === shownRef.current) return;
+    setReadyUrl(null);
+    setShown(wantRef.current);
+  }, []);
+
+  // A reversal mid-fade settles where it was last sent, because each chain's FIRST step is a no-op when its value
+  // is already there: Reanimated's valueSetter completes a withTiming to the value the shared value holds at once
+  // (callback(true), no duration — react-native-reanimated 4.1.7 src/valueSetter.ts), so the reversal's second
+  // step starts immediately and, by assigning the same value, cancels the stale chain's pending step (which then
+  // calls back finished = false). Read, not run on a device (review 2026-09-23 had assumed the opposite).
+  useEffect(() => {
+    if (glbUrl && glbUrl === shown) {
+      if (readyUrl === shown) {
+        model.set(withTiming(1, FADE, (done) => {
+          "worklet";
+          if (done) cover.set(withTiming(0, FADE));
+        }));
+      } else {
+        // Still loading: stay under the still (and stop a fade-out that was on its way to unmounting it).
+        cancelAnimation(model);
+      }
+      return;
+    }
+    if (glbUrl && !shown) {
+      setShown(glbUrl);
+      return;
+    }
+    if (!shown) return;
+    if (instantExit) {
+      // Covered: nobody sees a fade. Put the still back and let the model go now (a plain assignment cancels
+      // whatever chain was running on each value).
+      cover.set(1);
+      model.set(DRAWN);
+      settle();
+      return;
+    }
+    cover.set(withTiming(1, FADE, (done) => {
+      "worklet";
+      if (done) {
+        model.set(withTiming(DRAWN, FADE, (out) => {
+          "worklet";
+          if (out) scheduleOnRN(settle);
+        }));
+      }
+    }));
+  }, [glbUrl, shown, readyUrl, instantExit, model, cover, settle]);
+
+  const coverStyle = useAnimatedStyle(() => ({ opacity: cover.get() }));
+  const modelStyle = useAnimatedStyle(() => ({ opacity: model.get() }));
+
   return (
-    <View style={[styles.live, style]} pointerEvents="none">
-      {!ready ? <View style={styles.center}>{still}</View> : null}
-      <CarHero3D
-        key={glbUrl}
-        glbUrl={glbUrl}
-        interactive={false}
-        transparent
-        onReady={() => setReady(true)}
-        onSnapshot={onSnapshot}
-        style={StyleSheet.absoluteFill}
-      />
+    <View style={style} pointerEvents="none">
+      <Animated.View style={[StyleSheet.absoluteFill, coverStyle]}>{still}</Animated.View>
+      {shown ? (
+        <Animated.View style={[StyleSheet.absoluteFill, modelStyle]}>
+          <CarHero3D
+            key={shown}
+            glbUrl={shown}
+            interactive={false}
+            transparent
+            autoRotate={autoRotate}
+            onReady={() => setReadyUrl(shown)}
+            onSnapshot={onSnapshot}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -162,6 +374,13 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.14)",
     backgroundColor: "#000",
   },
-  live: { alignItems: "center", justifyContent: "center" },
-  center: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  card: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    marginLeft: -CARD_W / 2,
+    marginTop: -CARD_H / 2,
+    width: CARD_W,
+    height: CARD_H,
+  },
 });

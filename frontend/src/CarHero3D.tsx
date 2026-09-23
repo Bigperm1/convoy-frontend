@@ -27,25 +27,36 @@ import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 
-export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interactive?: boolean; transparent?: boolean }): string {
+export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interactive?: boolean; transparent?: boolean; autoRotate?: boolean }): string {
   const inline = opts?.inline ?? false;
   const interactive = opts?.interactive ?? true;
   // transparent (the Garage Showroom, 2026-09-22): the car turns ON the stage — its light cone and
   // turntable are drawn by the app underneath, so the page must not paint a box over them.
   const bg = opts?.transparent ? "transparent" : "#0B0C0E";
+  // …and no default progress bar either: model-viewer 3.5.0 draws it as a 5 px band across the TOP of the element
+  // (--progress-bar-color, default 40% black) that stays about a second after load before it fades — the Garage
+  // fades the model in over its still on 'load', which would bring that band in with it. The host's still is the
+  // loading state there.
+  const bar = opts?.transparent ? "--progress-bar-color:transparent;" : "";
+  // autoRotate false (Jeff, 2026-09-23: "make it so it does not spin the spin is for ultra only"): the model
+  // stands still at the framing orbit below. On load model-viewer JUMPS the camera to that orbit
+  // (jumpCameraToGoal in its $onModelLoad, 3.5.0) — nothing zooms or turns in.
+  const rotate = (opts?.autoRotate ?? true)
+    ? `auto-rotate
+  auto-rotate-delay="${inline ? 600 : 1200}"
+  rotation-per-second="${inline ? "12deg" : "8deg"}"`
+    : "";
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 <style>
   html,body{margin:0;height:100%;background:${bg};overflow:hidden}
-  model-viewer{width:100%;height:100%;--poster-color:transparent;background:${bg};background-color:${bg}}
+  model-viewer{width:100%;height:100%;--poster-color:transparent;${bar}background:${bg};background-color:${bg}}
 </style></head><body>
 <model-viewer
   src="${glbUrl}"
   ${interactive ? "camera-controls" : "disable-pan disable-zoom disable-tap"}
-  auto-rotate
-  auto-rotate-delay="${inline ? 600 : 1200}"
-  rotation-per-second="${inline ? "12deg" : "8deg"}"
+  ${rotate}
   camera-orbit="325deg 76deg 100%"
   min-camera-orbit="auto 55deg auto"
   max-camera-orbit="auto 92deg auto"
@@ -64,7 +75,9 @@ export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interac
     var mv = document.querySelector('model-viewer');
     if (!mv) return;
     function post(m) { try { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
-    // The MODEL is on screen (not just the page) — the app hides its still under the car on this.
+    // The MODEL is on screen (not just the page) — the app fades the car in over its still on this.
+    // model-viewer 3.5.0 dispatches 'load' two animation frames AFTER the model's first draw ("Wait for
+    // shaders to compile and pixels to be drawn", $updateSource), so it already means pixels.
     mv.addEventListener('load', function () { post({ t: 'ready' }); });
     mv.addEventListener('error', function () { post({ t: 'error' }); });
     mv.addEventListener('load', function () {
@@ -91,6 +104,7 @@ export default function CarHero3D({
   onSnapshot,
   transparent = false,
   onReady,
+  autoRotate = true,
 }: {
   glbUrl: string | null;
   style?: StyleProp<ViewStyle>;
@@ -114,6 +128,9 @@ export default function CarHero3D({
   interactive?: boolean;
   /** Receives a data:image/jpeg URI of the loaded hero (see the HERO SHOT script). */
   onSnapshot?: (jpegDataUri: string) => void;
+  /** false = the model stands still (no auto-rotate). Only a scanned car — Ultra's — turns on the Garage
+   *  stage (Jeff, 2026-09-23: "the spin is for ultra only"). Default true for every existing caller. */
+  autoRotate?: boolean;
 }) {
   const [ready, setReady] = useState(false);
 
@@ -139,7 +156,7 @@ export default function CarHero3D({
       <WebView
         pointerEvents={interactive ? "auto" : "none"}
         originWhitelist={["*"]}
-        source={{ html: carViewerHtml(glbUrl, { inline: true, interactive, transparent }), baseUrl: "https://localhost" }}
+        source={{ html: carViewerHtml(glbUrl, { inline: true, interactive, transparent, autoRotate }), baseUrl: "https://localhost" }}
         style={[styles.web, transparent && styles.clear]}
         javaScriptEnabled
         domStorageEnabled

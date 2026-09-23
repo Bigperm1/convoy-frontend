@@ -37,7 +37,8 @@ import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, uploadScan, requestScanSlot, type CapturedShot } from "../../src/carScan";
-import { adoptActiveScan } from "../../src/garageCars";
+import { adoptActiveScan, ownCarIdentity } from "../../src/garageCars";
+import { getGarage } from "../../src/garageStore";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { findColorsForTyped, type CarColor } from "../../src/carDatabase";
 import { MAIN_COLORS, CLUB_PALETTES } from "../../src/paintPalettes";
@@ -241,6 +242,7 @@ export default function GarageCaptureScreen() {
     setPhase("uploading");
     setSent(0);
     const s = await getSettings();
+    const own = ownCarIdentity(s, getGarage());
     // SERVER-ISSUED SLOT (2026-09-02; the cap itself is Jeff's 2026-08-27 call): the
     // device counter resets on reinstall, so the backend is the ledger and it MINTS
     // the scan id — no id exists on this phone until the server hands one over.
@@ -309,11 +311,13 @@ export default function GarageCaptureScreen() {
         userId: gate.userId ?? user?.id ?? null,
         slot: true,
         platform: Platform.OS,
+        // The member's OWN car — never the 3D class car's make/model/paint, which settings hold while
+        // that car is on the road (garageCars.ownCarIdentity).
         car: {
-          year: s.carYear ?? null,
-          make: s.carMake ?? null,
-          model: s.carModel ?? null,
-          color: s.carColor ?? null,
+          year: own.year ?? null,
+          make: own.make ?? null,
+          model: own.model ?? null,
+          color: own.color ?? null,
           vehicleClass: s.vehicleClass ?? null,
         },
         // The declared paint target (null = "match my photos"). The pipeline
@@ -353,13 +357,14 @@ export default function GarageCaptureScreen() {
 
   // ── paint declaration (between capture and upload) ─────────────────────────
   if (phase === "paint") {
-    const st = getSettings();
-    const factory = findColorsForTyped(st.carMake, st.carModel);
+    // The member's own car, not the 3D class car when that is on the road (garageCars.ownCarIdentity).
+    const st = ownCarIdentity(getSettings(), getGarage());
+    const factory = findColorsForTyped(st.make, st.model);
     // A factory match already names this car's version of black/white/silver, so
     // the universal row drops any duplicate NAME rather than showing both.
     const factoryNames = new Set(factory.map((c) => c.name.toLowerCase()));
     const main = MAIN_COLORS.filter((c) => !factoryNames.has(c.name.toLowerCase()));
-    const carLine = [st.carYear, st.carMake, st.carModel].filter(Boolean).join(" ");
+    const carLine = [st.year, st.make, st.model].filter(Boolean).join(" ");
     const club = CLUB_PALETTES.find((g) => g.label === clubOpen);
     const pick = (c: CarColor, source: ScanPaint["source"], group?: string) => {
       Haptics.selectionAsync();
@@ -404,7 +409,7 @@ export default function GarageCaptureScreen() {
 
           {factory.length > 0 && (
             <>
-              <Text style={styles.paintGroup}>Factory colors{st.carModel ? ` — ${st.carModel}` : ""}</Text>
+              <Text style={styles.paintGroup}>Factory colors{st.model ? ` — ${st.model}` : ""}</Text>
               <View style={styles.paintRow}>{factory.map((c) => swatch(c, "factory"))}</View>
             </>
           )}

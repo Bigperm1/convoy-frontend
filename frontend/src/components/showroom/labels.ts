@@ -2,9 +2,8 @@
 
 import { getVehicleClass, getClassPaint, type Settings, type VehicleClass } from "../../settings";
 import { classPaintName } from "../../classModels";
-import { resolveGRCKey } from "../../vehicleAssets";
 import type { GarageState } from "../../garageStore";
-import { identityFor, type GarageCar } from "../../garageCars";
+import { CLASS_3D_KEYS, CLASS_3D_SOON, class3dChoice, identityFor, isClass3dKey, type GarageCar } from "../../garageCars";
 
 // ---- The class picker (moved unchanged from app/(app)/garage.tsx) ----
 // Top-down vehicle classes. Hatchback previews with the GR Corolla asset; the rest use MCI glyph
@@ -28,6 +27,14 @@ export function classLabel(cls: string): string {
     ?? (cls ? cls.charAt(0).toUpperCase() + cls.slice(1) : "Class car");
 }
 
+/** Customize's 3D class picker: the three classes with a model first, then the five that are coming (Jeff scans
+ *  each class in turn) — same labels and icons as the class picker above. */
+export const CLASS_3D_PICKER: { key: VehicleClass; label: string; icon: string; soon: boolean }[] =
+  [...CLASS_3D_KEYS, ...CLASS_3D_SOON].map((key) => {
+    const c = VEHICLE_CLASSES.find((v) => v.key === key);
+    return { key, label: c?.label ?? classLabel(key), icon: c?.icon ?? "car", soon: !isClass3dKey(key) };
+  });
+
 /** The class car's paint in words: the real paint name when the class palette has it, else the hex. */
 export function classPaintWords(s: Settings): string {
   const cls = getVehicleClass(s);
@@ -46,11 +53,9 @@ export function carName(car: GarageCar, s: Settings, g: GarageState): string {
     case "arrow": return "Arrow";
     case "arrow3d": return "3D Arrow";
     case "class": return classLabel(getVehicleClass(s));
-    // Gold's 3D class car is headlined by the member's class, from the same classLabel the Silver slot
-    // uses — "Supercar · 3D" (Jeff, 2026-09-23: menu reorganization). Only the headline changed: the
-    // model on the stage and the map is still the stock GR Corolla for every class
-    // (getVehicleMapModelUrl resolves GRC keys only), and carSub ("3D class car · …") does not say so.
-    case "class3d": return `${classLabel(getVehicleClass(s))} · 3D`;
+    // Gold's 3D class car is headlined by the member's 3D CLASS choice — "Exotic · 3D" — and it is that class's
+    // car on the stage and the map (garageCars.class3dChoice; Jeff, 2026-09-23).
+    case "class3d": return `${classLabel(class3dChoice(s, g).cls)} · 3D`;
     case "scan": {
       if (car.building) return "Building your car";
       const id = identityFor(car.id, s, g);
@@ -79,10 +84,9 @@ export function carSub(car: GarageCar, s: Settings, g: GarageState): string {
     case "class":
       return `Class car · ${classPaintWords(s)} · 2D map`;
     case "class3d": {
-      // The stock 3D car takes its paint from the colour field when it names a GR Corolla paint
-      // (resolveGRCKey); any other colour draws the default bake, so no paint is claimed for it.
-      const color = identityFor(car.id, s, g).color;
-      return color && resolveGRCKey(color) ? `3D class car · ${color} · 3D map` : "3D class car · 3D map";
+      // The real car and the real paint of the bake it drives: "Lexus LFA · Pearl Blue · 3D map".
+      const c = class3dChoice(s, g);
+      return `${c.make} ${c.model} · ${c.paint} · 3D map`;
     }
     case "scan": {
       if (car.building) return "Rebuilding it in 3D from your four photos";

@@ -264,6 +264,11 @@ export function resolveGRCKey(color?: string | null): GRCColorKey | null {
   // Strip non-alphanum then retry — handles "Heavy-Metal", "heavy.metal", etc.
   const norm = raw.replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_");
   if (ALIASES[norm]) return ALIASES[norm];
+  // The presence slug of ANY key (toGRCSlug below: "grc_" + key). ALIASES spells out grc_* only for the six GR
+  // Corolla paints, so every other car came back null and a peer drew the default GR Corolla instead: a member on
+  // the Garage's 3D Exotic (carColor "Pearl Blue" → activeColor "grc_lfa_pearl_blue") was a Heavy Metal GRC to
+  // everyone else (review 2026-09-23). Exact keys only — the prefix stripped, one lookup, no fuzzy retry.
+  if (norm.startsWith("grc_") && ALIASES[norm.slice(4)]) return ALIASES[norm.slice(4)];
   const tight = raw.replace(/[^a-z0-9]/g, "");
   for (const [k, v] of Object.entries(ALIASES)) {
     if (k.replace(/[^a-z0-9]/g, "") === tight) return v;

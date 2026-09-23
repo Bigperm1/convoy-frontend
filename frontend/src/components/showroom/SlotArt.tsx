@@ -1,7 +1,9 @@
 // showroom/SlotArt.tsx — what stands on the turntable for each Showroom spot (2026-09-22).
 //
 // Sizes are the CENTRED size; the stage scales a neighbour down (~0.6) and dims it. Only the centred
-// spot may go live (one WebView on the page — see CarArt.tsx).
+// spot may go live — see CarArt.tsx; the one overlap is a swipe's handoff, where the car leaving fades out
+// under its still (~2 × MOTION.duration.fade) while the new one loads. A 3D car's spot is the SAME tree centred
+// or not (Frame3D): only its glbUrl changes, so going live never remounts or moves the still.
 
 import React from "react";
 import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
@@ -13,20 +15,26 @@ import { skin, type LockMetal, type VisualTier } from "../../tierTheme";
 import { withAlpha } from "../../appSkin";
 import { TierLock } from "../../PremiumBadge";
 import { ScanCountdown, ScanPlaceholder } from "../../ScanHero";
-import { identityFor, type GarageCar, type GarageTier } from "../../garageCars";
+import { class3dChoice, type GarageCar, type GarageTier } from "../../garageCars";
 import type { GarageState } from "../../garageStore";
-import { CarBox } from "./Stage";
-import { Arrow2D, Arrow3D, Car3DStill, ClassCar, GRC_ASPECT, LiveCar, ScanStill, stillHeight } from "./CarArt";
+import { CarBox, TURNTABLE_Y } from "./Stage";
+import {
+  Arrow2D, Arrow3D, Car3DStill, Class3DFramed, ClassCar, GRC_ASPECT, LIVE_H, LiveCar, ScanStill, stillHeight,
+  useLiveFrameWidth,
+} from "./CarArt";
 
 /** The GLB the live view and the 360° spin load for a car, or null when it has none on this screen
- *  (arrows: the arrow GLB is bundled-only; building scans: not published yet). */
+ *  (arrows: the arrow GLB is bundled-only; building scans: not published yet). The 3D class car loads its
+ *  chosen bake — the full model; the map loads the same car (getVehicleMapModelUrl of the same key). */
 export function carGlbUrl(car: GarageCar, s: Settings, g: GarageState): string | null {
-  if (car.kind === "class3d") return getVehicleModelUrl(identityFor(car.id, s, g).color);
+  if (car.kind === "class3d") return getVehicleModelUrl(class3dChoice(s, g).modelKey);
   if (car.kind === "scan" && car.scanId && !car.building) return scanHeroUrl(car.scanId);
   return null;
 }
 
 const STILL_W = 330;
+/** The lock H's size on a locked spot. */
+const LOCK_H = 56;
 const ARROW_2D_W = 136;
 /** Shrunk from 230 (Jeff, 2026-09-22: "shrink the 3d arrow down a bit"). */
 const ARROW_3D_W = 180;
@@ -43,28 +51,51 @@ function ClassSlot({ s }: { s: Settings }) {
   );
 }
 
-/** Live 3D box: taller than the car so model-viewer's framing leaves it standing on the turntable. */
-function LiveBox({ glbUrl, still, onSnapshot }: {
-  glbUrl: string; still: React.ReactNode; onSnapshot?: (d: string) => void;
+/** The 3D frame's lift: its bottom edge sits this far BELOW the turntable's centre line, so model-viewer's
+ *  framing stands the car on the table. */
+const FRAME_LIFT = -56;
+/** The 3D frame's vertical centre in stage coordinates (CarBox: top = TURNTABLE_Y + 14 − lift − height). Every 3D
+ *  still's fit is an offset from this point (CarArt.tsx). */
+const FRAME_MID_Y = TURNTABLE_Y + 14 - FRAME_LIFT - LIVE_H / 2;
+
+/** The 3D frame: the live view's box — taller than the car so model-viewer's framing leaves it standing on the
+ *  turntable — and the box its still stands in whether or not it is live (the still is placed at the live
+ *  model's framing, CarArt.tsx). `glbUrl` null = the still alone. */
+function Frame3D({ glbUrl, still, autoRotate, onSnapshot, instantExit }: {
+  glbUrl: string | null; still: React.ReactNode; autoRotate: boolean; onSnapshot?: (d: string) => void;
+  instantExit?: boolean;
 }) {
-  const { width: W } = useWindowDimensions();
-  const w = Math.min(W - 24, 380);
+  const w = useLiveFrameWidth();
   return (
-    <CarBox width={w} height={250} lift={-56}>
-      <LiveCar glbUrl={glbUrl} still={still} onSnapshot={onSnapshot} style={{ width: w, height: 250 }} />
+    <CarBox width={w} height={LIVE_H} lift={FRAME_LIFT}>
+      <LiveCar
+        glbUrl={glbUrl} still={still} autoRotate={autoRotate} onSnapshot={onSnapshot} instantExit={instantExit}
+        style={{ width: w, height: LIVE_H }}
+      />
     </CarBox>
   );
 }
 
-function stillFor3D(): React.ReactNode {
-  return <Car3DStill width={STILL_W} />;
+/** Gold's 3D class car — the member's chosen class and bake, standing still (the spin is Ultra's). */
+function Class3dSlot({ live, instantExit, s, g }: { live: boolean; instantExit?: boolean; s: Settings; g: GarageState }) {
+  const c = class3dChoice(s, g);
+  return (
+    <Frame3D
+      glbUrl={live ? getVehicleModelUrl(c.modelKey) : null}
+      autoRotate={false}
+      instantExit={instantExit}
+      still={<Class3DFramed cls={c.cls} modelKey={c.modelKey} hex={c.hex} />}
+    />
+  );
 }
 
-export function CarSlotArt({ car, centred, live = centred, s, g, metal, onHeroShot }: {
+export function CarSlotArt({ car, centred, live = centred, instantExit, s, g, metal, onHeroShot }: {
   car: GarageCar;
   centred: boolean;
   /** May mount the live 3D view (centred, and nothing covering the stage). Defaults to `centred`. */
   live?: boolean;
+  /** Something covers the stage: a live car leaving drops at once instead of fading (CarArt LiveCar). */
+  instantExit?: boolean;
   s: Settings;
   g: GarageState;
   metal: VisualTier;
@@ -86,15 +117,8 @@ export function CarSlotArt({ car, centred, live = centred, s, g, metal, onHeroSh
       );
     case "class":
       return <ClassSlot s={s} />;
-    case "class3d": {
-      const url = carGlbUrl(car, s, g);
-      if (live && url) return <LiveBox key={car.id} glbUrl={url} still={stillFor3D()} />;
-      return (
-        <CarBox width={STILL_W} height={Math.round(STILL_W * GRC_ASPECT)}>
-          <Car3DStill width={STILL_W} />
-        </CarBox>
-      );
-    }
+    case "class3d":
+      return <Class3dSlot live={live} instantExit={instantExit} s={s} g={g} />;
     case "scan": {
       if (car.building) {
         return centred
@@ -102,20 +126,15 @@ export function CarSlotArt({ car, centred, live = centred, s, g, metal, onHeroSh
           : <BuildingPeek metal={metal} />;
       }
       const id = car.scanId!;
-      if (live) {
-        return (
-          <LiveBox
-            key={car.id}
-            glbUrl={scanHeroUrl(id)}
-            still={<ScanStill key={id} scanId={id} width={STILL_W} />}
-            onSnapshot={(d) => onHeroShot(id, d)}
-          />
-        );
-      }
+      // Ultra's own car turns — the only car on the stage that does (Jeff, 2026-09-23).
       return (
-        <CarBox width={STILL_W} height={Math.round(STILL_W * 0.62)}>
-          <ScanStill key={id} scanId={id} width={STILL_W} />
-        </CarBox>
+        <Frame3D
+          glbUrl={live ? scanHeroUrl(id) : null}
+          autoRotate
+          instantExit={instantExit}
+          still={<ScanStill key={id} scanId={id} />}
+          onSnapshot={(d) => onHeroShot(id, d)}
+        />
       );
     }
   }
@@ -135,23 +154,19 @@ function BuildingPeek({ metal }: { metal: VisualTier }) {
 
 /** The next tier, locked — the real thing it sells, full size, with that tier's H on it. You cannot
  *  want what you cannot see (Jeff, 2026-08-23). */
-export function LockedSlotArt({ next, centred, live = centred, s }: {
+export function LockedSlotArt({ next, centred, live = centred, instantExit, s, g }: {
   next: GarageTier;
   centred: boolean;
   /** May mount the live 3D view (the Gold preview). Defaults to `centred`. */
   live?: boolean;
+  /** Something covers the stage: a live car leaving drops at once instead of fading (CarArt LiveCar). */
+  instantExit?: boolean;
   s: Settings;
+  g: GarageState;
 }) {
   if (next === "silver") return <ClassSlot s={s} />;
-  if (next === "gold") {
-    return live
-      ? <LiveBox key="locked-gold" glbUrl={getVehicleModelUrl(s.carColor)} still={stillFor3D()} />
-      : (
-        <CarBox width={STILL_W} height={Math.round(STILL_W * GRC_ASPECT)}>
-          <Car3DStill width={STILL_W} />
-        </CarBox>
-      );
-  }
+  // Gold's preview is the 3D class car it sells — the member's own 3D class choice, as Gold's 4th spot shows it.
+  if (next === "gold") return <Class3dSlot live={live} instantExit={instantExit} s={s} g={g} />;
   // next === "ultra": your own car — a shape, not somebody else's car.
   return centred
     ? <ScanPlaceholder />
@@ -166,13 +181,22 @@ export function LockedSlotArt({ next, centred, live = centred, s }: {
  *  stage's badge layer). The locked spot is always the LAST one, so it only ever peeks at the RIGHT
  *  edge, drawn at 0.6 about the stage centre and pushed 0.48 W right (Stage.tsx); this is placed in the
  *  slot's own coordinates so that, after that transform, the H lands where the approved drawing has it
- *  (≈12 pt in from the right edge, ≈190 pt down, 34 pt tall). Centred, it sits top-right of the car. */
-export function LockedBadge({ lockTier, centred }: { lockTier: LockMetal; centred: boolean }) {
+ *  (≈12 pt in from the right edge, ≈190 pt down, 34 pt tall). Centred, it sits top-right of the car.
+ *  Gold's preview (Silver's locked spot) is the 3D class car in the live frame (Class3dSlot), not the old 330-pt
+ *  still the centred spot was tuned on, so there the H is placed as it sat on that still — its centre 24 pt in
+ *  from the car's right edge and 5 pt above its roof: every class's still spans ≈ W/2 − 122 … W/2 + 110 across
+ *  and its roof is ≈ 50 pt above the frame's middle (CarArt CLASS_3D_STILL / GRC2_FIT; the Exotic's 10 pt
+ *  lower), so the centre is (W/2 + 86, FRAME_MID_Y − 55). The Silver and Ultra previews keep the old spot. */
+export function LockedBadge({ lockTier, next, centred }: { lockTier: LockMetal; next: GarageTier; centred: boolean }) {
   const { width: W } = useWindowDimensions();
-  const at = centred ? { top: 140, right: 26 } : { top: 183, left: W / 2 - 63 };
+  const at = !centred
+    ? { top: 183, left: W / 2 - 63 }
+    : next === "gold"
+      ? { top: FRAME_MID_Y - 55 - LOCK_H / 2, left: W / 2 + 86 - LOCK_H / 2 }
+      : { top: 140, right: 26 };
   return (
     <View style={[styles.lock, at]} pointerEvents="none">
-      <TierLock tier={lockTier} size={56} />
+      <TierLock tier={lockTier} size={LOCK_H} />
     </View>
   );
 }

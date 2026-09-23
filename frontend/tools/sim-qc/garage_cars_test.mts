@@ -5,15 +5,17 @@ import { register } from "node:module";
 register("./garage/loader.mjs", import.meta.url);
 
 const SRC = new URL("../../src/", import.meta.url).href;
+// garageCars.ts (the 3D class car, 2026-09-23) and labels.ts reach src/vehicleAssets.ts, whose top-level tables
+// require() the car PNGs the Metro way. A Metro asset require is only an id, so a stand-in `require` for the
+// length of these imports is enough: every require() in vehicleAssets runs at load, none inside a function.
+(globalThis as any).require = () => 0;
 const gc: any = await import(SRC + "garageCars.ts");
 const gs: any = await import(SRC + "garageStore.ts");
 const cs: any = await import(SRC + "carScan.ts");
 const tier: any = await import(SRC + "components/showroom/tier.ts");
-// labels.ts reaches src/vehicleAssets.ts, whose top-level tables require() the car PNGs the Metro way. A
-// Metro asset require is only an id, so a stand-in `require` for the length of this one import is enough:
-// every require() in vehicleAssets runs at load, none inside a function.
-(globalThis as any).require = () => 0;
 const labels: any = await import(SRC + "components/showroom/labels.ts");
+const va: any = await import(SRC + "vehicleAssets.ts");
+const cm: any = await import(SRC + "classModels.ts");
 delete (globalThis as any).require;
 const settings: any = await import(new URL("./garage/stubs/settings.mjs", import.meta.url).href);
 const apiStub: any = await import(new URL("./garage/stubs/api.mjs", import.meta.url).href);
@@ -35,7 +37,7 @@ async function resetAll(s: Record<string, unknown> = {}, g: Record<string, unkno
   settings.__reset(s);
   await gs.updateGarage({
     ownerId: undefined, arrowPick: undefined, scanParked: undefined, chosenAt: undefined,
-    nicknames: {}, identity: {}, scans: [], completeScanIds: [], ...g,
+    nicknames: {}, identity: {}, scans: [], completeScanIds: [], class3dPick: undefined, ...g,
   });
   apiStub.calls.length = 0;
   skinStub.skins.length = 0;
@@ -544,13 +546,165 @@ console.log("O · stage labels");
   const name = (n: number) => labels.carName(slot(n), settings.getSettings(), gs.getGarage());
   const sub = (n: number) => labels.carSub(slot(n), settings.getSettings(), gs.getGarage());
   ok("O1 a Supercar member's slot 4 reads \"Supercar · 3D\"", slot(4).kind === "class3d" && name(4) === "Supercar · 3D", name(4));
-  ok("O2 slot 4 names the class from the same source as Silver's slot 2", name(2) === "Supercar" && name(4) === `${name(2)} · 3D`);
-  ok("O3 slot 4's sub is unchanged: the 3D class car on the 3D map", sub(4) === "3D class car · 3D map", sub(4));
+  ok("O2 with nothing chosen, slot 4 follows Silver's class", name(2) === "Supercar" && name(4) === `${name(2)} · 3D`);
+  ok("O3 slot 4's sub names the real car and paint (2026-09-23): the GT3 RS's first bake", sub(4) === "Porsche 911 GT3 RS · Guards Red · 3D map", sub(4));
   await resetAll({ carColor: "Ice Cap White" });
   ok("O4 no class picked → the hatchback default, \"Hot Hatch · 3D\"", name(4) === "Hot Hatch · 3D", name(4));
-  ok("O5 a GR Corolla paint still reads in slot 4's sub", sub(4) === "3D class car · Ice Cap White · 3D map", sub(4));
+  ok("O5 today's GR Corolla paint is the default bake and reads in slot 4's sub", sub(4) === "Toyota GR Corolla · Icecap White · 3D map", sub(4));
   await resetAll({ vehicleClass: "supercar" }, { nicknames: { class3d: "Weekend car" } });
   ok("O6 a nickname still beats the class headline", name(4) === "Weekend car", name(4));
+}
+
+// ── P · the 3D class car (Jeff, 2026-09-23: "the exotic 3d class needs to have the exotic 3d car …") ──────────
+console.log("P · the 3D class car");
+{
+  const S = () => settings.getSettings();
+  const G = () => gs.getGarage();
+  const pick = () => gc.class3dChoice(S(), G());
+  const C3 = { id: "class3d", kind: "class3d" };
+  // P1–P6 the default (nothing stored)
+  await resetAll({ carColor: "Blue Flame" });
+  ok("P1 no class, GRC colour → Hot Hatch in that bake", pick().cls === "hatchback" && pick().modelKey === "blue_flame", JSON.stringify(pick()));
+  await resetAll({ vehicleClass: "exotic", carColor: "Ice Cap White" });
+  ok("P2 Exotic member, colour not an LFA bake → Exotic, the LFA's first bake", pick().cls === "exotic" && pick().modelKey === "lfa_whitest_white" && pick().paint === "Whitest White", JSON.stringify(pick()));
+  await resetAll({ vehicleClass: "supercar", carColor: "gt3rs_miami_blue" });
+  ok("P3 Supercar member in a GT3 RS bake → that bake", pick().cls === "supercar" && pick().modelKey === "gt3rs_miami_blue");
+  await resetAll({ vehicleClass: "muscle", carColor: "Supersonic Red" });
+  ok("P4 a Silver class with no 3D model (Muscle) → Hot Hatch, in today's GRC bake", pick().cls === "hatchback" && pick().modelKey === "supersonic_red");
+  await resetAll({ vehicleClass: "sedan", carColor: "Pearl Blue" });
+  ok("P5 Sedan member in an LFA colour → Hot Hatch's first bake (the colour is not a hatch bake)", pick().cls === "hatchback" && pick().modelKey === "heavy_metal");
+  await resetAll({ vehicleClass: "exotic" });
+  ok("P6 no colour at all → the class's first bake", pick().modelKey === "lfa_whitest_white");
+  // P7–P9 the stored choice
+  await resetAll({ vehicleClass: "supercar", carColor: "Blue Flame" }, { class3dPick: { cls: "exotic", modelKey: "lfa_pearl_blue" } });
+  ok("P7 a stored choice beats the default", pick().cls === "exotic" && pick().modelKey === "lfa_pearl_blue" && pick().make === "Lexus" && pick().model === "LFA");
+  await resetAll({ vehicleClass: "supercar" }, { class3dPick: { cls: "muscle", modelKey: "heavy_metal" } });
+  ok("P8 a stored 'Coming soon' class is never the car (read-time validation) → the default", pick().cls === "supercar", JSON.stringify(pick()));
+  await resetAll({ vehicleClass: "supercar" }, { class3dPick: { cls: "exotic", modelKey: "gt3rs_miami_blue" } });
+  ok("P9 a stored bake from another class → the default", pick().cls === "supercar" && pick().modelKey === "gt3rs_guards_red");
+  // P10–P12 storing it
+  await resetAll({});
+  let stored = true;
+  for (const cls of gc.CLASS_3D_SOON) stored = stored && !(await gc.setClass3dPick(cls, "heavy_metal"));
+  ok("P10 every 'Coming soon' class is refused and nothing is stored", stored && G().class3dPick === undefined, JSON.stringify(G().class3dPick));
+  ok("P11 a bake from another class, or a hex-only swatch, is refused",
+    !(await gc.setClass3dPick("exotic", "gt3rs_miami_blue")) && !(await gc.setClass3dPick("exotic", "Rosso Corsa")) && G().class3dPick === undefined);
+  ok("P12 a real bake of a selectable class is stored", (await gc.setClass3dPick("exotic", "lfa_pearl_blue")) && eq(G().class3dPick, { cls: "exotic", modelKey: "lfa_pearl_blue" }));
+  // P13 the picker lists 3 + 5, only the three selectable
+  ok("P13 the picker: Hot Hatch · Supercar · Exotic selectable, then Muscle · Sedan · Truck · Electric · Jeep coming soon",
+    eq(labels.CLASS_3D_PICKER.map((c: any) => `${c.label}${c.soon ? "*" : ""}`), ["Hot Hatch", "Supercar", "Exotic", "Muscle*", "Sedan*", "Truck*", "Electric*", "Jeep*"]),
+    JSON.stringify(labels.CLASS_3D_PICKER.map((c: any) => c.label)));
+  // P14 palettes = the classModels rows WITH a modelKey, no more
+  ok("P14 colours are the real bakes only (6 · 7 · 5), never the hex-only swatches",
+    gc.class3dPalette("hatchback").length === 6 && gc.class3dPalette("supercar").length === 7 && gc.class3dPalette("exotic").length === 5
+    && ["hatchback", "supercar", "exotic"].every((c) => gc.class3dPalette(c).length === cm.CLASS_MODEL_3D[c].palette.filter((e: any) => e.modelKey).length));
+  // P15 every selectable bake round-trips through what the map reads
+  const bad: string[] = [];
+  for (const c of gc.CLASS_3D_KEYS) for (const e of gc.class3dPalette(c)) {
+    if (va.resolveGRCKey(e.modelKey) !== e.modelKey || va.getVehicleModelKey(e.modelKey) !== e.modelKey || !va.VEHICLE_MODEL_URL[e.modelKey]) bad.push(e.modelKey);
+  }
+  ok("P15 every bake key resolves to itself on the map (resolveGRCKey / getVehicleModelKey / a model URL)", bad.length === 0, bad.join(","));
+  // P16 names and subs per class
+  const lab = async (p: any) => {
+    await resetAll({ selfMarkerType: "arrow" }, { class3dPick: p });
+    return [labels.carName(C3, S(), G()), labels.carSub(C3, S(), G())];
+  };
+  ok("P16 Hot Hatch", eq(await lab({ cls: "hatchback", modelKey: "blue_flame" }), ["Hot Hatch · 3D", "Toyota GR Corolla · Blue Flame · 3D map"]));
+  ok("P17 Supercar", eq(await lab({ cls: "supercar", modelKey: "gt3rs_miami_blue" }), ["Supercar · 3D", "Porsche 911 GT3 RS · Miami Blue · 3D map"]));
+  ok("P18 Exotic", eq(await lab({ cls: "exotic", modelKey: "lfa_pearl_blue" }), ["Exotic · 3D", "Lexus LFA · Pearl Blue · 3D map"]));
+  // P19–P22 Drive this today
+  await resetAll({ selfMarkerType: "arrow", carYear: "2023", carMake: "Toyota", carModel: "GR Corolla", carColor: "Ice Cap White" },
+    { class3dPick: { cls: "exotic", modelKey: "lfa_pearl_blue" } });
+  let r = await gc.driveToday(C3);
+  ok("P19 drive the Exotic: one settings write — marker car, carColor = the bake's paint, Lexus LFA, the year untouched",
+    r === "ok" && settings.writes.length === 1 && S().selfMarkerType === "car" && S().carColor === "Pearl Blue" && S().carMake === "Lexus" && S().carModel === "LFA"
+    && S().carYear === "2023" && !("carYear" in settings.writes[0]),
+    JSON.stringify(S()));
+  ok("P20 the profile gets the same car (peers), and the map loads that bake",
+    putsTo('"car_make":"Lexus"').length === 1 && putsTo('"car_color":"Pearl Blue"').length === 1
+    && va.getVehicleMapModelUrl(S().carColor).endsWith("/out_lfa_pearl_blue2.glb") && gc.class3dOnMap(S(), G()));
+  await resetAll({ selfMarkerType: "car", vehicleClass: "exotic", carMake: "Toyota", carModel: "GR Corolla", carColor: "Heavy Metal" });
+  ok("P21 an install whose 3D car predates the choice (GRC on the map, Exotic chosen by default) is NOT on the map",
+    gc.activeCarId(S(), G()) === "class3d" && !gc.class3dOnMap(S(), G()) && pick().cls === "exotic");
+  r = await gc.driveToday(C3);
+  ok("P22 so driving it is not 'same' — it puts the LFA on the map and pins the choice",
+    r === "ok" && S().carColor === "Whitest White" && S().carMake === "Lexus" && eq(G().class3dPick, { cls: "exotic", modelKey: "lfa_whitest_white" }));
+  ok("P23 …and driving it again is a no-op", (await gc.driveToday(C3)) === "same");
+  // P24 a 'Coming soon' class stored by hand never reaches settings
+  await resetAll({ selfMarkerType: "arrow", vehicleClass: "hatchback", carColor: "Blue Flame" }, { class3dPick: { cls: "truck", modelKey: "heavy_metal" } });
+  await gc.driveToday(C3);
+  ok("P24 a hand-stored Truck pick drives the default instead, and the pin is a real class", S().carColor === "Blue Flame" && eq(G().class3dPick, { cls: "hatchback", modelKey: "blue_flame" }));
+  // P25 claimGarage for another account forgets the choice
+  await resetAll({}, { ownerId: "u1", class3dPick: { cls: "exotic", modelKey: "lfa_pearl_blue" } });
+  await gs.claimGarage("u2");
+  ok("P25 another account starts with no 3D class choice", G().class3dPick === undefined);
+
+  // P26–P31 the member's OWN car is never lost to the class car (review 2026-09-23)
+  const OWN = { year: "2019", make: "Honda", model: "Civic Type R", color: "Championship White" };
+  const ownSettings = { carYear: OWN.year, carMake: OWN.make, carModel: OWN.model, carColor: OWN.color };
+  await resetAll({ selfMarkerType: "arrow", vehicleClass: "exotic", ...ownSettings });
+  await gc.driveToday(C3);
+  ok("P26 driving the class car keeps the member's own car aside; carYear untouched",
+    eq(G().ownIdentity, OWN) && S().carMake === "Lexus" && S().carColor === "Whitest White" && S().carYear === "2019", JSON.stringify(G().ownIdentity));
+  ok("P27 …so a new scan is filed under the member's own car, not the LFA (garage-capture reads ownCarIdentity)",
+    eq(gc.ownCarIdentity(S(), G()), OWN));
+  await gc.setClass3dPick("supercar", "gt3rs_miami_blue");
+  ok("P28 a new pick while it is on the road goes on the map (Customize), and the own car stays aside — not the LFA",
+    (await gc.applyClass3dToday()) && S().carMake === "Porsche" && S().carColor === "Miami Blue" && eq(G().ownIdentity, OWN)
+    && !(await gc.applyClass3dToday()));
+  apiStub.calls.length = 0;
+  await gc.driveToday({ id: "arrow", kind: "arrow" });
+  ok("P29 leaving it puts the member's own car back — settings and the profile — and forgets the copy",
+    eq(gc.identityOfSettings(S()), OWN) && G().ownIdentity === undefined && putsTo('"car_make":"Honda"').length === 1
+    && putsTo('"car_color":"Championship White"').length === 1, JSON.stringify(S()));
+  await resetAll({ selfMarkerType: "arrow" });
+  await gc.driveToday(C3);
+  apiStub.calls.length = 0;
+  await gc.driveToday({ id: "class", kind: "class" });
+  ok("P30 an EMPTY own car goes back empty — on the profile too, so the LFA does not outlive it there",
+    S().carMake === undefined && S().carColor === undefined && putsTo('"car_make":""').length === 1 && putsTo('"car_color":""').length === 1);
+  // A scan that finishes while the class car is on the road lands under the member's own car.
+  publish("own1");
+  await resetAll({ selfMarkerType: "arrow", vehicleClass: "exotic", ...ownSettings });
+  await gc.driveToday(C3);
+  await settings.updateSettings({ carScanId: "own1", carScanStatus: "submitted", carScanSubmittedAt: new Date(Date.now() + 60_000).toISOString() });
+  apiStub.calls.length = 0;
+  const landed = await cs.deliverSubmittedScan("own1", { heroUrl: `${MODELS}/scan_own1.glb`, mapUrl: `${MODELS}/scan_own1_map.glb` });
+  ok("P31 a scan delivered over the class car takes the member's own identity back (settings + profile), not the LFA's",
+    landed === "active" && eq(gc.identityOfSettings(S()), OWN) && G().ownIdentity === undefined
+    && gc.activeCarId(S(), G()) === "scan:own1" && putsTo('"car_make":"Honda"').length === 1
+    && !labels.carSub({ id: "scan:own1", kind: "scan", scanId: "own1" }, S(), G()).includes("LFA"),
+    JSON.stringify(gc.identityOfSettings(S())));
+  // Leaving the class car for a scan with no identity of its own gives the scan the member's own car.
+  await resetAll({ selfMarkerType: "arrow", ...ownSettings }, { completeScanIds: ["own1"] });
+  await gc.driveToday(C3);
+  await gc.driveToday({ id: "scan:own1", kind: "scan", scanId: "own1" });
+  ok("P32 class car → a scan with nothing remembered: the member's own car, not the LFA",
+    eq(gc.identityOfSettings(S()), OWN) && G().ownIdentity === undefined);
+
+  // P33 an unstored choice that IS what the map draws is pinned, so a new Silver class cannot move the 3D spot
+  await resetAll({ selfMarkerType: "car", vehicleClass: "hatchback", carColor: "Heavy Metal" });
+  await gc.pinClass3dIfOnMap();
+  await settings.updateSettings({ vehicleClass: "exotic" });
+  ok("P33 pinned while on the map: after the class changes the 3D spot is still the car the map draws",
+    eq(G().class3dPick, { cls: "hatchback", modelKey: "heavy_metal" }) && gc.class3dOnMap(S(), G()) && pick().cls === "hatchback");
+  await resetAll({ selfMarkerType: "car", vehicleClass: "exotic", carColor: "Heavy Metal" });
+  await gc.pinClass3dIfOnMap();
+  ok("P34 …and never pinned when the map draws something else (the stale install keeps its Drive this today)",
+    G().class3dPick === undefined && !gc.class3dOnMap(S(), G()));
+
+  // P35–P36 peers draw the same car: the presence slug of every bake reads back as that bake, and every bake's paint
+  // name (what carColor carries) resolves to exactly that bake
+  const slugBad: string[] = [];
+  const nameBad: string[] = [];
+  for (const c of gc.CLASS_3D_KEYS) for (const e of gc.class3dPalette(c)) {
+    if (va.resolveGRCKey(va.toGRCSlug(e.modelKey)) !== e.modelKey || va.resolveGRCKey(va.toGRCSlug(e.name)) !== e.modelKey) slugBad.push(e.modelKey);
+    if (va.resolveGRCKey(gc.class3dColor({ modelKey: e.modelKey, paint: e.name })) !== e.modelKey || gc.class3dColor({ modelKey: e.modelKey, paint: e.name }) !== e.name) nameBad.push(e.modelKey);
+  }
+  ok("P35 every bake's presence slug (activeColor) resolves back to that bake on a peer", slugBad.length === 0, slugBad.join(","));
+  ok("P36 every bake is written as its paint name, which resolves to exactly that bake", nameBad.length === 0, nameBad.join(","));
+  ok("P37 the GR Corolla slugs are unchanged", va.resolveGRCKey("grc_supersonic_red") === "supersonic_red" && va.resolveGRCKey("grc_heavymetal") === "heavy_metal"
+    && va.resolveGRCKey("grc_pearl_blue") === null);
 }
 
 console.log(fails ? `\nFAIL garage_logic (${fails})` : "\nPASS garage_logic");

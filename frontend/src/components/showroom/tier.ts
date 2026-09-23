@@ -11,7 +11,7 @@
 import type { VisualTier } from "../../tierTheme";
 import type { PremiumFeature } from "../../entitlements";
 import { rungPrice, ULTRA, priceLabel, annualLabel } from "../../pricing";
-import { goldIsYearly, type GarageTier } from "../../garageCars";
+import { goldIsYearly, type CarKind, type GarageTier } from "../../garageCars";
 
 export function garageMetal(t: GarageTier): VisualTier {
   switch (t) {
@@ -22,10 +22,26 @@ export function garageMetal(t: GarageTier): VisualTier {
   }
 }
 
-/** The header chip's word. Ultra's chip is the scan allowance instead (the approved design). */
+/** The tier's word — the header chip's (Ultra's header chip is the scan allowance instead, the approved
+ *  design) and the stage's right-hand chip's (which always says the word, ULTRA included). */
 export const TIER_WORD: Record<GarageTier, string> = {
   free: "FREE", silver: "SILVER", gold: "GOLD", ultra: "ULTRA",
 };
+
+/** The rung a car comes with — the stage's right-hand chip, so the member can tell which tier the car on
+ *  the turntable belongs to (Jeff, 2026-09-23: "on the right side of the screen (across from 'in your
+ *  garage') should have the tier with matching colour"). The same ladder as garageCars' BASE_CARS: the 2D
+ *  arrow is Free, the 2D class car Silver, both 3D cars Gold, a scanned car Ultra. No default on purpose:
+ *  a new CarKind fails the typecheck here until someone says which rung it is. */
+export function carTier(kind: CarKind): GarageTier {
+  switch (kind) {
+    case "arrow": return "free";
+    case "class": return "silver";
+    case "arrow3d":
+    case "class3d": return "gold";
+    case "scan": return "ultra";
+  }
+}
 
 /** The rung above this view, and the feature whose paywall sells it (PaywallSheet quotes
  *  featureRung(feature): class_marker → Silver, car_3d → Gold, car_scan → Gold + Ultra). */

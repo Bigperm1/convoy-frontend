@@ -22,6 +22,17 @@
 //                     complete, always complete — no need to HEAD them again).
 //   • ownerId       — the account this garage belongs to (claimGarage); every async write checks it.
 //   • profileClearPending — a park's "forget car_scan_id" PUT that has not been acknowledged yet.
+//   • class3dPick   — Gold's 3D class car: which 3D class and which of its real bakes (Jeff, 2026-09-23: "in
+//                     that section in customize it should have the 3d class car picker with colour options").
+//                     Missing = the default (garageCars.class3dChoice) — no migration. Stored as plain strings;
+//                     garageCars validates it on every read, so a class with no model yet can never come back
+//                     from here as the member's car.
+//   • ownIdentity   — the member's OWN car identity (the Year/Make/Model/Color settings held), set aside while the
+//                     3D class car is on the road: that car writes ITS make/model/paint into settings, because the
+//                     map, CarPlay/AA and peers draw carColor. Put back the moment the class car leaves the road
+//                     (garageCars.driveToday, carScan.deliverSubmittedScan / reconcileScanState), and read by the
+//                     scan capture while it is set (garageCars.ownCarIdentity) — a new scan is never filed as
+//                     the class car. Set ⇔ settings hold the class car's identity.
 //
 // ⛔ NO LOCAL RUNTIME IMPORTS IN THIS FILE (the tierTheme.ts rule; an `import type` is erased and fine):
 // carScan.ts imports it and garageCars.ts imports carScan — a cycle would hand one side `undefined` at
@@ -68,6 +79,11 @@ export type GarageState = {
   /** A park asked the backend profile to forget car_scan_id and has not had it acknowledged yet (offline,
    *  cold Render) — retried on Garage focus until it is (garageCars.retryProfileClear). */
   profileClearPending?: boolean;
+  /** Gold's 3D class car: the class ('hatchback' | 'supercar' | 'exotic') and the bake's GRCColorKey. Read it
+   *  through garageCars.class3dChoice, never directly — that is where it is validated and defaulted. */
+  class3dPick?: { cls: string; modelKey: string };
+  /** The member's own car identity, set aside while the 3D class car is on the road (see the header). */
+  ownIdentity?: CarIdentity;
 };
 
 const KEY = "convoy.garage.v1";
@@ -89,11 +105,12 @@ function sanitize(p: any): GarageState {
   const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : {});
   const nicknames: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj(p?.nicknames))) if (str(v)) nicknames[k] = v as string;
-  const identity: Record<string, CarIdentity> = {};
-  for (const [k, v] of Object.entries(obj(p?.identity))) {
+  const ident = (v: unknown): CarIdentity => {
     const o = obj(v);
-    identity[k] = { year: str(o.year), make: str(o.make), model: str(o.model), color: str(o.color) };
-  }
+    return { year: str(o.year), make: str(o.make), model: str(o.model), color: str(o.color) };
+  };
+  const identity: Record<string, CarIdentity> = {};
+  for (const [k, v] of Object.entries(obj(p?.identity))) identity[k] = ident(v);
   const scans: GarageScan[] = Array.isArray(p?.scans)
     ? p.scans
         .filter((x: any) => x && str(x.scanId) && typeof x.status === "string")
@@ -102,6 +119,8 @@ function sanitize(p: any): GarageState {
   const completeScanIds: string[] = Array.isArray(p?.completeScanIds)
     ? p.completeScanIds.filter((x: unknown) => !!str(x))
     : [];
+  const pick = obj(p?.class3dPick);
+  const class3dPick = str(pick.cls) && str(pick.modelKey) ? { cls: pick.cls as string, modelKey: pick.modelKey as string } : undefined;
   return {
     ownerId: str(p?.ownerId),
     arrowPick: p?.arrowPick === "arrow3d" ? "arrow3d" : p?.arrowPick === "arrow" ? "arrow" : undefined,
@@ -112,6 +131,8 @@ function sanitize(p: any): GarageState {
     scans,
     completeScanIds,
     profileClearPending: p?.profileClearPending === true,
+    class3dPick,
+    ownIdentity: p?.ownIdentity && typeof p.ownIdentity === "object" ? ident(p.ownIdentity) : undefined,
   };
 }
 
@@ -165,8 +186,23 @@ export async function claimGarage(userId: string): Promise<"same" | "first" | "r
   await updateGarage({
     ownerId: userId, arrowPick: undefined, scanParked: undefined, chosenAt: undefined,
     nicknames: {}, identity: {}, scans: [], completeScanIds: [], profileClearPending: undefined,
+    class3dPick: undefined, ownIdentity: undefined,
   });
   return "reset";
+}
+
+/** What puts the member's own car identity back (ownIdentity, above): the settings patch and the backend profile
+ *  body. An empty field goes back EMPTY — "" on the profile, which PUT /auth/profile stores (convoy-backend server.py
+ *  update_profile drops only None) — so the class car's make, model and paint never outlive it there. The year is not
+ *  in it: the class car never changes carYear. Pure; shared by garageCars and carScan (no import cycle). */
+export function ownIdentityBack(id: CarIdentity): {
+  settings: { carMake: string | undefined; carModel: string | undefined; carColor: string | undefined };
+  profile: { car_make: string; car_model: string; car_color: string };
+} {
+  return {
+    settings: { carMake: id.make, carModel: id.model, carColor: id.color },
+    profile: { car_make: id.make ?? "", car_model: id.model ?? "", car_color: id.color ?? "" },
+  };
 }
 
 export function subscribeGarage(fn: (s: GarageState) => void): () => void {

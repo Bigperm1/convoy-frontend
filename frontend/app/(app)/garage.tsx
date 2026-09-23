@@ -8,7 +8,7 @@
 //   plate    your CALL SIGN as a licence plate + two facts
 //   button   "Drive this today" in the page metal — or "Driving today ✓" when it already is
 //   up next  ONE card for the next rung (prices only from src/pricing.ts), or Ultra's scan tray
-//   actions  360° spin (the 3D cars) · Customize (the old long scroll, now a sheet) · Share
+//   actions  360° spin (a scan only — the spin is Ultra's) · Customize (the old long scroll, now a sheet) · Share
 //
 // What a switch writes, what each surface reads, and why a scan gets PARKED: src/garageCars.ts.
 // What the Garage remembers on its own: src/garageStore.ts. The stage: src/components/showroom/Stage.tsx.
@@ -47,8 +47,9 @@ import {
 } from '../../src/carScan';
 import { getGarage, useGarage } from '../../src/garageStore';
 import {
-  activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, driveToday, garageViewTier, ownedCars,
-  parkStrayScan, refreshScanList, retryProfileClear, scanCarId, scanCars, type GarageCar,
+  activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, class3dOnMap, driveToday, garageViewTier,
+  ownedCars, parkStrayScan, pinClass3dIfOnMap, refreshScanList, retryProfileClear, scanCarId, scanCars,
+  type GarageCar,
 } from '../../src/garageCars';
 import Stage, { type StageLabels, type StageSlot } from '../../src/components/showroom/Stage';
 import { AddSlotArt, CarSlotArt, LockedBadge, LockedSlotArt, carGlbUrl } from '../../src/components/showroom/SlotArt';
@@ -56,7 +57,7 @@ import PlateStrip, { type PlateFact } from '../../src/components/showroom/PlateS
 import TierChip from '../../src/components/showroom/TierChip';
 import UpNextCard from '../../src/components/showroom/UpNextCard';
 import CustomizeSheet from '../../src/components/showroom/CustomizeSheet';
-import { garageMetal, nextRung, upNextCopy } from '../../src/components/showroom/tier';
+import { carTier, garageMetal, nextRung, upNextCopy } from '../../src/components/showroom/tier';
 import { carName, carSub, scannedOn } from '../../src/components/showroom/labels';
 
 // Paints that no longer exist and must never be restored from any source — not local settings, not
@@ -103,6 +104,11 @@ export default function GarageScreen() {
   const centred = slots[centredIndex] ?? slots[0];
   const centredCar: GarageCar | undefined = centred.type === 'car' ? cars.find((c) => c.id === centred.key) : undefined;
   const onIndexChange = useCallback((i: number) => { const k = slots[i]?.key; if (k) setCentredKey(k); }, [slots]);
+  // "Today's car" means the map draws exactly this car. The 3D class spot shows the member's 3D CLASS choice,
+  // which an install whose stock 3D car predates the choice is not drawing yet — that spot offers "Drive this
+  // today" instead of claiming it (garageCars.class3dOnMap).
+  const isTodays = useCallback((car: GarageCar) =>
+    car.id === activeId && (car.kind !== 'class3d' || class3dOnMap(settings, garage)), [activeId, settings, garage]);
 
   // ── hydrate once per mount, after auth (unchanged) ───────────────────────────────────────────────
   // Local settings win; the backend profile fills blanks, so a fresh install / new build (local
@@ -223,6 +229,8 @@ export default function GarageScreen() {
     void (async () => {
       if (userId) await claimGarageFor(userId);
       if (!alive) return;
+      // An unstored 3D class choice that IS what the map draws is pinned, so it cannot drift off it later.
+      void pinClass3dIfOnMap();
       void refreshScan();
       // The inventory — every scan this account made (GET /scan/mine), then the building check again
       // once the fresh list is in — and the server's scan count. Only the Ultra view shows either.
@@ -299,7 +307,8 @@ export default function GarageScreen() {
   }, [next]);
 
   const [viewer3D, setViewer3D] = useState(false);
-  const spinUrl = centredCar && (viewTier === 'gold' || viewTier === 'ultra')
+  // The 360° spin is a scan's only — Ultra's own car (Jeff, 2026-09-23: "the spin is for ultra only").
+  const spinUrl = centredCar?.kind === 'scan' && (viewTier === 'gold' || viewTier === 'ultra')
     ? carGlbUrl(centredCar, settings, garage)
     : null;
 
@@ -319,13 +328,13 @@ export default function GarageScreen() {
   const onShare = useCallback(async () => {
     const car = centredCar && !centredCar.building ? centredCar : cars.find((c) => c.id === activeId);
     if (!car) return;
-    const lead = car.id === activeId ? "Today's car on Hairpin" : 'In my Hairpin garage';
+    const lead = isTodays(car) ? "Today's car on Hairpin" : 'In my Hairpin garage';
     const name = carName(car, settings, garage);
     const sub = carSub(car, settings, garage);
     try {
       await Share.share({ message: `${lead}: ${name} (${sub}).${callSign ? ` Call sign ${callSign}.` : ''}` });
     } catch {}
-  }, [centredCar, cars, activeId, settings, garage, callSign]);
+  }, [centredCar, cars, activeId, settings, garage, callSign, isTodays]);
 
   // ── what the page says ───────────────────────────────────────────────────────────────────────────
   const scanList = viewTier === 'ultra' ? cars.filter((c) => c.kind === 'scan') : [];
@@ -333,13 +342,14 @@ export default function GarageScreen() {
   const scansLeft = Math.max(0, ULTRA.includedScansPerYear - used);
 
   const labels: StageLabels | null = (() => {
-    if (centred.type === 'add') return null;                         // ScanPlaceholder carries its own words
+    if (centred.type === 'add') return { tier: 'ultra' };            // ScanPlaceholder carries its own words
     if (centred.type === 'locked') {
       if (!next) return null;
       if (next.tier === 'ultra') {
         // Gold's locked Ultra spot: labelled like the other locked spots, so it never reads as the Ultra
         // garage's own "+ Scan a car" (both centre on ScanPlaceholder art).
         return {
+          tier: next.tier,
           pill: upNextCopy('gold', 0).label,
           pillMetal: lockTier,
           name: 'Your own car',
@@ -347,15 +357,18 @@ export default function GarageScreen() {
         };
       }
       return {
+        tier: next.tier,
         pill: `UP NEXT · ${next.word.toUpperCase()}`,
         pillMetal: lockTier,
         name: next.tier === 'silver' ? 'Your class car' : 'Your car in 3D',
         sub: next.tier === 'silver' ? 'Class car in your paint · 2D map' : 'The 3D map, and your car on it in 3D',
       };
     }
-    if (!centredCar || centredCar.building) return null;             // ScanCountdown carries its own words
+    if (!centredCar) return null;
+    if (centredCar.building) return { tier: carTier(centredCar.kind) }; // ScanCountdown carries its own words
     return {
-      pill: centredCar.id === activeId ? "TODAY'S CAR" : 'IN YOUR GARAGE',
+      tier: carTier(centredCar.kind),
+      pill: isTodays(centredCar) ? "TODAY'S CAR" : 'IN YOUR GARAGE',
       pillMetal: metal,
       name: carName(centredCar, settings, garage),
       sub: carSub(centredCar, settings, garage),
@@ -385,28 +398,38 @@ export default function GarageScreen() {
 
   const up = upNextCopy(viewTier, scansLeft);
 
-  // ONE live WebView on the page: while the full-screen 360° viewer or the Customize sheet is up, the stage
-  // shows its still (Codex review 2026-09-22 — the viewer used to load the same model a second time).
-  // And NONE while the Garage is not in front: it is a Tabs screen (app/(app)/_layout.tsx), so it stays
-  // mounted behind the map after Back — an auto-rotating model-viewer must not live on under it.
+  // While the full-screen 360° viewer or the Customize sheet is up, the stage shows its still (Codex review
+  // 2026-09-22 — the viewer used to load the same model a second time). And no live car while the Garage is not
+  // in front: it is a Tabs screen (app/(app)/_layout.tsx), so it stays mounted behind the map after Back — an
+  // auto-rotating model-viewer must not live on under it.
+  // A live car leaving the stage fades out under its still (CarArt LiveCar, ~2 × MOTION.duration.fade), so on a
+  // swipe the old WebView outlives the handoff by that fade. When the stage is COVERED (the viewer, another
+  // screen) nobody sees a fade, so the model is dropped at once — the viewer never shares the page with it.
+  // The Customize sheet keeps the fade: its preview is a still, never a second WebView.
   const stageLive = focused && !viewer3D && !customizeOpen;
+  const stageCovered = !focused || viewer3D;
   const renderSlot = (slot: StageSlot, _i: number, isCentred: boolean) => {
     if (slot.type === 'locked') {
-      return next ? <LockedSlotArt next={next.tier} centred={isCentred} live={isCentred && stageLive} s={settings} /> : null;
+      return next ? (
+        <LockedSlotArt
+          next={next.tier} centred={isCentred} live={isCentred && stageLive} instantExit={stageCovered}
+          s={settings} g={garage}
+        />
+      ) : null;
     }
     if (slot.type === 'add') return <AddSlotArt centred={isCentred} metal={metal} />;
     const car = cars.find((c) => c.id === slot.key);
     if (!car) return null;
     return (
       <CarSlotArt
-        car={car} centred={isCentred} live={isCentred && stageLive}
+        car={car} centred={isCentred} live={isCentred && stageLive} instantExit={stageCovered}
         s={settings} g={garage} metal={metal} onHeroShot={onHeroShot}
       />
     );
   };
 
   const renderBadge = (slot: StageSlot, _i: number, isCentred: boolean) =>
-    slot.type === 'locked' && next ? <LockedBadge lockTier={lockTier} centred={isCentred} /> : null;
+    slot.type === 'locked' && next ? <LockedBadge lockTier={lockTier} next={next.tier} centred={isCentred} /> : null;
 
   // ── the primary button ───────────────────────────────────────────────────────────────────────────
   const primary = (() => {
@@ -422,7 +445,7 @@ export default function GarageScreen() {
     if (centredCar?.building) {
       return <CandyCta label="Building your car…" icon="hammer-outline" disabled tier={metal} height={52} radius={26} style={styles.primary} />;
     }
-    if (centredCar && centredCar.id === activeId) {
+    if (centredCar && isTodays(centredCar)) {
       return (
         <View style={[styles.primary, styles.today, { borderColor: sk.accent }]} accessibilityRole="text">
           <Ionicons name="checkmark-circle-outline" size={19} color={sk.accent} />
@@ -486,8 +509,8 @@ export default function GarageScreen() {
           <UpNextCard copy={up} variant="upsell" metal={lockTier} lockTier={lockTier} onPress={openNextPaywall} />
         )}
 
-        {/* Quiet actions — 360° spin only for the 3D cars (Gold / Ultra), wiring the full-screen viewer
-            that nothing opened before (CarViewer3D). */}
+        {/* Quiet actions — 360° spin only for a scan (Ultra's own car; the spin is Ultra's), wiring the
+            full-screen viewer that nothing opened before (CarViewer3D). */}
         <View style={styles.actions}>
           {canSpin && (
             <TouchableOpacity style={styles.action} onPress={() => { Haptics.selectionAsync(); setViewer3D(true); }} activeOpacity={0.7}>
@@ -522,7 +545,9 @@ export default function GarageScreen() {
         visible={customizeOpen}
         car={customizeCar}
         carName={customizeCar ? carName(customizeCar, settings, garage) : ''}
-        isToday={!!customizeCar && customizeCar.id === activeId}
+        // The stage's own test, so the sheet and the stage never disagree about the 3D class car: a 3D car still
+        // in a colour from before the choice is NOT today's here either, and saving the sheet only stores the pick.
+        isToday={!!customizeCar && isTodays(customizeCar)}
         metal={metal}
         onClose={() => setCustomizeOpen(false)}
       />

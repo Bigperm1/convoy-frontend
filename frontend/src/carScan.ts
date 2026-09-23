@@ -53,7 +53,7 @@ import { api } from "./api";
 import { getSettings, updateSettings, getSelfMarkerType } from "./settings";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { setSkinChoice } from "./appSkin";
-import { ensureGarageLoaded, getGarage, updateGarage, SKIN_FOR_SCAN } from "./garageStore";
+import { ensureGarageLoaded, getGarage, ownIdentityBack, updateGarage, SKIN_FOR_SCAN } from "./garageStore";
 
 export const SCAN_BUCKET = "car-scans";
 
@@ -629,13 +629,22 @@ export async function deliverSubmittedScan(
     return "parked";
   }
   const markerChanges = getSelfMarkerType(s) !== "car";
+  // The 3D class car was on the road: its make/model/paint leave settings with it, and the member's own identity —
+  // the one this scan was filed under (garage-capture reads garageCars.ownCarIdentity) — goes back, so the new car
+  // is not named after the class car (garageStore ownIdentity).
+  const own = getGarage().ownIdentity;
+  const back = own ? ownIdentityBack(own) : undefined;
   await updateSettings({
     carScanModelUrl: urls.heroUrl,
     carScanMapUrl: urls.mapUrl,
     carScanStatus: "ready",
     ...(markerChanges ? { selfMarkerType: "car" as const } : {}),
+    ...(back ? back.settings : {}),
   });
-  await updateGarage((cur) => ({ scanParked: false, completeScanIds: addId(cur.completeScanIds, id) }));
+  await updateGarage((cur) => ({
+    scanParked: false, completeScanIds: addId(cur.completeScanIds, id), ...(back ? { ownIdentity: undefined } : {}),
+  }));
+  if (back) api.put("/auth/profile", back.profile).catch(() => {});
   // The rest of what picking a car does (garageCars afterMarkerWrite): the profile's avatar_type when the
   // marker changed (ignored by today's backend, kept as it was), and the skin that follows the pick — a scan
   // is Ultra's car, so Diamond EVEN WHEN the marker was already 'car': from the stock 3D car (gold) the
@@ -731,14 +740,21 @@ export async function reconcileScanState(): Promise<"restored" | "failed" | "noo
       if (superseded()) return "noop";
       // Park only behind the ARROW (see the header): class, car and photo drivers get it back 'ready'.
       const parkIt = getSelfMarkerType(getSettings()) === "arrow";
+      // Restored 'ready' over the 3D class car: the member's own identity goes back with it (as in
+      // deliverSubmittedScan above).
+      const own = parkIt ? undefined : getGarage().ownIdentity;
+      const back = own ? ownIdentityBack(own) : undefined;
       await updateSettings({
         carScanId: sc.scanId, carScanModelUrl: ready.heroUrl, carScanMapUrl: ready.mapUrl,
         carScanStatus: parkIt ? "none" : "ready", carScanBackendId: undefined,
+        ...(back ? back.settings : {}),
       });
       await updateGarage((g) => ({
         completeScanIds: addId(g.completeScanIds, sc.scanId),
         ...(parkIt ? { scanParked: true } : {}),
+        ...(back ? { ownIdentity: undefined } : {}),
       }));
+      if (back) api.put("/auth/profile", back.profile).catch(() => {});
       logEventReliable(`carscan-restored id=${sc.scanId} from=${cur.carScanStatus ?? "none"}${parkIt ? " parked=1" : ""}`);
       // No explicit sync here: clearing carScanBackendId above makes map.tsx's sync effect PUT the
       // id once (sim run 2026-09-03 23:11 showed two identical carscan-sync rows with both).

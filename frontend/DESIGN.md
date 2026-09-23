@@ -87,7 +87,11 @@ touches the road and grid. `TIER_WALLPAPER` in `src/components/GlassBackdrop.tsx
 The Garage — the Showroom since 2026-09-22 — no longer uses the wallpaper: it sits on the plain stage
 black of the approved design, and everything tier-coloured on it follows ONE lookup,
 `garageMetal(tier)` in `src/components/showroom/tier.ts` (header chip, stage light and turntable
-ring, page dots, plate rim, "Drive this today", the quiet actions, Customize). The cars keep their
+ring, page dots, plate rim, "Drive this today", the quiet actions, Customize). **One exception, on purpose:
+the stage's top-RIGHT tier chip** names and colours the rung the CENTRED car belongs to (`carTier`: 2D arrow
+Free · 2D class car Silver · both 3D cars Gold · a scan Ultra; the locked spot says the tier it sells) — so a
+Free arrow on a Gold stage wears a green FREE chip (Jeff, 2026-09-23: "on the right side of the screen (across
+from 'in your garage') should have the tier with matcing colour. so we know what tier it is"). The cars keep their
 OWN artwork colours — a green arrow on a gold stage is the arrow's identity, not a stray accent.
 Their stills are RENDERS of the map's own models (model-viewer headless, keyed; `src/components/showroom/CarArt.tsx`),
 each with the class-sprite paint layers so any paint hex shows: the 2D arrow straight down (green, white rim —
@@ -96,7 +100,35 @@ exactly the 2D map's arrow) and the 3D arrow from the chase cam (behind and abov
 **2D cars are flat, 3D cars are 3D:** Silver's class car is the map's top-down sprite drawn flat like the 2D arrow
 (a 3/4 render went in and came out the same night — Jeff: "the … class car need to be 2D top down version and in
 2nd slot (silver) then this makes sense"). **The stage runs in rung order** — Free's 2D arrow · Silver's 2D class
-car · Gold's 3D arrow · Gold's 3D car of your class (the GR Corolla, the one car) · Ultra's scans.
+car · Gold's 3D arrow · Gold's 3D class car · Ultra's scans.
+
+**Gold's 3D class car is the member's 3D CLASS choice** (Jeff, 2026-09-23: "the exotic 3d class needs to have the
+exotic 3d car spinning not the 3d scanned car" · "only add the hot hatch/exotic/supercar model for now ill 3d scan
+each class when i get a chance but put the classes in there for now"). Three classes have a real model: **Hot Hatch =
+GR Corolla · Supercar = 911 GT3 RS · Exotic = LFA**, each in its real bakes only (the `CLASS_MODEL_3D` rows with a
+`modelKey`). Muscle · Sedan · Truck · Electric · Jeep are in the picker as disabled **"Coming soon"** chips until Jeff
+scans them (Muscle's generated model stays out: 64,831 verts in one primitive, never proven on the map). Customize →
+3D class + colour; the choice lives in the garage store (`class3dPick`, `src/garageStore.ts` — never `settings.ts`),
+and with none stored it is the Silver class when that is one of the three (else Hot Hatch), in today's colour when it
+is one of that class's bakes. "Drive this today" writes `carColor` = the bake's paint ("Pearl Blue", which resolves to
+exactly that bake) plus the class's make/model, so the map, CarPlay/AA and peers draw that same car; `carYear` is never
+touched, and the member's OWN car identity is kept aside (`ownIdentity`, the garage store) and put back the moment the
+class car leaves the road — a scan is always filed under the member's own car, never the class car. A 3D car still in a
+colour from before the choice is not "today's car" — on the stage OR in Customize — until it is driven; Customize then
+only stores the pick. Name "Exotic · 3D", sub "Lexus LFA · Pearl Blue · 3D map".
+
+**No spin except Ultra** ("make it so it does not spin the spin is for ultra only"): the 3D class car stands still on
+the turntable (`CarHero3D autoRotate={false}`) and has no "360° spin"; only a scanned car turns and gets the spin.
+
+**A 3D car never moves when it goes live** ("when swiping to ultra the 3d car has a wierd animation that pops the car
+into the carasoul, remove that pop and make it smooth"). Every 3D car — centred or a neighbour — stands in the live
+view's own frame, its still placed at the live model's framing (model-viewer frames by bounding sphere, so the car's
+size follows the frame height; the class stills' fits are computed from the GLBs, `CarArt.tsx`). Going live, the model
+fades in over the still, and only once it is fully on screen does the still fade out; leaving, the still fades back
+first (`MOTION.duration.fade`, opacity only, so under Reduce Motion too). A reversal mid-fade cancels the other
+direction's chain first, so it always settles where it was last sent. When the stage is COVERED (the 360° viewer,
+another screen) the model is dropped at once — no one sees that fade, and the viewer never shares the page with it. A scan's still is its hero photo as a card,
+the photo drawn 1:1 with the frame so its car lies where the live one will.
 
 `accent` is the mid-tone for text/icons on a DARK ground (`#2DEC86` / `#C9D2D8` /
 `#E0A93E`); `ink` is for glyphs riding ON the fill. Never use `ink` on black.
@@ -144,7 +176,8 @@ separate them.)
 Today: the Garage Scan flow (`garage-scan` → `garage-consent` → `garage-capture`, the viewfinder and the
 scan hero/countdown) is **Ultra / diamond** (gold until 2026-09-22). The Garage itself (the Showroom, 2026-09-22)
 wears the metal of the tier it is drawn for — Free green · Silver silver · Gold gold · Ultra diamond
-(`garageMetal`) — and says the tier in words on its header chip
+(`garageMetal`) — and says the tier in words on its header chip (the stage's right-hand chip says the centred
+CAR's rung instead, in that rung's metal — §1)
 (Jeff, 2026-09-22: "the diamond is only for ultra … skins are already set in place for how they work").
 
 ---

@@ -27,6 +27,14 @@
 //     (settings + the backend profile carry today's car only — src/garageCars.ts).
 //   • Drafts are seeded when the sheet OPENS, not at first render (the old screen read getSettings() at
 //     mount and could seed from DEFAULT_SETTINGS if settings had not loaded yet).
+//   • The 3D CLASS car (Gold's 4th spot) has no typed Year/Make/Model/Color any more: it gets a 3D CLASS PICKER
+//     — Hot Hatch · Supercar · Exotic, and the five classes still to come as disabled "Coming soon" chips — and
+//     that class's REAL bakes as its colours (Jeff, 2026-09-23: "in that section in customize it should have the
+//     3d class car picker with colour options"). Save stores the choice in the garage store
+//     (garageCars.setClass3dPick) and, when the 3D class car is ON THE ROAD (isToday — the Garage passes the
+//     stage's own test, class3dOnMap), puts a CHANGED choice on the map (garageCars.applyClass3dToday: the class's
+//     make/model and the bake's paint, the member's own identity kept aside); the save's PUT /auth/profile then
+//     carries it to peers. A save that changed nothing writes no car. The typed fields stay for a scan.
 
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -60,14 +68,25 @@ import { TopDownClassSnap } from "../../ConvoyMapbox";
 import { getColorsForModel } from "../../carDatabase";
 import { getGarage } from "../../garageStore";
 import {
+  CLASS_3D_CARS,
+  applyClass3dToday,
   carHasIdentity,
+  class3dChoice,
+  class3dPalette,
   identityFor,
+  isClass3dKey,
+  pinClass3dIfOnMap,
   rememberIdentity,
   saveIdentity,
+  setClass3dPick,
   setNickname,
+  type Class3dKey,
   type GarageCar,
 } from "../../garageCars";
-import { VEHICLE_CLASSES, classLabel } from "./labels";
+import { PressableScale } from "../../ui/PressableScale";
+import { haptics } from "../../haptics";
+import { CLASS_3D_PICKER, VEHICLE_CLASSES, classLabel } from "./labels";
+import { Class3DStill } from "./CarArt";
 
 // Check-mark contrast on an arbitrary palette hex (moved from garage.tsx).
 const isLightHex = (hex: string) => {
@@ -125,7 +144,8 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
   /** The car being customized; null renders nothing (the Modal stays closed). */
   car: GarageCar | null;
   carName: string;
-  /** Is this today's car? Its identity lives in settings; any other car's in the garage store. */
+  /** Is this today's car — the car the map draws (the Garage's isTodays: the 3D class car only when the map
+   *  draws its chosen bake)? Its identity lives in settings; any other car's in the garage store. */
   isToday: boolean;
   metal: VisualTier;
   onClose: () => void;
@@ -146,6 +166,9 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
   const [arrPriDraft, setArrPriDraft] = useState<string | null>(null);
   const [arrSecDraft, setArrSecDraft] = useState<string | null>(null);
   const [hexDraft, setHexDraft] = useState("");
+  // The 3D class car's draft: its class and the bake (GRCColorKey) within it.
+  const [c3Cls, setC3Cls] = useState<Class3dKey>("hatchback");
+  const [c3Key, setC3Key] = useState<string>("");
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -170,6 +193,9 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
     setArrSecDraft(s.arrowPaint?.secondary ?? null);
     setPaintSlot("primary");
     setHexDraft("");
+    const c3 = class3dChoice(s, g);
+    setC3Cls(c3.cls);
+    setC3Key(c3.modelKey);
     setSaved(false);
     setBusy(false);
     // user?.handle only seeds a blank call sign; re-seeding on a profile refresh mid-edit would wipe typing.
@@ -179,7 +205,11 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
   const kind = car?.kind;
   const isArrow = kind === "arrow" || kind === "arrow3d";
   const isClass = kind === "class";
-  const showsIdentity = !!car && carHasIdentity(car);
+  const isClass3d = kind === "class3d";
+  // The typed Year/Make/Model/Color: a scan's. The 3D class car's identity comes from its class picker.
+  const showsIdentity = !!car && carHasIdentity(car) && !isClass3d;
+  const c3Bakes = class3dPalette(c3Cls);
+  const c3Bake = c3Bakes.find((e) => e.modelKey === c3Key) ?? c3Bakes[0];
 
   // Only used to put a colour dot next to a paint we happen to recognise.
   const knownColors = make && model ? getColorsForModel(make, model) : [];
@@ -227,6 +257,9 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
   }, [hexDraft, pickColor, isArrow]);
 
   const saveClassPaint = async () => {
+    // A new Silver class re-points an UNSTORED 3D class choice (its default follows the class): pin it first while
+    // it is what the map draws, so the 3D spot never moves off the car on the road (garageCars.pinClass3dIfOnMap).
+    await pinClass3dIfOnMap();
     const s = getSettings();
     const nextPaint = { ...(s.classPaint || {}) };
     if (priDraft || secDraft) nextPaint[vehClass] = { primary: priDraft ?? undefined, secondary: secDraft ?? undefined };
@@ -252,18 +285,25 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
     setBusy(true);
     if (isClass) await saveClassPaint();
     if (isArrow) await saveArrowPaint();
+    // The 3D class choice is stored whichever car is today's — the Showroom's 3D spot shows it. A class with no
+    // model yet can never get here (its chip is disabled), and setClass3dPick refuses one anyway. On the road, a
+    // CHANGED choice goes on the map too (applyClass3dToday writes nothing when the map already draws it).
+    const c3Saved = isClass3d && !!c3Bake && (await setClass3dPick(c3Cls, c3Bake.modelKey));
+    if (c3Saved && isToday) await applyClass3dToday();
     await setNickname(car.id, nickname);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const sign = callSign.trim();
     if (showsIdentity && !isToday) {
       await rememberIdentity(car.id, { year: year.trim(), make: make.trim(), model: model.trim(), color: color.trim() });
     }
-    // Today's identity: the drafts when this sheet is showing today's car, otherwise what settings hold.
+    // Today's identity: the drafts when this sheet is showing today's car (a scan); otherwise what settings hold —
+    // the 3D class car's identity included, when that car is on the road.
     const s = getSettings();
-    const ident = showsIdentity && isToday
+    const typedToday = showsIdentity && isToday;
+    const ident = typedToday
       ? { carYear: year, carMake: make, carModel: model, carColor: color }
       : { carYear: s.carYear ?? "", carMake: s.carMake ?? "", carModel: s.carModel ?? "", carColor: s.carColor ?? "" };
-    await updateSettings({ ...(showsIdentity && isToday ? ident : {}), callSign: sign });
+    await updateSettings({ ...(typedToday ? ident : {}), callSign: sign });
     // Push the full identity to the backend so peers render us correctly AND the call sign (= account
     // handle) persists to the account: it survives a reinstall and is the name other drivers see on the
     // map and in comms.
@@ -481,8 +521,81 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
               </View>
             )}
 
-            {/* Year / make / model / colour — the 3D cars only (the old "3D mode"). They feed the peer
-                label and the stock car's paint, and a scan is filed against them. */}
+            {/* The 3D class car: which 3D class, and which of its real bakes. The classes Jeff has not scanned
+                yet are listed, disabled, as "Coming soon". */}
+            {isClass3d && c3Bake && (
+              <View style={styles.panel}>
+                <Text style={styles.hint}>Pick your 3D class — more classes are coming</Text>
+                <View style={styles.clsGrid}>
+                  {CLASS_3D_PICKER.map((c) => {
+                    const sel = !c.soon && c3Cls === c.key;
+                    return (
+                      // hitSlop 0: 66 pt tall already, and 8 pt from the next chip — a 12 pt slop would take its edge
+                      // (DESIGN.md §11.5).
+                      <PressableScale
+                        key={c.key}
+                        style={[styles.clsTile, sel && { borderColor: sk.rim, overflow: "hidden" }, c.soon && styles.clsTileSoon]}
+                        hitSlop={0}
+                        disabled={c.soon}
+                        accessibilityState={{ disabled: c.soon, selected: sel }}
+                        accessibilityLabel={c.soon ? `${c.label}, coming soon` : c.label}
+                        onPress={() => {
+                          if (!isClass3dKey(c.key) || c.key === c3Cls) return;
+                          haptics.tick();
+                          const bakes = class3dPalette(c.key);
+                          setC3Cls(c.key);
+                          // Keep the colour when the new class has the same bake (it never does today); else its first.
+                          setC3Key((bakes.find((e) => e.modelKey === c3Key) ?? bakes[0]).modelKey);
+                        }}
+                      >
+                        {sel && (
+                          <LinearGradient colors={sk.colors} locations={sk.locations} style={[StyleSheet.absoluteFill, { borderRadius: 13 }]} />
+                        )}
+                        {CLASS_TOPDOWN[c.key] ? (
+                          <Image source={CLASS_TOPDOWN[c.key]} style={styles.clsTileImg} resizeMode="contain" />
+                        ) : (
+                          <MaterialCommunityIcons name={c.icon as any} size={26} color={sel ? sk.ink : sk.accent} />
+                        )}
+                        <Text style={[styles.clsTileLabel, sel && { color: sk.ink }]} numberOfLines={1}>{c.label}</Text>
+                        {c.soon ? <Text style={styles.clsTileSoonText} numberOfLines={1}>Coming soon</Text> : null}
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+
+                {/* Preview — the stage's own still of this class, in this bake's paint. */}
+                <View style={styles.previewRow}>
+                  <Class3DStill cls={c3Cls} modelKey={c3Bake.modelKey} hex={c3Bake.hex} width={104} />
+                  <Text style={styles.previewText}>
+                    {classLabel(c3Cls)} · {CLASS_3D_CARS[c3Cls].make} {CLASS_3D_CARS[c3Cls].model} · {c3Bake.name}
+                  </Text>
+                </View>
+
+                {/* The class's real bakes only — each one a GLB of its own, so no hex entry here. */}
+                <View style={styles.swatchRow}>
+                  {c3Bakes.map((e) => {
+                    const active = e.modelKey === c3Bake.modelKey;
+                    return (
+                      // hitSlop 5: half the row's 10 pt gap — 42 pt to aim at without taking a neighbour's edge
+                      // (DESIGN.md §11.5).
+                      <PressableScale
+                        key={e.modelKey}
+                        hitSlop={5}
+                        onPress={() => { if (!active) { haptics.tick(); setC3Key(e.modelKey); } }}
+                        style={[styles.swatch, { backgroundColor: e.hex }, active && styles.swatchSel]}
+                        accessibilityLabel={e.name}
+                        accessibilityState={{ selected: active }}
+                      >
+                        {active && <Ionicons name="checkmark" size={16} color={isLightHex(e.hex) ? "#000" : "#FFF"} />}
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Year / make / model / colour — a scan's (the 3D class car's come from its class picker). They
+                feed the peer label, and a scan is filed against them. */}
             {showsIdentity && (
               <>
                 <TextField
@@ -574,6 +687,8 @@ const styles = StyleSheet.create({
   clsTile: { width: "23%", flexGrow: 1, height: 66, borderRadius: 13, borderWidth: 1, borderColor: "#1E1E1E", alignItems: "center", justifyContent: "center", gap: 4 },
   clsTileImg: { width: 40, height: 26 },
   clsTileLabel: { color: COLORS.textDim, fontSize: 10.5, fontWeight: "600" },
+  clsTileSoon: { opacity: 0.45 },
+  clsTileSoonText: { color: COLORS.textDim, fontSize: 9, fontWeight: "600", marginTop: -3 },
   previewRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 12, marginBottom: 4 },
   previewText: { color: "#F4F4F4", fontSize: 13, fontWeight: "700", flexShrink: 1 },
   slotRow: { flexDirection: "row", gap: 8, marginTop: 10, marginBottom: 2 },

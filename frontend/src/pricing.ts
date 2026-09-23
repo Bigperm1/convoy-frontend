@@ -9,14 +9,15 @@
 // $5.99–12.99; four rungs was the confusing part.
 //
 // THE LADDER — three rungs:
-//   Free   — everything you need to drive with the club: every car on the map (NO convoy cap), push-to-
+//   Free   — the 2D green arrow on the 2D map, and everything you need to drive with the club: every car on the map (NO convoy cap), push-to-
 //            talk, turn-by-turn on phone + CarPlay + Android Auto, Scout, hazards, clubs and cruises.
 //            The promise: paying changes how YOU look and what YOU get alerted about, never who you can
 //            see or talk to.
 //   Silver — $4.99/mo or $39.99/yr: alerts and identity (speed cameras + alerts, incident feed, every
 //            Scout voice + hands-free, your class car in your paint, every map style, route colours,
 //            Top Cruise Speed, the silver skin).
-//   Gold   — $9.99/mo or $79.99/yr: the 3D map and a 3D car of your class, the gold skin.
+//   Gold   — $9.99/mo or $79.99/yr: the 3D map, the 3D arrow or a 3D car of your class, the gold skin
+//            (Jeff 2026-09-22: "the free tier has a 2d arrow and the gold tier gets the 3d arrow").
 //   Ultra  — NOT a tier: GOLD-YEARLY'S ADD-ON, sold as one yearly plan "Gold + Ultra" at $84.99 (Jeff,
 //            2026-09-22, SET IN STONE: "what if ultra was $4.99 and that get 3 more scans would that work at
 //            $84.99?" … "i like your ideas and lets set this in stone"). Includes the diamond skin, the Ultra
@@ -64,7 +65,7 @@ export const PRICING: readonly RungPrice[] = [
     tagline: "The map in 3D, and your car on it in 3D.",
     includes: [
       "The live 3D map on the phone and in the car",
-      "A 3D car of your class in your paint",
+      "The 3D arrow, or a 3D car of your class in your paint",
       "The gold app skin",
       "Go yearly and add Ultra for $5: your own car scanned, the diamond skin, the Ultra garage",
     ],

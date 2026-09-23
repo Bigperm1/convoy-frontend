@@ -1071,6 +1071,16 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **🏎 THE SHOWROOM GARAGE BUILT (Jeff, 2026-09-22: "go build the new garage...") — commit `4bb9d9f5`, JS-only, rides the next OTA.**
+  One tier-aware page: stage + turntable in the tier metal, swipe your owned cars, "Drive this today", next tier locked last with its
+  metal H (Ultra: "+ Scan a car"), plate strip with call sign, one Up-next card (prices from src/pricing.ts), 360° spin / Customize /
+  Share, Customize sheet holds the old panels. src/garageCars.ts + garageStore.ts (convoy.garage.v1); switching is one settings write
+  (non-scan car parks a ready scan) so map, CarPlay/AA and peers switch with no locked edits; carScan.ts delivery/reconcile fixes;
+  convoyPresence re-broadcasts scanId. Gate tools/sim-qc/garage_cars_test.mts (100). Sim-verified all four views + a real
+  arrow↔scan round trip on the map. Tier preview on the sim: `preview_garage.sh tier free|premium|gold|ultra|none` (scratchpad sim/).
+  OPEN (Jeff's calls / build 80): 2D vs 3D arrow write the same map state; "Driving today" can't be re-tapped to re-apply the skin;
+  scanned car named from settings Year/Make/Model (sim shows "Toyota Supra" on a GRC scan — fix in Customize); arrow paint not yet
+  gated for Free; diamond skin merge; multi-car scan caps (3 places); scan purchase; Share needs a native share-image module.
 - **🔒 PRICING SET IN STONE (Jeff, 2026-09-22: "i like your ideas and lets set this in stone").** Free · Silver $4.99/mo or $39.99/yr ·
   Gold $9.99/mo or $79.99/yr · **Gold + Ultra $84.99/yr, yearly only** — 3 Garage Scans a year (carry over while active), extra scans
   $2.99, the Ultra garage, the diamond skin. One Apple subscription group (Silver < Gold < Gold + Ultra); Play: its own yearly plan.

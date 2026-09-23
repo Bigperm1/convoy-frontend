@@ -739,13 +739,16 @@ console.log("P · the 3D class car");
     legacyCarried && eq(gc.identityOfSettings(S()), OWN) && G().ownIdentity === undefined && carPuts().length === 0,
     `carried=${legacyCarried} own=${JSON.stringify(G().ownIdentity)} puts=${JSON.stringify(carPuts())}`);
   // P41 the Garage mount's one-time identity sync and the Customize save both skip the car fields while settings hold the
-  // class car this Garage put there (read from the source: both are React screens this harness cannot mount)
+  // class car this Garage put there, or while the garage store is still another account's (read from the source: both
+  // are React screens this harness cannot mount)
   {
     const gsrc = readFileSync(new URL("../../app/(app)/garage.tsx", import.meta.url), "utf8");
     const csrc = readFileSync(new URL("../../src/components/showroom/CustomizeSheet.tsx", import.meta.url), "utf8");
-    ok("P41 Garage mount sync (after the garage store loads) and Customize save gate the profile's car fields on settingsHoldClassCar",
-      /ensureGarageLoaded\(\)\.then\(\(g\) => \{\s*if \(settingsHoldClassCar\(s, g\)\) return;\s*api\.put\('\/auth\/profile'/.test(gsrc)
-      && /: settingsHoldClassCar\(s, await ensureGarageLoaded\(\)\)\s*\? undefined/.test(csrc) && /\.\.\.\(ident \? \{/.test(csrc));
+    const mountGuard = /ensureGarageLoaded\(\)\.then\(\(g\) => \{[\s\S]{0,300}?if \(settingsHoldClassCar\(s, g\) \|\| !garageIsFor\(g, user\?\.id\)\) return;\s*api\.put\('\/auth\/profile'/;
+    const saveGuard = /: settingsHoldClassCar\(s, g\) \|\| !garageIsFor\(g, user\?\.id\)\s*\? undefined/;
+    const claimPassesProfile = /claimGarageFor\(userId, userRef\.current \?\? undefined\)/;
+    ok("P41 Garage mount sync and Customize save gate the profile's car fields on settingsHoldClassCar + garageIsFor; the claim gets the profile",
+      mountGuard.test(gsrc) && saveGuard.test(csrc) && /\.\.\.\(ident \? \{/.test(csrc) && claimPassesProfile.test(gsrc));
   }
   // P42 a REAL GR Corolla owner whose own car matches a Hot Hatch bake is not "holding the class car" — their car keeps
   // syncing to the profile (Codex review of 6cdcc831); the same identity put there by driving the class car is
@@ -758,6 +761,28 @@ console.log("P · the 3D class car");
   await gc.driveToday(C3);
   ok("P42b …and the Hot Hatch the Garage put on the road IS (so its identity stays off the profile)",
     gc.settingsHoldClassCar(S(), G()) && S().carModel === "GR Corolla" && S().carColor === "Supersonic Red");
+  // P43 Codex's account-switch repro (review of 296b9530): A drives the class car, B signs in on the same phone and opens
+  // the Garage. The claim must take A's car out of settings and put B's own in, so nothing B saves can send A's car.
+  await resetAll({ selfMarkerType: "arrow", ...ownSettings }, { ownerId: "userA" });
+  await gc.driveToday(C3);
+  const aHeld = gc.settingsHoldClassCar(S(), G()) && S().carMake !== "Honda";
+  await gc.claimGarageFor("userB", { car_make: "Subaru", car_model: "WRX", car_color: "WR Blue Pearl", car_year: 2022 });
+  ok("P43 account switch: A's class car leaves settings and B's profile car comes in (none of A's identity stays)",
+    aHeld && eq(gc.identityOfSettings(S()), { year: "2022", make: "Subaru", model: "WRX", color: "WR Blue Pearl" })
+    && G().ownerId === "userB" && G().ownIdentity === undefined && !gc.settingsHoldClassCar(S(), G()) && carPuts().length === 0,
+    JSON.stringify(gc.identityOfSettings(S())));
+  await resetAll({ selfMarkerType: "arrow", ...ownSettings }, { ownerId: "userA" });
+  await gc.driveToday(C3);
+  await gc.claimGarageFor("userB", {});
+  ok("P43b …and a B with no car on its profile starts with an EMPTY identity, not A's",
+    S().carMake === undefined && S().carModel === undefined && S().carColor === undefined && S().carYear === undefined);
+  await resetAll({ ...ownSettings }, { ownerId: "userA" });
+  ok("P43c garageIsFor: the owner's store yes, another account's no, an owner-less store yes (the first claim adopts it)",
+    gc.garageIsFor(G(), "userA") && !gc.garageIsFor(G(), "userB") && !gc.garageIsFor(G(), undefined)
+    && gc.garageIsFor({ ...G(), ownerId: undefined }, "userB"));
+  await resetAll({ ...ownSettings }, { ownerId: "userA" });
+  await gc.claimGarageFor("userA", { car_make: "Subaru" });
+  ok("P43d the SAME account re-claiming changes nothing in settings", eq(gc.identityOfSettings(S()), OWN));
 }
 
 console.log(fails ? `\nFAIL garage_logic (${fails})` : "\nPASS garage_logic");

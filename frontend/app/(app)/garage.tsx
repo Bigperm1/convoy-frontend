@@ -47,7 +47,7 @@ import {
 } from '../../src/carScan';
 import { ensureGarageLoaded, getGarage, useGarage } from '../../src/garageStore';
 import {
-  activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, class3dOnMap, driveToday, garageViewTier,
+  activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, class3dOnMap, driveToday, garageIsFor, garageViewTier,
   ownedCars, parkStrayScan, pinClass3dIfOnMap, refreshScanList, retryProfileClear, scanCarId, scanCars,
   settingsHoldClassCar, type GarageCar,
 } from '../../src/garageCars';
@@ -143,7 +143,9 @@ export default function GarageScreen() {
     // awaited first — the class car's provenance lives there, and it may not have loaded yet.
     if (s.carMake || s.carModel || s.carColor) {
       void ensureGarageLoaded().then((g) => {
-        if (settingsHoldClassCar(s, g)) return;
+        // Not while the store is still another account's (the focus claim has not landed): its settings are that
+        // account's car (garageCars garageIsFor).
+        if (settingsHoldClassCar(s, g) || !garageIsFor(g, user?.id)) return;
         api.put('/auth/profile', {
           car_make: s.carMake || undefined,
           car_model: s.carModel || undefined,
@@ -159,6 +161,9 @@ export default function GarageScreen() {
   // (garageCars.claimGarageFor). Claimed at the top of every focus, BEFORE the inventory is fetched —
   // refreshScanList discards an answer whose owner changed mid-flight, so the claim must land first.
   const userId = user?.id;
+  // The signed-in profile, for claimGarageFor to refill the car identity from when another account's garage is reset.
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   // ── the server's scan count (Ultra's plate + chip) ───────────────────────────────────────────────
   // GET /api/entitlement → scanSlots.used. ⚠ The server's max is SCAN_MAX_SLOTS (default 2, and the
@@ -233,7 +238,7 @@ export default function GarageScreen() {
     setFocused(true);
     let alive = true;
     void (async () => {
-      if (userId) await claimGarageFor(userId);
+      if (userId) await claimGarageFor(userId, userRef.current ?? undefined);
       if (!alive) return;
       // An unstored 3D class choice that IS what the map draws is pinned, so it cannot drift off it later.
       void pinClass3dIfOnMap();

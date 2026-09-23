@@ -32,7 +32,9 @@
 // Skins follow the pick exactly as the old appearance tiles did (SKIN_FOR_MARKER, unchanged values).
 
 import { api } from "./api";
-import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, type Settings, type VehicleClass } from "./settings";
+import {
+  getSettings, updateSettings, getSelfMarkerType, getVehicleClass, hydrateCarFromProfile, type Settings, type VehicleClass,
+} from "./settings";
 import { CLASS_MODEL_3D, type ClassPaletteEntry } from "./classModels";
 import { getVehicleModelKey, resolveGRCKey, type GRCColorKey } from "./vehicleAssets";
 import { checkScanReady, scanHeroUrl, scanMapUrl, scanSyncSettled } from "./carScan";
@@ -673,14 +675,30 @@ export async function adoptActiveScan(): Promise<void> {
  *  scan pointer is dropped too — otherwise the new account would drive, broadcast and list the last
  *  one's car (Codex review 2026-09-22). reconcileScanState then restores the new account's own newest
  *  finished scan, if it has one. */
-export async function claimGarageFor(userId: string): Promise<void> {
+export async function claimGarageFor(
+  userId: string,
+  profile?: { car_make?: string | null; car_model?: string | null; car_color?: string | null; car_year?: number | null },
+): Promise<void> {
   const how = await claimGarage(userId);
   if (how !== "reset") return;
   await updateSettings({
     carScanId: undefined, carScanModelUrl: undefined, carScanMapUrl: undefined, carScanStatus: undefined,
     carScanBackendId: undefined, carScanHeroShotId: undefined, carScanSubmittedAt: undefined,
+    // The outgoing account's car identity leaves with it, and the incoming account's comes from its own profile. Settings
+    // are per PHONE (logout keeps them): without this the next account's Customize save would PUT the previous account's
+    // car onto its profile — the 3D class car included, whose provenance (ownIdentity) the reset above just dropped
+    // (Codex review of 296b9530).
+    carYear: undefined, carMake: undefined, carModel: undefined, carColor: undefined,
   });
-  try { logEventReliable("garage-owner-changed scan-pointer=cleared"); } catch {}
+  if (profile) await hydrateCarFromProfile(profile);
+  try { logEventReliable(`garage-owner-changed scan-pointer=cleared identity=${profile ? "profile" : "cleared"}`); } catch {}
+}
+
+/** The garage store belongs to the signed-in account — or predates owners (the first claim adopts it). False while
+ *  another account's store is still here (claimGarageFor has not run yet this focus): then nothing in settings can be
+ *  trusted to be this account's car, and no car field may be written to its profile. */
+export function garageIsFor(g: GarageState, userId: string | undefined): boolean {
+  return !g.ownerId || (!!userId && g.ownerId === userId);
 }
 
 // ── Nicknames ───────────────────────────────────────────────────────────────────────────────────────

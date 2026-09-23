@@ -79,6 +79,7 @@ import {
   pinClass3dIfOnMap,
   rememberIdentity,
   saveIdentity,
+  garageIsFor,
   settingsHoldClassCar,
   setClass3dPick,
   setNickname,
@@ -303,10 +304,12 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
     // draw it from live presence; the profile keeps the real car — garageCars driveToday). Then only the call sign
     // is sent.
     const s = getSettings();
+    const g = await ensureGarageLoaded();
     const typedToday = showsIdentity && isToday;
+    // …nor while the garage store is still another account's (garageCars garageIsFor): settings are that account's car.
     const ident = typedToday
       ? { carYear: year, carMake: make, carModel: model, carColor: color }
-      : settingsHoldClassCar(s, await ensureGarageLoaded())
+      : settingsHoldClassCar(s, g) || !garageIsFor(g, user?.id)
         ? undefined
         : { carYear: s.carYear ?? "", carMake: s.carMake ?? "", carModel: s.carModel ?? "", carColor: s.carColor ?? "" };
     await updateSettings({ ...(typedToday ? ident : {}), callSign: sign });

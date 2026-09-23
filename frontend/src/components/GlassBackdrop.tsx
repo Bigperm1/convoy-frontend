@@ -23,8 +23,8 @@ import type { VisualTier } from "../tierTheme";
  * ~3.6% of the image is lit, so the rotation only ever touches the road and grid.
  *
  * Pass `source` ONLY to override deliberately:
- *   • app/(app)/garage.tsx pins it to the HERO CAROUSEL's tier, not the app skin, so
- *     the page previews the metal of whichever car you are looking at.
+ *   • (until 2026-09-22 app/(app)/garage.tsx pinned it to its hero carousel's tier; the
+ *     Showroom that replaced the carousel sits on plain stage black and uses no wallpaper.)
  *   • app/(auth)/login.tsx pins it to green — that screen is a brand lockup around the
  *     Hairpin wordmark PNG, which is itself green and cannot follow a skin.
  * The require() must live in the CALLER for a static override so Metro can bundle it.

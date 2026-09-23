@@ -1,245 +1,137 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  SafeAreaView, Dimensions, TextInput,
-  Image, ActivityIndicator, Alert,
-} from 'react-native';
+// The Garage — "The Showroom" (Jeff, 2026-09-22: "go build the new garage...", after approving the four
+// tier views drawn on the Design canvas). One page for every tier:
+//
+//   header   back · GARAGE · the tier chip (FREE / SILVER / GOLD in that metal; Ultra: the scan pips)
+//   stage    today's car turning on a lit turntable; swipe through every car you OWN (neighbours peek,
+//            dimmed); the last spot is the next tier, LOCKED with its metal H (tap → that tier's paywall),
+//            or, for Ultra, "+ Scan a car" (→ the scan flow, never a paywall)
+//   plate    your CALL SIGN as a licence plate + two facts
+//   button   "Drive this today" in the page metal — or "Driving today ✓" when it already is
+//   up next  ONE card for the next rung (prices only from src/pricing.ts), or Ultra's scan tray
+//   actions  360° spin (the 3D cars) · Customize (the old long scroll, now a sheet) · Share
+//
+// What a switch writes, what each surface reads, and why a scan gets PARKED: src/garageCars.ts.
+// What the Garage remembers on its own: src/garageStore.ts. The stage: src/components/showroom/Stage.tsx.
+//
+// KEPT FROM THE OLD SCREEN (every write shape and backend PUT unchanged):
+//   • hydrate once per mount, after auth — local settings win, the backend profile fills blanks, the
+//     retired "Widebody" paint never comes back, a one-time upward sync of an existing local car;
+//   • the scan RETURN LEG — refresh on every focus, a 20 s poll only while something is building,
+//     reconcile with the server first, the HEAL for a missing map twin, the one-shot celebration keyed
+//     on the persisted flag, the hero shot uploaded once per scan;
+//   • the skin follows the pick (SKIN_FOR_MARKER, unchanged values) — through "Drive this today" now;
+//   • locks wear the FEATURE's metal (useFeatureTier), never the member's skin.
+// CHANGED ON PURPOSE:
+//   • swiping only PREVIEWS; "Drive this today" switches (the carousel used to switch on landing);
+//   • the page wears the tier's metal all the way through, on the plain stage black of the approved
+//     design (the carousel's tier wallpaper is gone with the carousel);
+//   • Silver's locked Gold spot opens the Gold paywall (openPaywall('car_3d')); the old locked 3D tile
+//     went to the Garage Scan pitch instead (Jeff 8/20) — the Ultra spot keeps that job now.
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Share, Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassPaint, type VehicleClass } from '../../src/settings';
-import { useFeature, useFeatureTier, openPaywall, TierCornerLock } from '../../src/PremiumBadge';
-import { getVehiclePngOrDefault, CLASS_TOPDOWN } from '../../src/vehicleAssets';
-import { TopDownClassSnap } from '../../src/ConvoyMapbox';
-import { ClassSprite, PAINT_COLORS } from '../../src/classLayers';
-import { CLASS_SWATCHES, classPaintName } from '../../src/classModels';
+import { getSettings, updateSettings, useSettings } from '../../src/settings';
+import { useFeatureTier, openPaywall, useEntitlementVersion } from '../../src/PremiumBadge';
 import { useAuth } from '../../src/auth';
-import { COLORS } from '../../src/theme';
 import { api } from '../../src/api';
+import { skin } from '../../src/tierTheme';
+import { ULTRA } from '../../src/pricing';
 import CarViewer3D from '../../src/CarViewer3D';
-import CarHero3D from '../../src/CarHero3D';
-import { ScanPlaceholder, ScanCountdown, ScanReadyOverlay } from '../../src/ScanHero';
-import GarageHeroCarousel from '../../src/GarageHeroCarousel';
+import { ScanReadyOverlay } from '../../src/ScanHero';
 import { CandyCta } from '../../src/components/CandyCta';
-import { CANDY_RIM, CANDY_INK } from '../../src/components/ManeuverArrow';
-import { skin, type VisualTier } from '../../src/tierTheme';
-import { setSkinChoice } from '../../src/appSkin';
-import { checkScanReady, syncScanIdToBackend, uploadScanHero, reconcileScanState } from '../../src/carScan';
-import { logEventReliable } from '../../src/crashBreadcrumb';
-import { LinearGradient } from 'expo-linear-gradient';
-import { resolveGRCKey, getVehicleModelUrl } from '../../src/vehicleAssets';
-import { GlassFill } from '../../src/Glass';
-import GlassBackdrop, { TIER_WALLPAPER } from '../../src/components/GlassBackdrop';
-import { getColorsForModel } from '../../src/carDatabase';
-/** Appearance -> metal. Module scope: a constant the useCallback below closes over,
- *  so it can never be a stale dependency. 'photo' is absent on purpose (see
- *  applyMarkerType). */
-const SKIN_FOR_MARKER: Partial<Record<'car' | 'arrow' | 'photo' | 'class', VisualTier>> = {
-  arrow: 'brand', class: 'premium', car: 'ultra',
-};
+import {
+  checkScanReady, deliverSubmittedScan, fetchScanSlots, reconcileScanState, uploadScanHero, SHOTS_TOTAL,
+} from '../../src/carScan';
+import { getGarage, useGarage } from '../../src/garageStore';
+import {
+  activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, driveToday, garageViewTier, ownedCars,
+  parkStrayScan, refreshScanList, retryProfileClear, scanCarId, scanCars, type GarageCar,
+} from '../../src/garageCars';
+import Stage, { type StageLabels, type StageSlot } from '../../src/components/showroom/Stage';
+import { AddSlotArt, CarSlotArt, LockedBadge, LockedSlotArt, carGlbUrl } from '../../src/components/showroom/SlotArt';
+import PlateStrip, { type PlateFact } from '../../src/components/showroom/PlateStrip';
+import TierChip from '../../src/components/showroom/TierChip';
+import UpNextCard from '../../src/components/showroom/UpNextCard';
+import CustomizeSheet from '../../src/components/showroom/CustomizeSheet';
+import { garageMetal, nextRung, upNextCopy } from '../../src/components/showroom/tier';
+import { carName, carSub, scannedOn } from '../../src/components/showroom/labels';
 
-const { width: SCREEN_W } = Dimensions.get('window');
-const HERO_H = 300;   // one height for every hero page — the carousel cannot jump
-const YELLOW = '#2DEC86';
-
-
-// Photo avatars are parked until the backend upload endpoint + Supabase Storage
-// exist (they need server-side work). Flip to true to re-enable the Photo option;
-// the picker/upload code below is already wired for it.
-const PHOTO_AVATAR_ENABLED = false;
-
-// Paints that no longer exist and must never be restored from any source — not
-// local settings, not the backend profile. "Widebody" was Jeff's own scanned car,
-// retired 2026-08-23 ("remove the widebody and start fresh. including my car").
+// Paints that no longer exist and must never be restored from any source — not local settings, not
+// the backend profile. "Widebody" was Jeff's own scanned car, retired 2026-08-23 ("remove the widebody
+// and start fresh. including my car").
 const RETIRED_COLORS = new Set<string>(['Widebody']);
 
-// ---- "Class" map appearance ----
-// Top-down vehicle classes. Hatchback previews with the GR Corolla asset; the
-// rest use MCI glyph PLACEHOLDERS until Jeff's top-down class photos land.
-const VEHICLE_CLASSES: { key: VehicleClass; label: string; icon: string }[] = [
-  { key: 'hatchback',  label: 'Hot Hatch',  icon: 'car-hatchback' }, // storage key stays 'hatchback'
-  { key: 'muscle',     label: 'Muscle',     icon: 'car-side' },
-  { key: 'supercar',   label: 'Supercar',   icon: 'car-sports' },
-  { key: 'exotic',     label: 'Exotic',     icon: 'car-convertible' },
-  { key: 'sedan',      label: 'Sedan',      icon: 'car' },
-  { key: 'truck',      label: 'Truck',      icon: 'car-pickup' },
-  { key: 'electric',   label: 'Electric',   icon: 'car-electric' },
-  { key: 'jeep',       label: 'Jeep',       icon: 'car-estate' },
-  // Motorcycle / ATV / SxS / Boat pulled from the picker 8/20 (Jeff: parked for a future
-  // release; the class ladder goes 3D and these have no 3D model planned).
-  // The TYPES stay valid so anyone who already picked one keeps rendering.
-];
-// Check-mark contrast on an arbitrary palette hex — the old two-hex
-// special-case (white/yellow) can't scale to per-class palettes.
-const isLightHex = (hex: string) => {
-  const n = parseInt(hex.replace('#', ''), 16);
-  return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 160;
-};
+/** A PB is stored in km/h (server.py top_speed_record); the old card printed it raw with "km/h". */
+const fmtSpeed = (kmh: number) => (Number.isInteger(kmh) ? String(kmh) : kmh.toFixed(1));
 
-// Same palette as Settings → Route Color, per Jeff ("use the color swatch from
-// the route line").
-const CLASS_PRESETS = [
-  '#2DEC86', '#0A84FF', '#00D6E0', '#5E5CE6', '#BF5CFF',
-  '#FF2D95', '#FF3B30', '#FF9500', '#FFD60A', '#FFFFFF',
-];
-
-// The candy fill as an absolute layer. Any tile/chip drops one in as its first
-// child. `tier` picks the metal: the appearance tiles each wear their own —
-// Arrow is free so it stays brand green, Class is Premium silver, 3D is Ultra
-// gold (Jeff 8/23). The tile therefore states its price before you tap it.
-function CandyFill({ radius, tier = 'brand' }: { radius?: number; tier?: VisualTier }) {
-  const sk = skin(tier);
-  return (
-    <LinearGradient
-      colors={sk.colors}
-      locations={sk.locations}
-      style={[StyleSheet.absoluteFill, radius ? { borderRadius: radius } : null]}
-    />
-  );
-}
-
-// ---- Typed identity field (Year / Make / Model / Color) ----
-// Was a dropdown bound to carDatabase. Jeff, 2026-08-23: "it should be fillable
-// from the user not a picker" — a scanned car can be ANY car, so a list of the
-// few models we happen to ship is the wrong control entirely.
-type TextFieldProps = {
-  label: string;
-  value: string;
-  onChangeText: (v: string) => void;
-  onBlur: () => void;
-  placeholder?: string;
-  keyboardType?: 'default' | 'number-pad';
-  maxLength?: number;
-  /** Hex for a leading colour dot, when the typed paint happens to be one we know. */
-  swatch?: string;
-};
-
-function TextField({
-  label, value, onChangeText, onBlur, placeholder, keyboardType, maxLength, swatch,
-}: TextFieldProps) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{label}</Text>
-      <View style={styles.fieldRow}>
-        <GlassFill style={{ borderRadius: 16, overflow: 'hidden' }} />
-        {swatch ? <View style={[styles.swatchDot, { backgroundColor: swatch, marginRight: 9 }]} /> : null}
-        <TextInput
-          style={styles.fieldInput}
-          value={value}
-          onChangeText={onChangeText}
-          onBlur={onBlur}
-          onEndEditing={onBlur}
-          placeholder={placeholder}
-          placeholderTextColor="#808080"
-          keyboardType={keyboardType ?? 'default'}
-          maxLength={maxLength}
-          autoCapitalize="words"
-          autoCorrect={false}
-          returnKeyType="done"
-          // Free text needs a way out — retyping a long model name because you
-          // fat-fingered one character is the kind of small cruelty that makes
-          // people give up on a form.
-          clearButtonMode="while-editing"
-        />
-      </View>
-    </View>
-  );
-}
-
-// ---- Main screen ----
 export default function GarageScreen() {
   const router = useRouter();
-  const { user, refresh } = useAuth();
-  const [year,  setYear]  = useState('2025');
-  const [make,  setMake]  = useState('');
-  const [model, setModel] = useState('');
-  const [color, setColor] = useState('');
-  const [topSpeed, setTopSpeed] = useState<number | null>(null);
-  const [callSign, setCallSign] = useState('');
-  const classUnlocked = useFeature('class_marker');
-  const car3dUnlocked = useFeature('car_3d');
-  // Which metal each lock wears — read from the entitlement ladder so a re-rank
-  // changes the badge automatically instead of drifting.
-  const classTier = useFeatureTier('class_marker');   // premium -> silver H
-  const car3dTier = useFeatureTier('car_3d');         // ultra   -> gold H
-  // How the driver appears on the convoy map: arrow / class sprite / 3D car / photo.
-  const [markerType, setMarkerType] = useState<'car' | 'arrow' | 'photo' | 'class'>('car');
-  // Paint drafts (PRIMARY + SECONDARY slots; null = original / stock). The
-  // class panel and the arrow panel each keep their own pair; Save commits.
-  const [vehClass, setVehClass] = useState<VehicleClass>(getVehicleClass(getSettings()));
-  const [paintSlot, setPaintSlot] = useState<'primary' | 'secondary'>('primary');
-  const [priDraft, setPriDraft] = useState<string | null>(getClassPaint(getSettings()).primary ?? null);
-  const [secDraft, setSecDraft] = useState<string | null>(getClassPaint(getSettings()).secondary ?? null);
-  const [arrPriDraft, setArrPriDraft] = useState<string | null>(getSettings().arrowPaint?.primary ?? null);
-  const [arrSecDraft, setArrSecDraft] = useState<string | null>(getSettings().arrowPaint?.secondary ?? null);
-  const [classHexDraft, setClassHexDraft] = useState<string>('');
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const { user } = useAuth();
+  const [settings] = useSettings();
+  const garage = useGarage();
+  // Re-render when the tier (or the QA override) hydrates — getTier()/getDevTier() are 'free'/null
+  // until the async read finishes.
+  useEntitlementVersion();
+  const viewTier = garageViewTier();
+  const metal = garageMetal(viewTier);
+  const sk = skin(metal);
+  const next = nextRung(viewTier);
+  // Locks wear the FEATURE's metal, never the page's or the member's skin (DESIGN.md §4). Called
+  // unconditionally — Ultra has no next rung, so it asks about car_scan and never uses the answer.
+  const lockTier = useFeatureTier(next?.feature ?? 'car_scan');
 
-  const [saved, setSaved] = useState(false);
-  // Which hero page is showing. Kept in sync with markerType so the tiles below
-  // and the carousel always agree.
-  const [heroIndex, setHeroIndex] = useState(0);
-  // markerType -> page. Selecting a tile below slides the carousel to match, so
-  // the two controls can never disagree about what you have chosen.
-  useEffect(() => {
-    const i = markerType === 'arrow' ? 0 : markerType === 'class' ? 1 : 2;
-    setHeroIndex(i);
-  }, [markerType]);
+  // ── the cars ─────────────────────────────────────────────────────────────────────────────────────
+  const cars = useMemo(() => ownedCars(viewTier, settings, garage), [viewTier, settings, garage]);
+  const derivedActive = activeCarId(settings, garage);
+  // The 3D arrow is one map state with the 2D one; a view that does not own it shows the arrow.
+  const activeId = cars.some((c) => c.id === derivedActive)
+    ? derivedActive
+    : derivedActive === 'arrow3d' ? 'arrow' : derivedActive;
+  const slots: StageSlot[] = useMemo(() => [
+    ...cars.map((c) => ({ key: c.id, type: 'car' as const })),
+    next ? { key: 'locked', type: 'locked' as const } : { key: 'add', type: 'add' as const },
+  ], [cars, next]);
 
-  // Only used to put a colour dot next to a paint we happen to recognise. The
-  // field itself accepts anything, so an unknown paint simply gets no dot.
-  const colors    = (make && model) ? getColorsForModel(make, model) : [];
-  const swatchFor = (name: string) => colors.find(c => c.name === name)?.hex;
+  // Which spot is centred. null = follow today's car (the first paint, and after a switch).
+  const [centredKey, setCentredKey] = useState<string | null>(null);
+  const wantKey = centredKey ?? activeId;
+  const found = slots.findIndex((sl) => sl.key === wantKey);
+  const centredIndex = found >= 0 ? found : Math.max(0, slots.findIndex((sl) => sl.key === activeId));
+  const centred = slots[centredIndex] ?? slots[0];
+  const centredCar: GarageCar | undefined = centred.type === 'car' ? cars.find((c) => c.id === centred.key) : undefined;
+  const onIndexChange = useCallback((i: number) => { const k = slots[i]?.key; if (k) setCentredKey(k); }, [slots]);
 
-  // Load saved settings — prefer locally-saved values, but fall back to the
-  // backend profile so a fresh install / new build (local storage wiped) still
-  // shows the car attached to the account instead of forcing a re-entry.
+  // ── hydrate once per mount, after auth (unchanged) ───────────────────────────────────────────────
+  // Local settings win; the backend profile fills blanks, so a fresh install / new build (local
+  // storage wiped) still shows the car attached to the account instead of forcing a re-entry.
   const hydratedRef = useRef(false);
   useEffect(() => {
     if (user === undefined || hydratedRef.current) return; // wait for auth, run once
     hydratedRef.current = true;
     const s = getSettings();
-    const y  = s.carYear  || (user?.car_year != null ? String(user.car_year) : '');
-    const mk = s.carMake  || user?.car_make  || '';
-    const md = s.carModel || user?.car_model || '';
-    // Colour is free text, so it cannot be validated against a list — but a
-    // RETIRED paint must still not come back. Clearing it locally is not enough:
-    // the BACKEND profile still holds it and the patch below would write it
-    // straight back, which is exactly how "Widebody" survived its own migration.
+    // Colour is free text, so it cannot be validated against a list — but a RETIRED paint must still
+    // not come back. Clearing it locally is not enough: the BACKEND profile still holds it and the
+    // patch below would write it straight back, which is exactly how "Widebody" survived its migration.
     const rawColor = s.carColor || user?.car_color || '';
     const cl = RETIRED_COLORS.has(rawColor) ? '' : rawColor;
-    if (y)  setYear(y);
-    if (mk) setMake(mk);
-    if (md) setModel(md);
-    if (cl) setColor(cl);
-    if (s.topSpeed) setTopSpeed(s.topSpeed);
-    else if (user?.top_speed_record) setTopSpeed(user.top_speed_record);
-    if (s.callSign) setCallSign(s.callSign);
-    else if (user?.handle) setCallSign(user.handle);
     // Appearance: local settings first, backend profile as fallback.
-    setMarkerType(getSelfMarkerType(s));
-    if (s.avatarUrl) setAvatarUrl(s.avatarUrl);
-    else if ((user as any)?.avatar_url) setAvatarUrl((user as any).avatar_url);
     if (!s.selfMarkerType && (user as any)?.avatar_type) {
-      setMarkerType((user as any).avatar_type);
       updateSettings({ selfMarkerType: (user as any).avatar_type });
     }
-
-    // If local was empty but the profile had the car, persist it locally so the
-    // rest of the app (map self-marker, presence) picks it up immediately too.
+    // If local was empty but the profile had the car, persist it locally so the rest of the app (map
+    // self-marker, presence) picks it up immediately too.
     const patch: Record<string, any> = {};
-    if (!s.carMake  && user?.car_make)  patch.carMake  = user.car_make;
+    if (!s.carMake && user?.car_make) patch.carMake = user.car_make;
     if (!s.carModel && user?.car_model) patch.carModel = user.car_model;
     if (!s.carColor && cl) patch.carColor = cl;          // cl, not user.car_color — a retired paint must not come back
-    if (s.carColor && !cl) patch.carColor = undefined;   // stored paint is dead — clear it so the picker reopens
-    if (!s.carYear  && user?.car_year != null) patch.carYear = String(user.car_year);
+    if (s.carColor && !cl) patch.carColor = undefined;   // stored paint is dead — clear it so the field reopens
+    if (!s.carYear && user?.car_year != null) patch.carYear = String(user.car_year);
     if (Object.keys(patch).length) updateSettings(patch);
-
-    // One-time sync of any EXISTING local car identity up to the backend, so
-    // users who picked their car before backend-sync existed get their paint
-    // onto the map without having to re-select anything.
+    // One-time sync of any EXISTING local car identity up to the backend, so users who picked their
+    // car before backend-sync existed get their paint onto the map without re-selecting anything.
     if (s.carMake || s.carModel || s.carColor) {
       api.put('/auth/profile', {
         car_make: s.carMake || undefined,
@@ -250,359 +142,71 @@ export default function GarageScreen() {
     }
   }, [user]);
 
-  const save = useCallback((updates: Record<string, any>) => {
-    updateSettings(updates);
-    // Mirror car identity to the BACKEND profile so OTHER drivers see the
-    // right paint/model on the map. Presence, /users/nearby AND the /location
-    // broadcast all read the backend user doc — the Garage used to save only
-    // locally, which is why a peer's car reverted to the default Heavy Metal
-    // color the moment they started moving (live frames came from the backend,
-    // which never knew the chosen color).
-    const profile: Record<string, any> = {};
-    if ('carMake' in updates) profile.car_make = updates.carMake;
-    if ('carModel' in updates) profile.car_model = updates.carModel;
-    if ('carColor' in updates) profile.car_color = updates.carColor;
-    if ('carYear' in updates) { const y = parseInt(updates.carYear, 10); if (y) profile.car_year = y; }
-    if (Object.keys(profile).length > 0) {
-      api.put('/auth/profile', profile).catch(() => {});
-    }
-  }, []);
+  // A garage belongs to an ACCOUNT; settings belong to the phone (logout keeps them). A different account
+  // signing in here starts from an empty garage, and the last account's scan pointer is dropped
+  // (garageCars.claimGarageFor). Claimed at the top of every focus, BEFORE the inventory is fetched —
+  // refreshScanList discards an answer whose owner changed mid-flight, so the claim must land first.
+  const userId = user?.id;
 
-  // Year / Make / Model / Colour are TYPED, not picked (Jeff, 2026-08-23). A
-  // dropdown limited to the handful of cars in carDatabase contradicts the whole
-  // premise of scanning YOUR car — the 3D marker can be any car in the world, so
-  // the identity fields have to accept any car in the world.
-  //
-  // Committed on blur rather than per keystroke: save() mirrors to the backend
-  // profile, and one PUT per character would hammer it. The Save button commits
-  // too, so a field left focused is not lost.
-  const commitYear  = () => save({ carYear: year.trim() });
-  const commitMake  = () => save({ carMake: make.trim() });
-  const commitModel = () => save({ carModel: model.trim() });
-  const commitColor = () => save({ carColor: color.trim() });
+  // ── the server's scan count (Ultra's plate + chip) ───────────────────────────────────────────────
+  // GET /api/entitlement → scanSlots.used. ⚠ The server's max is SCAN_MAX_SLOTS (default 2, and the
+  // consent copy still says the second replaces the first) while Ultra includes 3 a year
+  // (src/pricing.ts) — the caps and the copy move together in build 80. Until then the "of 3" here is
+  // the plan, not the server's gate.
+  const [serverUsed, setServerUsed] = useState<number | null>(null);
 
-  // ---- Appearance (how you're drawn on the map: car / arrow / photo) ----
-  // Persist the choice locally AND to the backend profile (avatar_type) so peers,
-  // /users/nearby and the live /location broadcast all render you the same way —
-  // exactly like carColor is mirrored above.
-  // ── PICKING A MARKER PICKS THE APP'S METAL (Jeff, 2026-08-27) ──────────────
-  // "if you select from the arrow, the class, or the 3D it should also change the
-  //  skin to that class or 3D or arrow."
-  //
-  // The three appearances ALREADY carry a tier in this screen — pageTier below
-  // paints the whole page from the carousel, and DESIGN.md fixes the ladder:
-  // Arrow is free (green), Class is Premium (silver), 3D is Ultra (gold). So the
-  // choice a driver makes here is a tier statement, and the app now follows it
-  // instead of making them set the same thing twice in Settings → App Skin.
-  //
-  // 'photo' is deliberately ABSENT: it is not one of the three tiered appearances
-  // (Jeff named arrow/class/3D), so choosing it leaves the metal alone.
-  //
-  // setSkinChoice CLAMPS to what the account is entitled to and persists the pick,
-  // so this can never hand out a metal the tier has not bought — and Settings →
-  // App Skin still overrides afterwards, because both write the same setting.
-  const applyMarkerType = useCallback((type: 'car' | 'arrow' | 'photo' | 'class') => {
-    Haptics.selectionAsync();
-    setMarkerType(type);
-    updateSettings({ selfMarkerType: type });
-    api.put('/auth/profile', { avatar_type: type }).catch(() => {});
-    const metal = SKIN_FOR_MARKER[type];
-    if (metal) void setSkinChoice(metal);
-  }, []);
-
-  // Photo mode: pick a square photo → send as base64 to the backend, which stores
-  // it (Supabase Storage) and returns a hosted avatar_url. Same base64→profile
-  // pattern the community logo/cover uploads already use.
-  const pickAndUploadAvatar = useCallback(async () => {
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm.status !== 'granted') {
-        return Alert.alert('Photo access needed', 'Allow photo access to set a profile picture.');
-      }
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true,
-      });
-      if (res.canceled || !res.assets?.[0]?.base64) return;
-      const asset = res.assets[0];
-      const mime = asset.mimeType || 'image/jpeg';
-      const dataUri = `data:${mime};base64,${asset.base64}`;
-      setUploadingAvatar(true);
-      // Backend uploads to Supabase Storage and returns { avatar_url }.
-      const r = await api.put('/auth/profile', { avatar_b64: dataUri, avatar_type: 'photo' });
-      const url: string | undefined = r?.data?.avatar_url || r?.data?.user?.avatar_url;
-      if (url) {
-        setAvatarUrl(url);
-        setMarkerType('photo');
-        await updateSettings({ selfMarkerType: 'photo', avatarUrl: url });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        Alert.alert('Upload failed', 'Could not save your photo. Please try again.');
-      }
-    } catch {
-      Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
-    } finally {
-      setUploadingAvatar(false);
-    }
-  }, []);
-
-  // Tap an appearance option. Photo: if we don't have a picture yet, open the
-  // picker; otherwise just switch back to the saved photo.
-  const handleAppearance = (type: 'car' | 'arrow' | 'photo' | 'class') => {
-    // Build-80 free tier: Class and 3D are premium (green arrow stays free).
-    // No-ops while ENTITLEMENTS_ENFORCED is false.
-    if (type === 'class' && !classUnlocked) { openPaywall('class_marker'); return; }
-    if (type === 'car' && !car3dUnlocked) {
-      // Jeff 8/20: locked 3D doesn't get the plain sheet — it opens the
-      // Apple-style animated Ultra pitch (the Garage Scan experience).
-      router.push('/(app)/garage-scan' as any);
-      return;
-    }
-    if (type === 'photo' && !avatarUrl) { pickAndUploadAvatar(); return; }
-    applyMarkerType(type);
-  };
-
-  // ---- Paint actions (class + arrow) ----
-  // Pick into the ACTIVE slot (primary/secondary); null = original / stock.
-  const pickColor = useCallback((color: string | null, arrow: boolean) => {
-    Haptics.selectionAsync();
-    if (arrow) { (paintSlot === 'primary' ? setArrPriDraft : setArrSecDraft)(color); }
-    else { setPriDraft(color); }   // class = single colour, always primary
-  }, [paintSlot]);
-  const saveClassPaint = useCallback(async () => {
-    const s = getSettings();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const nextPaint = { ...(s.classPaint || {}) };
-    if (priDraft || secDraft) nextPaint[vehClass] = { primary: priDraft ?? undefined, secondary: secDraft ?? undefined };
-    else delete nextPaint[vehClass];
-    // retire any legacy single-color entry so it can't shadow the new paint
-    const legacy = { ...(s.classColors || {}) }; delete legacy[vehClass];
-    await updateSettings({ selfMarkerType: 'class', vehicleClass: vehClass, classPaint: nextPaint, classColors: legacy });
-  }, [vehClass, priDraft, secDraft]);
-  const saveArrowPaint = useCallback(async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await updateSettings({
-      selfMarkerType: 'arrow',
-      arrowPaint: (arrPriDraft || arrSecDraft) ? { primary: arrPriDraft ?? undefined, secondary: arrSecDraft ?? undefined } : undefined,
-    });
-  }, [arrPriDraft, arrSecDraft]);
-  const applyClassHex = useCallback(() => {
-    const raw = classHexDraft.trim().replace(/^#/, '');
-    if (!/^[0-9a-fA-F]{6}$/.test(raw)) {
-      Alert.alert('Invalid color code', 'Enter a 6-digit hex code, e.g. 2DEC86 or #FF453A.');
-      return;
-    }
-    pickColor('#' + raw.toUpperCase(), markerType === 'arrow');
-    setClassHexDraft('');
-  }, [classHexDraft, pickColor, markerType]);
-
-  // Shared Primary/Secondary paint picker (class + arrow panels): two slot
-  // buttons (each shows its current color dot), the swatch palette + an
-  // "Original/Stock" chip, and a hex field that applies to the ACTIVE slot.
-  // CLASS panels show the CLASS's own palette — real factory paints from that
-  // class's marques (CLASS_SWATCHES; Jeff 2026-08-27). Arrow isn't a class,
-  // so it keeps the generic PAINT_COLORS ramp.
-  const renderPaintPicker = (arrow: boolean) => {
-    const pri = arrow ? arrPriDraft : priDraft;
-    const sec = arrow ? arrSecDraft : secDraft;
-    // Class has no slot row, so its paint always lands on primary.
-    const slot = arrow ? paintSlot : 'primary';
-    const activeColor = slot === 'primary' ? pri : sec;
-    const entries: { name?: string; hex: string }[] =
-      !arrow && CLASS_SWATCHES[vehClass]
-        ? CLASS_SWATCHES[vehClass]!
-        : PAINT_COLORS.map((hex) => ({ hex }));
-    return (
-      <>
-        {/* Two paint slots are an ARROW thing (body + rim). A class sprite is
-            one colour, so the slot row was asking a question with one answer —
-            removed for class (Jeff 8/23). */}
-        {arrow && (
-          <View style={styles.slotRow}>
-            {(['primary', 'secondary'] as const).map((slot) => {
-              const on = paintSlot === slot;
-              const col = slot === 'primary' ? pri : sec;
-              return (
-                <TouchableOpacity key={slot} style={[styles.slotBtn, on && styles.slotBtnOn]} activeOpacity={0.85}
-                  onPress={() => { Haptics.selectionAsync(); setPaintSlot(slot); }}>
-                  <View style={[styles.slotDot, { backgroundColor: col ?? 'transparent', borderStyle: col ? 'solid' : 'dashed' }]} />
-                  <Text style={[styles.slotText, on && styles.slotTextOn]}>
-                    {slot === 'primary' ? 'Primary' : 'Secondary'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
-        <View style={styles.clsSwatchRow}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => pickColor(null, arrow)}
-            style={[styles.clsSwatch, { backgroundColor: 'rgba(255,255,255,0.08)' }, activeColor === null && styles.clsSwatchSel]}
-          >
-            <Ionicons name="ban-outline" size={15} color="#9A9A9E" />
-          </TouchableOpacity>
-          {entries.map(({ name, hex }) => {
-            const active = (activeColor ?? '').toLowerCase() === hex.toLowerCase();
-            return (
-              <TouchableOpacity
-                key={name ? name + hex : hex}
-                activeOpacity={0.8}
-                onPress={() => pickColor(hex, arrow)}
-                style={[styles.clsSwatch, { backgroundColor: hex }, active && styles.clsSwatchSel]}
-              >
-                {active && <Ionicons name="checkmark" size={16} color={isLightHex(hex) ? '#000' : '#FFF'} />}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-        <Text style={styles.clsHint}>Have a paint code? Enter the hex</Text>
-        <View style={styles.clsHexRow}>
-          <Text style={styles.clsHexHash}>#</Text>
-          <TextInput
-            style={styles.clsHexInput}
-            value={classHexDraft}
-            onChangeText={setClassHexDraft}
-            placeholder="2DEC86"
-            placeholderTextColor="#606060"
-            autoCapitalize="characters"
-            autoCorrect={false}
-            maxLength={7}
-            returnKeyType="done"
-            onSubmitEditing={applyClassHex}
-          />
-          <TouchableOpacity
-            style={[styles.clsHexSave, { backgroundColor: skin(arrow ? 'brand' : pageTier).accent }]}
-            activeOpacity={0.85}
-            onPress={applyClassHex}
-          >
-            <Text style={[styles.clsSaveText, { color: skin(arrow ? 'brand' : pageTier).ink }]}>Apply</Text>
-          </TouchableOpacity>
-        </View>
-        {/* Arrow keeps its own Save; the CLASS paint commits through the main
-            garage Save button below (Jeff: "just have the original save"). */}
-        {arrow && (
-          <TouchableOpacity style={styles.clsSaveBtn} activeOpacity={0.85} onPress={() => void saveArrowPaint()}>
-            <Text style={styles.clsSaveText}>Save Arrow</Text>
-          </TouchableOpacity>
-        )}
-      </>
-    );
-  };
-
-  // Explicit Save — selections already auto-save, but this confirms + persists
-  // the call sign and gives clear feedback before returning. In CLASS mode it
-  // ALSO commits the paint drafts (the panel has no Save of its own — Jeff:
-  // "just have the original save button").
-  const handleSave = async () => {
-    if (!canSave) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      Alert.alert('Finish your car', `Add your ${missingFields.join(', ').replace(/, ([^,]*)$/, ' and $1').toLowerCase()} first.`);
-      return;
-    }
-    if (markerType === 'class') await saveClassPaint();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const sign = callSign.trim();
-    await updateSettings({
-      carYear: year,
-      carMake: make,
-      carModel: model,
-      carColor: color,
-      callSign: sign,
-    });
-    // Push the full identity to the backend so peers render us correctly AND
-    // the call sign (= account handle) persists to the account: it survives a
-    // reinstall and is the name other drivers see on the map and in comms.
-    try {
-      await api.put('/auth/profile', {
-        car_make: make || undefined,
-        car_model: model || undefined,
-        car_color: color || undefined,
-        car_year: parseInt(year, 10) || undefined,
-        ...(sign ? { handle: sign } : {}),
-      });
-      // Refresh the in-memory auth user so the new call sign takes effect
-      // app-wide (map self-marker, presence, Hub header) without a relaunch.
-      await refresh();
-    } catch {}
-    setSaved(true);
-    setTimeout(() => router.back(), 650);
-  };
-
-  const [viewer3D, setViewer3D] = useState(false);
-  // The driver's OWN scanned car wins over the authored fleet model. Since the
-  // widebody was retired there is no personal car baked into the app any more —
-  // it comes from a scan or not at all.
-  const [scanModelUrl, setScanModelUrl] = useState<string | null>(null);
-  // HERO SHOT (2026-09-03): the first time the finished scan's hero renders, keep a JPEG of it
-  // in car-scans/<scanId>/hero.jpg so the Crew / friend tiles can show the car, not a sprite.
-  // Once per scan (carScanHeroShotId); a rescan is a new id and gets a new shot.
-  const heroShotBusyRef = useRef(false);
-  const onHeroShot = useCallback(async (dataUri: string) => {
-    const st = getSettings();
-    const id = st.carScanStatus === 'ready' ? st.carScanId : undefined;
-    if (!id || st.carScanHeroShotId === id || heroShotBusyRef.current) return;
-    heroShotBusyRef.current = true;
-    try {
-      if (await uploadScanHero(id, dataUri)) await updateSettings({ carScanHeroShotId: id });
-    } catch {} finally { heroShotBusyRef.current = false; }
-  }, []);
-  const [scanPending, setScanPending] = useState(false);
-  const [scanSubmittedAt, setScanSubmittedAt] = useState<string | null>(null);
+  // ── the scan return leg (v2, 2026-08-29; the Showroom version 2026-09-22) ───────────────────────
+  // Re-check on every FOCUS (this screen lives in a Tabs navigator — "mount" is the first visit of the
+  // whole session), and while anything is building keep a 20 s interval running so the car appears
+  // while the driver sits here watching the clock. A HEAD against the public bucket is free and misses
+  // are never CDN-cached.
   const [scanJustReady, setScanJustReady] = useState(false);
-  // THE RETURN LEG, v2 (2026-08-29). The 2026-08-27 version ran ONCE on mount — and
-  // this screen lives in a Tabs navigator, so "mount" is the first visit of the whole
-  // session. Jeff's first real scan finished and the app never noticed until he
-  // force-quit ("for mine to show up i had to force close the app and restart. does
-  // this have to happen?" — no, it never did; this is the defect). Now: re-check on
-  // every FOCUS, and while a scan is submitted keep a 20 s interval running so the
-  // car appears while the driver is sitting on this very screen watching the clock.
-  // A HEAD against the public bucket is free and misses are never CDN-cached, so the
-  // interval costs nothing and is always accurate.
-  const scanPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // In-flight guard: a HEAD slower than the 20 s interval (or a blur/refocus racing a
-  // tick) would otherwise run two refreshScans concurrently and double-write settings
-  // + double-emit the delivered probe (review find, 2026-08-29).
+  // In-flight guard: a HEAD slower than the interval (or a blur/refocus racing a tick) would otherwise
+  // run two refreshes at once and double-write settings (review find, 2026-08-29).
   const scanBusyRef = useRef(false);
   const refreshScan = useCallback(async () => {
     if (scanBusyRef.current) return;
     scanBusyRef.current = true;
     try {
+      // Today's scan goes into the Garage's own list FIRST — before anything (a new capture, a restore)
+      // can move the pointer off it.
+      await adoptActiveScan();
       let s = getSettings();
-      setScanModelUrl(s.carScanModelUrl ?? null);
       // Server truth first (restore a lost finished scan / surface a failed one), then the local view.
       try { if (await reconcileScanState() !== 'noop') s = getSettings(); } catch {}
-      setScanPending(s.carScanStatus === 'submitted');
-      setScanSubmittedAt(s.carScanSubmittedAt ?? null);
       if (s.carScanStatus === 'submitted' && s.carScanId) {
-        const ready = await checkScanReady(s.carScanId);
+        const id = s.carScanId;
+        const owner = getGarage().ownerId;
+        const ready = await checkScanReady(id);
         if (ready) {
-          await updateSettings({
-            carScanModelUrl: ready.heroUrl,
-            carScanMapUrl: ready.mapUrl,
-            carScanStatus: 'ready',
-          });
-          setScanModelUrl(ready.heroUrl);
-          setScanPending(false);
-          // The settings write above is also what flips the MAP marker live —
-          // map.tsx and carStore subscribe to settings, so the car lands on every
-          // surface in the same instant this Garage page updates.
-          try { logEventReliable(`carscan-delivered id=${s.carScanId} map=1`); } catch {}
-          // Tell the backend, so the roster shows this car's twin / hero shot to members
-          // who are not live on presence (2026-09-03). Retries from map.tsx if it fails.
-          void syncScanIdToBackend(s.carScanId);
+          // Writes the scan fields — which is also what flips the MAP marker live (map.tsx and carStore
+          // subscribe to settings) — and makes the new car today's car unless the member picked another
+          // car after submitting it. The same function lands it at launch (carScan.deliverSubmittedScan).
+          const how = await deliverSubmittedScan(id, ready, owner);
+          if (how === 'active') setCentredKey(scanCarId(id));
+          s = getSettings();
         }
       }
-      // HEAL a pre-fix latch: an install that flipped ready while the map twin was
-      // still publishing has carScanMapUrl stuck undefined and nothing re-checking.
-      // One extra HEAD per Garage focus, only while in that broken state.
+      // An old-Garage state (the arrow picked while a scan stayed 'ready') is parked, so every surface
+      // shows the arrow the member picked (garageCars.parkStrayScan).
+      if (await parkStrayScan()) s = getSettings();
+      // HEAL a pre-fix latch: an install that flipped ready while the map twin was still publishing has
+      // carScanMapUrl stuck undefined and nothing re-checking. One extra HEAD per focus, only then.
       if (s.carScanStatus === 'ready' && !s.carScanMapUrl && s.carScanId) {
         const healed = await checkScanReady(s.carScanId);
         if (healed) await updateSettings({ carScanMapUrl: healed.mapUrl });
       }
-      // The one-shot celebration. Keyed on the PERSISTED flag, not the transition:
-      // a force-quit between the ready-flip and the dismissal must not silently
-      // turn the one-shot into a zero-shot (review find, 2026-08-29).
+      // A park's profile clear that did not get through (offline) is retried until it does.
+      await retryProfileClear();
+      // Any OTHER scan the Garage shows as building (a second car, or one whose pointer a newer pick
+      // replaced) — it simply becomes a car in the Garage when it finishes.
+      const pendingId = getSettings().carScanStatus === 'submitted' ? getSettings().carScanId : undefined;
+      const others = scanCars(getSettings(), getGarage())
+        .filter((c) => c.building && c.scanId && c.scanId !== pendingId)
+        .map((c) => c.scanId!);
+      if (others.length) await checkBuildingScans(others);
+      // The one-shot celebration. Keyed on the PERSISTED flag, not the transition: a force-quit between
+      // the ready-flip and the dismissal must not turn the one-shot into a zero-shot (review, 08-29).
       const after = getSettings();
       if (after.carScanStatus === 'ready' && after.carScanModelUrl && !after.carScanCelebrated) {
         setScanJustReady(true);
@@ -611,532 +215,337 @@ export default function GarageScreen() {
       scanBusyRef.current = false;
     }
   }, []);
+
+  const [focused, setFocused] = useState(false);
   useFocusEffect(useCallback(() => {
-    void refreshScan();
-    // Poll only while something is actually pending — an idle Garage runs no timer.
-    if (getSettings().carScanStatus === 'submitted') {
-      scanPollRef.current = setInterval(() => { void refreshScan(); }, 20000);
-      // Capture hands back to this screen mid-build ("puts you back to the 3D
-      // screen") — land the carousel on the car page so the countdown is what
-      // the driver sees, not the arrow.
-      setHeroIndex(2);
-    }
-    return () => {
-      if (scanPollRef.current) { clearInterval(scanPollRef.current); scanPollRef.current = null; }
-    };
-  }, [refreshScan]));
-  const heroModelUrl = (() => {
-    if (scanModelUrl) return scanModelUrl;
+    setFocused(true);
+    let alive = true;
+    void (async () => {
+      if (userId) await claimGarageFor(userId);
+      if (!alive) return;
+      void refreshScan();
+      // The inventory — every scan this account made (GET /scan/mine), then the building check again
+      // once the fresh list is in — and the server's scan count. Only the Ultra view shows either.
+      if (viewTier === 'ultra') {
+        void fetchScanSlots().then((slots) => { if (alive && slots) setServerUsed(slots.used); });
+        await refreshScanList();
+        if (alive) void refreshScan();
+      }
+    })();
+    // Capture hands back to this screen mid-build — land the stage on the building car so the clock is
+    // what the driver sees.
+    const s = getSettings();
+    if (s.carScanStatus === 'submitted' && s.carScanId) setCentredKey(scanCarId(s.carScanId));
+    return () => { alive = false; setFocused(false); };
+  }, [refreshScan, viewTier, userId]));
+  // Poll only while something is actually building and this screen is in front — an idle Garage runs no
+  // timer. Reactive, so a building scan the fresh /scan/mine answer brings in starts the clock too
+  // (Codex review 2026-09-22: the timer used to be decided once, before the list arrived).
+  const anyBuilding = settings.carScanStatus === 'submitted' || cars.some((c) => c.building);
+  useEffect(() => {
+    if (!focused || !anyBuilding) return;
+    const t = setInterval(() => { void refreshScan(); }, 20000);
+    return () => clearInterval(t);
+  }, [focused, anyBuilding, refreshScan]);
+
+  // HERO SHOT (2026-09-03, per scan since 2026-09-22): the first time a scan's hero renders live here,
+  // keep a JPEG of it in car-scans/<scanId>/hero.jpg — the Crew / friend tiles show it, and so does this
+  // stage for every car that is not the live one. Insert-only upload (a duplicate is a success);
+  // carScanHeroShotId still marks today's scan exactly as before.
+  const heroShotBusyRef = useRef(false);
+  const heroShotDone = useRef(new Set<string>());
+  const onHeroShot = useCallback(async (scanId: string, dataUri: string) => {
+    const st = getSettings();
+    if (!scanId || st.carScanHeroShotId === scanId || heroShotDone.current.has(scanId) || heroShotBusyRef.current) return;
+    heroShotBusyRef.current = true;
     try {
-      const k = resolveGRCKey(color);
-      return k ? getVehicleModelUrl(color) : null;
-    } catch { return null; }
+      if (await uploadScanHero(scanId, dataUri)) {
+        heroShotDone.current.add(scanId);
+        const now = getSettings();
+        if (now.carScanStatus === 'ready' && now.carScanId === scanId) await updateSettings({ carScanHeroShotId: scanId });
+      }
+    } catch {} finally { heroShotBusyRef.current = false; }
+  }, []);
+
+  // ── actions ──────────────────────────────────────────────────────────────────────────────────────
+  const [driving, setDriving] = useState(false);
+  const drive = useCallback(async () => {
+    if (!centredCar || driving) return;
+    Haptics.selectionAsync();
+    setDriving(true);
+    try {
+      const r = await driveToday(centredCar);
+      if (r === 'ok') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setCentredKey(centredCar.id);
+      } else if (r === 'not-ready') {
+        Alert.alert('Not ready yet', 'This car is still being published. Try again in a minute.');
+      }
+    } finally {
+      setDriving(false);
+    }
+  }, [centredCar, driving]);
+
+  const goScan = useCallback(() => {
+    Haptics.selectionAsync();
+    router.push('/(app)/garage-scan' as any);
+  }, [router]);
+
+  const openNextPaywall = useCallback(() => {
+    if (!next) return;
+    Haptics.selectionAsync();
+    openPaywall(next.feature);
+  }, [next]);
+
+  const [viewer3D, setViewer3D] = useState(false);
+  const spinUrl = centredCar && (viewTier === 'gold' || viewTier === 'ultra')
+    ? carGlbUrl(centredCar, settings, garage)
+    : null;
+
+  const onTapCentre = useCallback(() => {
+    if (centred.type === 'locked') openNextPaywall();
+    else if (centred.type === 'add') goScan();
+    else if (spinUrl) { Haptics.selectionAsync(); setViewer3D(true); }
+  }, [centred.type, openNextPaywall, goScan, spinUrl]);
+
+  // Customize: the car on the stage, or today's car when the stage shows a spot that is not a car.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const customizeCar: GarageCar | null =
+    (centredCar && !centredCar.building ? centredCar : cars.find((c) => c.id === activeId)) ?? null;
+
+  const callSign = settings.callSign || user?.handle || '';
+
+  const onShare = useCallback(async () => {
+    const car = centredCar && !centredCar.building ? centredCar : cars.find((c) => c.id === activeId);
+    if (!car) return;
+    const lead = car.id === activeId ? "Today's car on Hairpin" : 'In my Hairpin garage';
+    const name = carName(car, settings, garage);
+    const sub = carSub(car, settings, garage);
+    try {
+      await Share.share({ message: `${lead}: ${name} (${sub}).${callSign ? ` Call sign ${callSign}.` : ''}` });
+    } catch {}
+  }, [centredCar, cars, activeId, settings, garage, callSign]);
+
+  // ── what the page says ───────────────────────────────────────────────────────────────────────────
+  const scanList = viewTier === 'ultra' ? cars.filter((c) => c.kind === 'scan') : [];
+  const used = serverUsed ?? scanList.length;
+  const scansLeft = Math.max(0, ULTRA.includedScansPerYear - used);
+
+  const labels: StageLabels | null = (() => {
+    if (centred.type === 'add') return null;                         // ScanPlaceholder carries its own words
+    if (centred.type === 'locked') {
+      if (!next) return null;
+      if (next.tier === 'ultra') {
+        // Gold's locked Ultra spot: labelled like the other locked spots, so it never reads as the Ultra
+        // garage's own "+ Scan a car" (both centre on ScanPlaceholder art).
+        return {
+          pill: upNextCopy('gold', 0).label,
+          pillMetal: lockTier,
+          name: 'Your own car',
+          sub: 'Scanned to 3D · on the map',
+        };
+      }
+      return {
+        pill: `UP NEXT · ${next.word.toUpperCase()}`,
+        pillMetal: lockTier,
+        name: next.tier === 'silver' ? 'Your class car' : 'Your car in 3D',
+        sub: next.tier === 'silver' ? 'Class car in your paint · 2D map' : 'The 3D map, and your car on it in 3D',
+      };
+    }
+    if (!centredCar || centredCar.building) return null;             // ScanCountdown carries its own words
+    return {
+      pill: centredCar.id === activeId ? "TODAY'S CAR" : 'IN YOUR GARAGE',
+      pillMetal: metal,
+      name: carName(centredCar, settings, garage),
+      sub: carSub(centredCar, settings, garage),
+    };
   })();
-  const displayColor = colors.find(c => c.name === color);
 
-  // Year / Make / Model / Colour are MANDATORY (Jeff, 2026-08-23). They are what
-  // peers see on the map and what a scan is filed against, so a half-filled car
-  // is worse than none. Only enforced where the fields are actually shown —
-  // Arrow and Class hide them, and blocking Save on invisible fields would be a
-  // dead button with no explanation.
-  const carFieldsShown = markerType !== 'arrow' && markerType !== 'class';
-  const missingFields = carFieldsShown
-    ? ([['Year', year], ['Make', make], ['Model', model], ['Color', color]] as const)
-        .filter(([, v]) => !v.trim()).map(([k]) => k)
-    : [];
-  const canSave = missingFields.length === 0;
+  const topSpeed = settings.topSpeed || user?.top_speed_record || null;
+  const facts: PlateFact[] = (() => {
+    const speed: PlateFact = topSpeed && viewTier !== 'free'
+      ? { value: `${fmtSpeed(topSpeed)} km/h`, label: 'Top Cruise Speed' }
+      : { value: 'Call sign', label: 'on every map' };
+    if (viewTier === 'ultra') {
+      const scans: PlateFact = { value: `${Math.min(used, 99)} of ${ULTRA.includedScansPerYear} scans used`, label: `${scansLeft} left this year` };
+      if (centredCar?.kind === 'scan' && !centredCar.building) {
+        const on = scannedOn(centredCar);
+        return [{ value: on ? `Scanned ${on}` : 'Scanned', label: `from ${SHOTS_TOTAL} photos` }, scans];
+      }
+      return [speed, scans];
+    }
+    const n = cars.length;
+    // Short enough for the plate row at 390 pt (the long list truncated in the sim render, 2026-09-22).
+    const which = viewTier === 'free' ? 'the 2D arrow'
+      : viewTier === 'silver' ? 'arrow · class'
+      : 'in 2D and 3D';
+    return [speed, { value: `${n} car${n === 1 ? '' : 's'}`, label: which }];
+  })();
 
-  // The whole page follows the appearance you are looking at (Jeff 8/23: "the
-  // top speed/icon and save buttons should follow the same gold/silver
-  // colours"). Arrow is free -> green, Class -> silver, 3D -> gold.
-  const pageTier: VisualTier = heroIndex === 1 ? 'premium' : heroIndex === 2 ? 'ultra' : 'brand';
+  const up = upNextCopy(viewTier, scansLeft);
+
+  // ONE live WebView on the page: while the full-screen 360° viewer or the Customize sheet is up, the stage
+  // shows its still (Codex review 2026-09-22 — the viewer used to load the same model a second time).
+  // And NONE while the Garage is not in front: it is a Tabs screen (app/(app)/_layout.tsx), so it stays
+  // mounted behind the map after Back — an auto-rotating model-viewer must not live on under it.
+  const stageLive = focused && !viewer3D && !customizeOpen;
+  const renderSlot = (slot: StageSlot, _i: number, isCentred: boolean) => {
+    if (slot.type === 'locked') {
+      return next ? <LockedSlotArt next={next.tier} centred={isCentred} live={isCentred && stageLive} s={settings} /> : null;
+    }
+    if (slot.type === 'add') return <AddSlotArt centred={isCentred} metal={metal} />;
+    const car = cars.find((c) => c.id === slot.key);
+    if (!car) return null;
+    return (
+      <CarSlotArt
+        car={car} centred={isCentred} live={isCentred && stageLive}
+        s={settings} g={garage} metal={metal} onHeroShot={onHeroShot}
+      />
+    );
+  };
+
+  const renderBadge = (slot: StageSlot, _i: number, isCentred: boolean) =>
+    slot.type === 'locked' && next ? <LockedBadge lockTier={lockTier} centred={isCentred} /> : null;
+
+  // ── the primary button ───────────────────────────────────────────────────────────────────────────
+  const primary = (() => {
+    if (centred.type === 'locked' && next) {
+      // Ultra is Gold's add-on, not a rung: the button says what the Up next card says ("Add Ultra" /
+      // "See yearly"), never "See Ultra".
+      const ctaLabel = next.tier === 'ultra' ? upNextCopy('gold', 0).cta : `See ${next.word}`;
+      return <CandyCta label={ctaLabel} icon="sparkles" onPress={openNextPaywall} tier={lockTier} height={52} radius={26} style={styles.primary} />;
+    }
+    if (centred.type === 'add') {
+      return <CandyCta label="Scan a car" icon="scan-outline" onPress={goScan} tier={metal} height={52} radius={26} style={styles.primary} />;
+    }
+    if (centredCar?.building) {
+      return <CandyCta label="Building your car…" icon="hammer-outline" disabled tier={metal} height={52} radius={26} style={styles.primary} />;
+    }
+    if (centredCar && centredCar.id === activeId) {
+      return (
+        <View style={[styles.primary, styles.today, { borderColor: sk.accent }]} accessibilityRole="text">
+          <Ionicons name="checkmark-circle-outline" size={19} color={sk.accent} />
+          <Text style={[styles.todayText, { color: sk.accent }]}>Driving today</Text>
+        </View>
+      );
+    }
+    return <CandyCta label="Drive this today" icon="car-sport" onPress={drive} busy={driving} tier={metal} height={52} radius={26} style={styles.primary} />;
+  })();
+
+  const canSpin = !!spinUrl;
+  const spinTitle = centredCar ? carName(centredCar, settings, garage) : undefined;
 
   return (
     <SafeAreaView style={styles.safe}>
-      <GlassBackdrop source={TIER_WALLPAPER[pageTier]} />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color={COLORS.text} />
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={24} color={sk.accent} />
           </TouchableOpacity>
-          <Text style={styles.title}>Garage</Text>
-          <View style={{ width: 40 }} />
+          {/* Centred across the whole row; never in the way of the back button's taps. */}
+          <View style={styles.titleWrap} pointerEvents="none">
+            <Text style={styles.title}>GARAGE</Text>
+          </View>
+          <View style={styles.headerRight}>
+            <TierChip tier={viewTier} scansLeft={scansLeft} />
+          </View>
         </View>
 
-        {/* Car hero — what renders depends on the selected appearance:
-              class → the high-res class sprite in the SAVED/draft paint,
-                      rotated nose-LEFT (showroom profile pose)
-              arrow → the Hairpin word logo
-              3D car / photo → the original showroom image (untouched) */}
-        {/* The hero is a SHOWROOM, not a preview of the one thing you own.
-            Arrow / Class / your car sit side by side and you swipe between them
-            — the locked ones render in full with the tier's H on top, because
-            you cannot want what you cannot see (Jeff 8/23). */}
-        <GarageHeroCarousel
-          height={HERO_H}
-          index={heroIndex}
-          onIndexChange={(i) => {
-            setHeroIndex(i);
-            // Map Appearance follows the carousel. Only to a tier you OWN,
-            // and never via handleAppearance — that opens the paywall, and
-            // browsing must not fire a purchase sheet on every swipe. A
-            // locked page previews; the tile below stays where it was.
-            const key = (['arrow', 'class', 'car'] as const)[i];
-            const owned = key === 'arrow' || (key === 'class' ? classUnlocked : car3dUnlocked);
-            if (owned && key !== markerType) applyMarkerType(key);
-          }}
-          onSelect={(page) => {
-            Haptics.selectionAsync();
-            handleAppearance(page.key as 'arrow' | 'class' | 'car');
-          }}
-          pages={[
-            {
-              key: 'arrow',
-              label: 'Arrow',
-              tier: 'brand',
-              render: () => (
-                <View style={styles.heroPage}>
-                  <Image
-                    source={require('../../assets/images/hairpin-word.png')}
-                    style={styles.heroWordLogo}
-                    resizeMode="contain"
-                  />
-                </View>
-              ),
-            },
-            {
-              key: 'class',
-              label: 'Class',
-              tier: classTier,
-              locked: !classUnlocked,
-              render: () => (
-                <View style={styles.heroPage}>
-                  <View style={{ transform: [{ rotate: '-90deg' }] }}>
-                    <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={260} />
-                  </View>
-                </View>
-              ),
-            },
-            {
-              key: 'car',
-              label: 'Your car',
-              tier: car3dTier,
-              locked: !car3dUnlocked,
-              // Three states (Jeff, 2026-08-29): building → the clock countdown;
-              // no car at all → the animated invitation; car → the auto-rotating
-              // model, with the one-shot "here's what happened" overlay the first
-              // time a scan lands.
-              render: () => (
-                <View style={StyleSheet.absoluteFill}>
-                  {scanPending ? (
-                    <ScanCountdown submittedAt={scanSubmittedAt} />
-                  ) : heroModelUrl ? (
-                    <CarHero3D
-                      glbUrl={heroModelUrl}
-                      onSnapshot={scanModelUrl ? onHeroShot : undefined}
-                      // Non-interactive INSIDE the carousel — a pager and a
-                      // finger-spinnable model both want horizontal drags and the
-                      // model wins, which would trap you on this page. It still
-                      // auto-rotates; tap to spin it full screen.
-                      interactive={false}
-                      style={StyleSheet.absoluteFill}
-                    />
-                  ) : (
-                    <ScanPlaceholder />
-                  )}
-                  {scanJustReady && !scanPending && (
-                    <ScanReadyOverlay
-                      onDismiss={() => {
-                        setScanJustReady(false);
-                        void updateSettings({ carScanCelebrated: true });
-                        router.push('/(app)/map');
-                      }}
-                    />
-                  )}
-                </View>
-              ),
-            },
-          ]}
-        />
-
-        {/* Year / make / model / colour sit BELOW the car, not on top of it
-            (Jeff 8/23: "move the year make model color under the car down so you
-            see the whole car"). They used to be an absolute overlay with a fade
-            behind them, which cropped the rear wheels on every model. */}
-        {heroIndex === 2 && (
-          <View style={styles.heroCaption}>
-            <Text style={styles.heroTitle}>
-              {year && make && model ? `${year} ${make} ${model}` : 'Your car'}
-            </Text>
-            {color ? (
-              <View style={styles.heroColorRow}>
-                {displayColor && <View style={[styles.heroColorDot, { backgroundColor: displayColor.hex }]} />}
-                <Text style={styles.heroSub}>{color}</Text>
-              </View>
-            ) : (
-              <Text style={styles.heroHint}>Fill in your year, make &amp; model below</Text>
-            )}
-          </View>
-        )}
-
-        <CarViewer3D
-          visible={viewer3D}
-          glbUrl={heroModelUrl}
-          title={color || undefined}
-          onClose={() => setViewer3D(false)}
-        />
-
-        {/* Top speed badge */}
-        {topSpeed ? (
-          <View style={styles.speedCard}>
-            <View style={[styles.speedIcon, { borderColor: skin(pageTier).rim }]}>
-              <CandyFill tier={pageTier} />
-              <Ionicons name="speedometer" size={22} color={skin(pageTier).ink} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.speedLabel}>Top Cruise Speed</Text>
-              <Text style={styles.speedSub}>Personal best - beat it on your next drive.</Text>
-            </View>
-            <Text style={[styles.speedValue, { color: skin(pageTier).accent }]}>{topSpeed}</Text>
-            <Text style={styles.speedUnit}>km/h</Text>
-          </View>
-        ) : null}
-
-        {/* Call sign */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Call Sign</Text>
-          <View style={styles.fieldRow}>
-            <Ionicons name="person-circle-outline" size={20} color={skin(pageTier).accent} style={{ marginRight: 8 }} />
-            <TextInput
-              style={styles.callSignInput}
-              value={callSign}
-              onChangeText={setCallSign}
-              placeholder="e.g. Maverick"
-              placeholderTextColor="#808080"
-              maxLength={20}
-              autoCapitalize="words"
-              returnKeyType="done"
+        <Stage
+          slots={slots}
+          index={centredIndex}
+          onIndexChange={onIndexChange}
+          onTapCentre={onTapCentre}
+          metal={metal}
+          labels={labels}
+          renderSlot={renderSlot}
+          renderBadge={renderBadge}
+          overlay={scanJustReady ? (
+            <ScanReadyOverlay
+              onDismiss={() => {
+                setScanJustReady(false);
+                void updateSettings({ carScanCelebrated: true });
+                router.push('/(app)/map');
+              }}
             />
-          </View>
-        </View>
-
-        {/* Map Appearance — how you're drawn on the live convoy map */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Map Appearance</Text>
-          {/* Order per Jeff: Arrow · Class · 3D (3D slated to become premium). */}
-          <View style={styles.apRow}>
-            <TouchableOpacity
-              style={[styles.apCard, markerType === 'arrow' && styles.apCardSel, markerType === 'arrow' && styles.apCardSelBrand]}
-              activeOpacity={0.85}
-              onPress={() => handleAppearance('arrow')}
-            >
-              {markerType === 'arrow' && <CandyFill tier="brand" />}
-              <Ionicons name="navigate" size={25} color={markerType === 'arrow' ? skin('brand').ink : YELLOW} />
-              <Text style={[styles.apLabel, markerType === 'arrow' && styles.apLabelSel]}>Arrow</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.apCard, markerType === 'class' && styles.apCardSel, markerType === 'class' && styles.apCardSelPremium]}
-              activeOpacity={0.85}
-              onPress={() => handleAppearance('class')}
-            >
-              {markerType === 'class' && <CandyFill tier="premium" />}
-              <MaterialCommunityIcons name="car-hatchback" size={25} color={markerType === 'class' ? skin('premium').ink : skin('premium').accent} />
-              <Text style={[styles.apLabel, markerType === 'class' && styles.apLabelSel]}>Class</Text>
-              {!classUnlocked && <TierCornerLock tier={classTier} size={24} />}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.apCard, markerType === 'car' && styles.apCardSel, markerType === 'car' && styles.apCardSelUltra]}
-              activeOpacity={0.85}
-              onPress={() => handleAppearance('car')}
-            >
-              {markerType === 'car' && <CandyFill tier="ultra" />}
-              <Ionicons name="car-sport" size={25} color={markerType === 'car' ? skin('ultra').ink : skin('ultra').accent} />
-              <Text style={[styles.apLabel, markerType === 'car' && styles.apLabelSel]}>3D</Text>
-              {!car3dUnlocked && <TierCornerLock tier={car3dTier} size={24} />}
-            </TouchableOpacity>
-
-            {PHOTO_AVATAR_ENABLED ? (
-              <TouchableOpacity
-                style={[styles.apCard, markerType === 'photo' && styles.apCardSel]}
-                activeOpacity={0.85}
-                onPress={() => handleAppearance('photo')}
-                disabled={uploadingAvatar}
-              >
-                {uploadingAvatar ? (
-                  <ActivityIndicator color={markerType === 'photo' ? '#000' : YELLOW} />
-                ) : avatarUrl ? (
-                  <Image source={{ uri: avatarUrl }} style={styles.apPhoto} />
-                ) : (
-                  <Ionicons name="person-circle" size={26} color={markerType === 'photo' ? CANDY_INK : YELLOW} />
-                )}
-                <Text style={[styles.apLabel, markerType === 'photo' && styles.apLabelSel]}>Photo</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          {PHOTO_AVATAR_ENABLED && markerType === 'photo' && avatarUrl ? (
-            <TouchableOpacity onPress={pickAndUploadAvatar} style={styles.apChange} activeOpacity={0.7}>
-              <Ionicons name="camera-outline" size={15} color={YELLOW} />
-              <Text style={styles.apChangeText}>Change photo</Text>
-            </TouchableOpacity>
           ) : null}
-
-          {/* Scan your car — the Ultra pitch. 3D ONLY: it advertises the
-              exact-car scan, which has nothing to do with the arrow or a class
-              sprite, and sat under both of them looking like a global action. */}
-          {/* Follows the VISIBLE hero page, not the saved markerType — swiping
-              changes what you are looking at, and this line has to belong to
-              what is on screen or it reads as a global action again. */}
-          {/* Wears the PAGE tier (gold here — the gate is heroIndex === 2), not
-              brand green: DESIGN.md locks one metal per page, and green means
-              "yours" while metal means "a tier". apChangeText is shared with
-              "Change photo", so the accent is overridden inline, not in it. */}
-          {heroIndex === 2 && (
-          <TouchableOpacity
-            onPress={() => { Haptics.selectionAsync(); router.push('/(app)/garage-scan' as any); }}
-            style={styles.apChange}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="scan-outline" size={15} color={skin(pageTier).accent} />
-            <Text style={[styles.apChangeText, { color: skin(pageTier).accent }]}>Scan your car — build your real car in 3D</Text>
-          </TouchableOpacity>
-          )}
-
-          {/* ---- Arrow panel: primary (body) + secondary (rim) paint ---- */}
-          {markerType === 'arrow' && (
-            <View style={styles.clsPanel}>
-              <Text style={styles.clsHint}>Arrow paint — Primary is the body, Secondary is the rim</Text>
-              {renderPaintPicker(true)}
-            </View>
-          )}
-
-          {/* ---- Class panel: top-down class picker + per-class paint ---- */}
-          {markerType === 'class' && (
-            <View style={styles.clsPanel}>
-              <Text style={styles.clsHint}>Pick your class — each remembers its own paint</Text>
-              <View style={styles.clsGrid}>
-                {VEHICLE_CLASSES.map((c) => {
-                  const sel = vehClass === c.key;
-                  return (
-                    <TouchableOpacity
-                      key={c.key}
-                      style={[styles.clsTile, sel && styles.clsTileSel, sel && { borderColor: skin(pageTier).rim }]}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        Haptics.selectionAsync();
-                        setVehClass(c.key);
-                        const p = getSettings().classPaint?.[c.key] ?? (getSettings().classColors?.[c.key] ? { primary: getSettings().classColors![c.key] } : {});
-                        setPriDraft(p.primary ?? null);
-                        setSecDraft(p.secondary ?? null);
-                        setPaintSlot('primary');
-                      }}
-                    >
-                      {sel && <CandyFill tier={pageTier} radius={13} />}
-                      {CLASS_TOPDOWN[c.key] ? (
-                        // Real top-down class photo (keyed + nose-up).
-                        <Image source={CLASS_TOPDOWN[c.key]} style={styles.clsTileImg} resizeMode="contain" />
-                      ) : (
-                        // Placeholder glyph until Jeff's photo lands for this class.
-                        <MaterialCommunityIcons name={c.icon as any} size={26} color={sel ? CANDY_INK : YELLOW} />
-                      )}
-                      <Text style={[styles.clsTileLabel, sel && styles.clsTileLabelSel]} numberOfLines={1}>{c.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {/* Live preview — the exact sprite the map draws, in the draft paint. */}
-              <View style={styles.clsPreviewRow}>
-                {CLASS_TOPDOWN[vehClass] ? (
-                  <ClassSprite vehicleClass={vehClass} primary={priDraft} secondary={secDraft} size={56} />
-                ) : (
-                  <TopDownClassSnap color={priDraft ?? '#2DEC86'} />
-                )}
-                <Text style={styles.clsPreviewText}>
-                  {VEHICLE_CLASSES.find((c) => c.key === vehClass)?.label} · {priDraft ? (classPaintName(vehClass, priDraft) ?? priDraft.toUpperCase()) : 'Original'}{secDraft ? ` / ${classPaintName(vehClass, secDraft) ?? secDraft.toUpperCase()}` : ''}
-                </Text>
-              </View>
-
-              {renderPaintPicker(false)}
-            </View>
-          )}
-        </View>
-
-        {/* Dropdowns — the car identity (feeds the 3D GRC + peer rendering).
-            Shown ONLY in 3D mode (Jeff 2026-07-17): Arrow and Class replace
-            them with the primary/secondary paint picker. */}
-        {markerType !== 'arrow' && markerType !== 'class' && (<>
-        <TextField
-          label="Year"
-          value={year}
-          onChangeText={setYear}
-          onBlur={commitYear}
-          placeholder="e.g. 2019"
-          keyboardType="number-pad"
-          maxLength={4}
         />
 
-        <TextField
-          label="Make"
-          value={make}
-          onChangeText={setMake}
-          onBlur={commitMake}
-          placeholder="e.g. Subaru"
-          maxLength={28}
-        />
+        <PlateStrip callSign={callSign} metal={metal} facts={facts} onPress={() => setCustomizeOpen(true)} />
 
-        <TextField
-          label="Model"
-          value={model}
-          onChangeText={setModel}
-          onBlur={commitModel}
-          placeholder="e.g. WRX STI"
-          maxLength={32}
-        />
+        {primary}
 
-        <TextField
-          label="Color"
-          value={color}
-          onChangeText={setColor}
-          onBlur={commitColor}
-          placeholder="e.g. World Rally Blue"
-          maxLength={28}
-          swatch={swatchFor(color)}
-        />
-        </>)}
-
-        {/* Tell them WHICH field is missing — a dead Save button with no reason
-            is the most common way a form loses someone. */}
-        {!canSave && (
-          <Text style={styles.requiredHint}>
-            {missingFields.join(', ').replace(/, ([^,]*)$/, ' and $1')} required
-          </Text>
+        {viewTier === 'ultra' ? (
+          <UpNextCard copy={up} variant="scan" metal={metal} onPress={goScan} />
+        ) : (
+          <UpNextCard copy={up} variant="upsell" metal={lockTier} lockTier={lockTier} onPress={openNextPaywall} />
         )}
 
-        {/* Save — the map banner's candy gradient (Jeff 8/23) */}
-        <CandyCta
-          label={saved ? 'Saved' : 'Save'}
-          icon={saved ? 'checkmark-circle' : 'save-outline'}
-          onPress={handleSave}
-          disabled={!canSave}
-          tier={pageTier}
-          style={styles.saveCta}
-        />
-
+        {/* Quiet actions — 360° spin only for the 3D cars (Gold / Ultra), wiring the full-screen viewer
+            that nothing opened before (CarViewer3D). */}
+        <View style={styles.actions}>
+          {canSpin && (
+            <TouchableOpacity style={styles.action} onPress={() => { Haptics.selectionAsync(); setViewer3D(true); }} activeOpacity={0.7}>
+              <MaterialCommunityIcons name="rotate-3d-variant" size={21} color={sk.accent} />
+              <Text style={[styles.actionText, { color: sk.accent }]}>360° spin</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={styles.action}
+            onPress={() => { Haptics.selectionAsync(); setCustomizeOpen(true); }}
+            activeOpacity={0.7}
+            disabled={!customizeCar}
+          >
+            <Ionicons name="color-palette-outline" size={20} color={sk.accent} />
+            <Text style={[styles.actionText, { color: sk.accent }]}>Customize</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.action} onPress={() => { Haptics.selectionAsync(); void onShare(); }} activeOpacity={0.7}>
+            <Ionicons name="share-outline" size={20} color={sk.accent} />
+            <Text style={[styles.actionText, { color: sk.accent }]}>Share</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
+
+      <CarViewer3D
+        visible={viewer3D && canSpin}
+        glbUrl={spinUrl}
+        title={spinTitle}
+        onClose={() => setViewer3D(false)}
+      />
+
+      <CustomizeSheet
+        visible={customizeOpen}
+        car={customizeCar}
+        carName={customizeCar ? carName(customizeCar, settings, garage) : ''}
+        isToday={!!customizeCar && customizeCar.id === activeId}
+        metal={metal}
+        onClose={() => setCustomizeOpen(false)}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  heroPage:           { width: SCREEN_W, height: HERO_H, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
-  saveCta:            { marginHorizontal: 16, marginTop: 8, marginBottom: 28 },
-  requiredHint:       { color: COLORS.warning, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 14, marginHorizontal: 16 },
-  badge360: {
-    position: 'absolute', top: 14, right: 14,
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: COLORS.brand, borderRadius: 999,
-    paddingHorizontal: 9, paddingVertical: 4,
+  safe: { flex: 1, backgroundColor: '#000' },
+  scroll: { paddingBottom: 60 },
+  header: { height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
+  backBtn: { width: 44, height: 44, marginLeft: -10, alignItems: 'center', justifyContent: 'center' },
+  titleWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  title: { color: '#F4FDFF', fontSize: 13, fontWeight: '800', letterSpacing: 3 },
+  headerRight: { minWidth: 44, alignItems: 'flex-end' },
+  primary: { marginHorizontal: 16, marginTop: 14 },
+  today: {
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
-  badge360Text: { color: '#04150B', fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
-  safe:               { flex: 1, backgroundColor: '#000' },
-  scroll:             { paddingBottom: 60 },
-  header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
-  backBtn:            { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title:              { color: '#F4F4F4', fontSize: 20, fontWeight: '600' },
-
-  // Premium full-bleed hero — image fades to black (welcome-carousel style),
-  // no card/LED border. The car name overlays the bottom fade.
-  heroWrap:           { width: SCREEN_W, height: 260, marginBottom: 0, backgroundColor: '#000' },
-  // heroTall: the class-sprite / arrow-logo hero fills most of the screen
-  heroTall:           { width: SCREEN_W, height: 430, marginBottom: 14, backgroundColor: '#000' },
-  heroAlt:            { alignItems: 'center', justifyContent: 'center' },
-  heroWordLogo:       { width: '94%', height: 240 },
-  heroBg:             { flex: 1, justifyContent: 'flex-end' },
-  // Normal flow, UNDER the hero — never an overlay, so it can't cover the car.
-  heroCaption:        { paddingHorizontal: 24, paddingTop: 2, paddingBottom: 18 },
-  heroTitle:          { color: '#F4F4F4', fontSize: 26, fontWeight: '800', letterSpacing: -0.3 },
-  heroColorRow:       { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 },
-  heroColorDot:       { width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
-  heroSub:            { color: '#808080', fontSize: 15, fontWeight: '500' },
-  heroHint:           { color: '#808080', fontSize: 14, marginTop: 6 },
-
-  speedCard:          { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 16, backgroundColor: '#111', borderRadius: 16, padding: 14, gap: 12 },
-  speedIcon:          { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: CANDY_RIM },
-  speedLabel:         { color: '#F4F4F4', fontSize: 15, fontWeight: '600' },
-  speedSub:           { color: '#808080', fontSize: 12, marginTop: 2 },
-  speedValue:         { color: '#2DEC86', fontSize: 28, fontWeight: '700' },
-  speedUnit:          { color: '#808080', fontSize: 12, alignSelf: 'flex-end', marginBottom: 4 },
-
-  section:            { marginHorizontal: 16, marginBottom: 10 },
-  sectionLabel:       { color: '#808080', fontSize: 13, fontWeight: '500', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.8 },
-
-  // Collapsed field row (dropdown header + call-sign input share this)
-  fieldRow:           { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderRadius: 16, backgroundColor: 'transparent', paddingHorizontal: 16, borderWidth: 1, borderColor: '#1E1E1E' },
-  fieldRowOpen:       { borderColor: 'rgba(45,236,134,0.4)', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
-  fieldRowDisabled:   { opacity: 0.5 },
-  fieldValueRow:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  fieldValue:         { color: '#F4F4F4', fontSize: 17, fontWeight: '600' },
-  fieldInput:         { flex: 1, color: '#F4F4F4', fontSize: 17, fontWeight: '600', paddingVertical: 14 },
-  fieldPlaceholder:   { color: '#808080', fontWeight: '400' },
-  swatchDot:          { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-
-  // Expanded options
-  optionList:         { backgroundColor: 'transparent', borderBottomLeftRadius: 16, borderBottomRightRadius: 16, borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(45,236,134,0.4)', overflow: 'hidden' },
-  optionRow:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, borderTopWidth: 1, borderTopColor: '#1A1A1A' },
-  optionRowSel:       { backgroundColor: 'rgba(45,236,134,0.08)' },
-  optionText:         { color: '#808080', fontSize: 16 },
-  optionTextSel:      { color: '#F4F4F4', fontWeight: '600' },
-
-  // Call sign input
-  callSignInput:      { flex: 1, color: '#F4F4F4', fontSize: 17, fontWeight: '600', paddingVertical: 14 },
-
-  // Map appearance selector (3D car / arrow / photo)
-  apRow:              { flexDirection: 'row', gap: 10 },
-  // ---- Class panel ----
-  clsPanel:           { marginTop: 12 },
-  clsHint:            { color: '#808080', fontSize: 12, fontWeight: '600', marginBottom: 8, marginTop: 4 },
-  clsGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  clsTile:            { width: '23%', flexGrow: 1, height: 66, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  clsTileSel:         { overflow: 'hidden' },
-  clsTileImg:         { width: 40, height: 26 },
-  clsTileLabel:       { color: '#808080', fontSize: 10.5, fontWeight: '600' },
-  clsTileLabelSel:    { color: '#000' },
-  clsPreviewRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, marginBottom: 4 },
-  clsPreviewText:     { color: '#F4F4F4', fontSize: 13, fontWeight: '700' },
-  clsSwatchRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
-  slotRow:            { flexDirection: 'row', gap: 8, marginTop: 10, marginBottom: 2 },
-  slotBtn:            { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E' },
-  slotBtnOn:          { borderColor: YELLOW, backgroundColor: 'rgba(45,236,134,0.10)' },
-  slotDot:            { width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)' },
-  slotText:           { color: '#808080', fontSize: 13, fontWeight: '700' },
-  slotTextOn:         { color: '#F4F4F4' },
-  clsSwatch:          { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-  clsSwatchSel:       { borderWidth: 3, borderColor: '#FFFFFF' },
-  clsSaveBtn:         { marginTop: 12, alignSelf: 'flex-start', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },
-  clsSaveText:        { color: '#000', fontWeight: '800', fontSize: 13 },
-  clsHexRow:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  clsToggleRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
-  clsToggleText:      { color: '#E5E5EA', fontSize: 13, fontWeight: '600' },
-  clsHexHash:         { color: '#808080', fontSize: 16, fontWeight: '800' },
-  clsHexInput:        { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: '#1E1E1E', color: '#F4F4F4', paddingHorizontal: 12, fontSize: 15, fontWeight: '700', letterSpacing: 1 },
-  clsHexSave:         { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 13, backgroundColor: YELLOW },
-  apCard:             { flex: 1, height: 86, borderRadius: 16, borderWidth: 1, borderColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  apCardSel:          { overflow: 'hidden' },
-  apCardSelBrand:     { borderColor: CANDY_RIM },
-  apCardSelPremium:   { borderColor: 'rgba(255,255,255,0.62)' },
-  apCardSelUltra:     { borderColor: 'rgba(255,231,163,0.62)' },
-  apLabel:            { color: '#808080', fontSize: 13, fontWeight: '600' },
-  apLabelSel:         { color: '#000', fontWeight: '800' },
-  apPhoto:            { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: 'rgba(0,0,0,0.25)' },
-  apChange:           { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 8, paddingVertical: 4 },
-  apChangeText:       { color: YELLOW, fontSize: 13, fontWeight: '600' },
-
-  // Save button
-  saveBtn:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: 16, marginTop: 8, height: 52, borderRadius: 16, backgroundColor: YELLOW },
-  saveBtnDone:        { backgroundColor: '#4CD964' },
-  saveBtnText:        { color: '#000', fontSize: 17, fontWeight: '700' },
+  todayText: { fontSize: 16, fontWeight: '800' },
+  actions: { flexDirection: 'row', marginTop: 6, marginHorizontal: 16 },
+  action: { flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 5 },
+  actionText: { fontSize: 12, fontWeight: '600' },
 });

@@ -196,6 +196,8 @@ export function useConvoyPresence(
   // change (live <-> parked, e.g. CarPlay connect/disconnect) ALWAYS re-tracks and
   // bypasses the throttle — otherwise a parked flip whose pinned coords didn't change
   // would never reach peers (the position deps wouldn't fire, the throttle would eat it).
+  // scanId is a dep too (2026-09-22): the Showroom garage switches scan→stock car and scan A→scan B
+  // with the marker staying 'car', so without it a stationary driver's peers kept the old car.
   useEffect(() => {
     if (!handleRef.current || !coords || !me) return;
     const now = Date.now();
@@ -204,7 +206,7 @@ export function useConvoyPresence(
     lastTrackRef.current = now;
     lastStatusRef.current = me.status ?? "live";
     handleRef.current.track();
-  }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec]);
+  }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec, me?.scanId]);
 
   return { peers, status };
 }

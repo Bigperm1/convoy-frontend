@@ -27,15 +27,18 @@ import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 
-export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interactive?: boolean }): string {
+export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interactive?: boolean; transparent?: boolean }): string {
   const inline = opts?.inline ?? false;
   const interactive = opts?.interactive ?? true;
+  // transparent (the Garage Showroom, 2026-09-22): the car turns ON the stage — its light cone and
+  // turntable are drawn by the app underneath, so the page must not paint a box over them.
+  const bg = opts?.transparent ? "transparent" : "#0B0C0E";
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 <style>
-  html,body{margin:0;height:100%;background:#0B0C0E;overflow:hidden}
-  model-viewer{width:100%;height:100%;--poster-color:transparent;background:#0B0C0E}
+  html,body{margin:0;height:100%;background:${bg};overflow:hidden}
+  model-viewer{width:100%;height:100%;--poster-color:transparent;background:${bg};background-color:${bg}}
 </style></head><body>
 <model-viewer
   src="${glbUrl}"
@@ -60,6 +63,10 @@ export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interac
   (function () {
     var mv = document.querySelector('model-viewer');
     if (!mv) return;
+    function post(m) { try { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+    // The MODEL is on screen (not just the page) — the app hides its still under the car on this.
+    mv.addEventListener('load', function () { post({ t: 'ready' }); });
+    mv.addEventListener('error', function () { post({ t: 'error' }); });
     mv.addEventListener('load', function () {
       setTimeout(function () {
         try {
@@ -82,6 +89,8 @@ export default function CarHero3D({
   onEmptyPress,
   interactive = true,
   onSnapshot,
+  transparent = false,
+  onReady,
 }: {
   glbUrl: string | null;
   style?: StyleProp<ViewStyle>;
@@ -89,6 +98,11 @@ export default function CarHero3D({
   emptyLabel?: string;
   emptyHint?: string;
   onEmptyPress?: () => void;
+  /** No background at all — the host draws the stage behind the car (the Garage Showroom). No spinner
+   *  either: the host shows a still of the car until onReady. */
+  transparent?: boolean;
+  /** The model itself has loaded (model-viewer 'load'), not merely the page. */
+  onReady?: () => void;
   /**
    * false = auto-rotate only, finger orbit OFF.
    *
@@ -121,12 +135,12 @@ export default function CarHero3D({
   }
 
   return (
-    <View style={[styles.wrap, style]}>
+    <View style={[styles.wrap, transparent && styles.clear, style]}>
       <WebView
         pointerEvents={interactive ? "auto" : "none"}
         originWhitelist={["*"]}
-        source={{ html: carViewerHtml(glbUrl, { inline: true, interactive }), baseUrl: "https://localhost" }}
-        style={styles.web}
+        source={{ html: carViewerHtml(glbUrl, { inline: true, interactive, transparent }), baseUrl: "https://localhost" }}
+        style={[styles.web, transparent && styles.clear]}
         javaScriptEnabled
         domStorageEnabled
         allowsInlineMediaPlayback
@@ -149,11 +163,12 @@ export default function CarHero3D({
           try {
             const m = JSON.parse(e.nativeEvent.data);
             if (m && m.t === 'hero' && typeof m.d === 'string' && m.d.startsWith('data:image/jpeg')) onSnapshot?.(m.d);
+            else if (m && m.t === 'ready') onReady?.();
           } catch {}
         }}
       />
 
-      {!ready && (
+      {!ready && !transparent && (
         <View style={styles.loading} pointerEvents="none">
           <ActivityIndicator color={COLORS.brand} />
         </View>
@@ -178,6 +193,8 @@ export default function CarHero3D({
 const styles = StyleSheet.create({
   wrap: { backgroundColor: "#0B0C0E", overflow: "hidden" },
   web: { flex: 1, backgroundColor: "#0B0C0E" },
+  // react-native-webview draws a transparent page only when the view's own background is transparent.
+  clear: { backgroundColor: "transparent" },
   loading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
 
   empty: { alignItems: "center", justifyContent: "center", gap: 8 },

@@ -1,0 +1,316 @@
+// showroom/Stage.tsx — the Showroom stage (2026-09-22; the approved design, "The Showroom").
+//
+// A dark stage with a soft overhead light, a light cone and an oval turntable, all in the page's metal;
+// today's car turns on it and the member's other cars peek, dimmed, at the edges.
+//
+// HOW IT IS BUILT — three layers, bottom to top:
+//   1. the set (SVG: glow, cone, turntable) and the light bar — fixed, it never scrolls;
+//   2. the cars — one absolutely placed layer per slot, driven off the swipe position (translate, scale,
+//      opacity), so a neighbour can peek at the edge at a SMALLER size than the car on the turntable,
+//      which a plain paging ScrollView of full-width pages cannot draw;
+//   3. an invisible full-width paging ScrollView on top that owns every touch. The live 3D car (a
+//      WebView) therefore sits UNDER the swipe layer and can never win a horizontal drag — the trap
+//      GarageHeroCarousel solved by making the model non-interactive; here it is also structural.
+//
+// SWIPING ONLY PREVIEWS. Settling on a car never switches it (GarageHeroCarousel switched on landing on
+// an owned page); "Drive this today" does. A locked spot never opens the paywall on a swipe either —
+// only a deliberate tap or its button.
+
+import React, { useCallback, useEffect, useRef } from "react";
+import {
+  Animated,
+  StyleSheet,
+  Text,
+  TouchableWithoutFeedback,
+  View,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ScrollView,
+} from "react-native";
+import Svg, { Defs, Ellipse, LinearGradient as SvgLinearGradient, Polygon, RadialGradient, Rect, Stop } from "react-native-svg";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { skin, type VisualTier } from "../../tierTheme";
+
+export const STAGE_H = 400;
+/** Where the turntable sits (its centre line) — every car is placed to stand on it. */
+export const TURNTABLE_Y = 332;
+
+export type StageSlot = {
+  key: string;
+  /** 'car' = an owned car; 'locked' = the next tier's preview; 'add' = Ultra's "+ Scan a car". */
+  type: "car" | "locked" | "add";
+};
+
+export type StageLabels = {
+  pill: string;
+  pillMetal: VisualTier;
+  name: string;
+  sub: string;
+};
+
+/** Stand a car on the turntable: a box of the given size whose bottom edge sits `lift` above the
+ *  turntable's centre line, centred across the stage. */
+export function CarBox({ width, height, lift = 0, children }: {
+  width: number; height: number; lift?: number; children: React.ReactNode;
+}) {
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        top: TURNTABLE_Y + 14 - lift - height,
+        left: 0,
+        right: 0,
+        height,
+        alignItems: "center",
+        justifyContent: "flex-end",
+      }}
+    >
+      <View style={{ width, height, alignItems: "center", justifyContent: "flex-end" }}>{children}</View>
+    </View>
+  );
+}
+
+export default function Stage({
+  slots,
+  index,
+  onIndexChange,
+  onTapCentre,
+  metal,
+  labels,
+  renderSlot,
+  renderBadge,
+  overlay,
+}: {
+  slots: StageSlot[];
+  /** The settled, centred slot. */
+  index: number;
+  onIndexChange: (i: number) => void;
+  onTapCentre: () => void;
+  /** The page metal: light, cone, turntable ring, the active dot. */
+  metal: VisualTier;
+  /** Top-left words for the centred slot; null hides them (a full-stage state carries its own). */
+  labels: StageLabels | null;
+  /** The slot's visual. `centred` is true only for the settled slot — the only one allowed to go live. */
+  renderSlot: (slot: StageSlot, i: number, centred: boolean) => React.ReactNode;
+  /** Optional mark that travels WITH a slot but is not dimmed with it — the lock H on the next tier's
+   *  spot, which has to stay legible while the car behind it is a dim preview. */
+  renderBadge?: (slot: StageSlot, i: number, centred: boolean) => React.ReactNode;
+  /** Drawn over everything (the one-shot "your car is built" card). */
+  overlay?: React.ReactNode;
+}) {
+  const { width: W } = useWindowDimensions();
+  const sk = skin(metal);
+  const glowHex = metal === "brand" ? sk.accent : sk.colors[0];
+
+  const pager = useRef<ScrollView>(null);
+  const scrollX = useRef(new Animated.Value(index * W)).current;
+  const lastSettled = useRef(index);
+
+  // Follow an index change made OUTSIDE a swipe (the list changed under the centred car, or the page
+  // re-centred on a new car). A settle we just reported is already where we are — no scroll fight.
+  useEffect(() => {
+    if (lastSettled.current === index) return;
+    lastSettled.current = index;
+    pager.current?.scrollTo({ x: index * W, animated: false });
+  }, [index, W]);
+
+  const onMomentumEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const i = Math.max(0, Math.min(slots.length - 1, Math.round(e.nativeEvent.contentOffset.x / W)));
+    if (i !== lastSettled.current) {
+      lastSettled.current = i;
+      Haptics.selectionAsync();
+      onIndexChange(i);
+    }
+  }, [W, slots.length, onIndexChange]);
+
+  // Neighbour geometry, matched to the approved drawing at 390 pt: a neighbour's centre sits ~187 pt
+  // out (0.48 of the width), drawn at ~60% size and ~35% opacity; two out it is gone.
+  const PEEK = W * 0.48;
+
+  // The cone: the approved design's trapezoid (18%–82% across the top, full width at the foot).
+  const coneL = W * 0.064;
+  const coneR = W - coneL;
+  const coneW = coneR - coneL;
+  const cone = `${coneL + coneW * 0.18},16 ${coneL + coneW * 0.82},16 ${coneR},326 ${coneL},326`;
+
+  return (
+    <View style={[styles.stage, { height: STAGE_H }]}>
+      {/* 1 · the set */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Svg width={W} height={STAGE_H}>
+        <Defs>
+          <RadialGradient id="stageGlow" cx={W / 2} cy={100} r={240} gradientUnits="userSpaceOnUse">
+            <Stop offset="0" stopColor={glowHex} stopOpacity={0.14} />
+            <Stop offset="0.55" stopColor={glowHex} stopOpacity={0} />
+          </RadialGradient>
+          <SvgLinearGradient id="stageCone" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={sk.accent} stopOpacity={0.1} />
+            <Stop offset="1" stopColor={sk.accent} stopOpacity={0} />
+          </SvgLinearGradient>
+          {/* objectBoundingBox (the default): the gradient stretches to the ellipse it fills */}
+          <RadialGradient id="stageTable" cx="50%" cy="50%" r="50%">
+            <Stop offset="0" stopColor="#12161B" stopOpacity={1} />
+            <Stop offset="1" stopColor="#0B0C0E" stopOpacity={1} />
+          </RadialGradient>
+          <RadialGradient id="stageShadow" cx="50%" cy="50%" r="50%">
+            <Stop offset="0" stopColor="#000000" stopOpacity={0.7} />
+            <Stop offset="1" stopColor="#000000" stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Rect x={0} y={0} width={W} height={STAGE_H} fill="#0B0C0E" />
+        <Rect x={0} y={0} width={W} height={STAGE_H} fill="url(#stageGlow)" />
+        <Polygon points={cone} fill="url(#stageCone)" />
+        {/* the turntable's soft glow, then the table, then the shadow the car throws on it */}
+        <Ellipse cx={W / 2} cy={TURNTABLE_Y} rx={156} ry={37} fill="none" stroke={sk.accent} strokeOpacity={0.08} strokeWidth={8} />
+        <Ellipse cx={W / 2} cy={TURNTABLE_Y} rx={150} ry={32} fill="url(#stageTable)" stroke={sk.accent} strokeOpacity={0.55} strokeWidth={1} />
+        <Ellipse cx={W / 2} cy={TURNTABLE_Y - 3} rx={130} ry={13} fill="url(#stageShadow)" />
+      </Svg>
+      </View>
+      {/* the light bar */}
+      <View
+        pointerEvents="none"
+        style={[styles.lightBar, { left: (W - 220) / 2, shadowColor: sk.accent }]}
+      />
+
+      {/* 2 · the cars */}
+      {slots.map((slot, i) => {
+        if (Math.abs(i - index) > 2) return null;
+        const inputRange = [(i - 2) * W, (i - 1) * W, i * W, (i + 1) * W, (i + 2) * W];
+        const translateX = scrollX.interpolate({
+          inputRange,
+          outputRange: [PEEK * 2, PEEK, 0, -PEEK, -PEEK * 2],
+          extrapolate: "extend",
+        });
+        const scale = scrollX.interpolate({ inputRange, outputRange: [0.5, 0.6, 1, 0.6, 0.5], extrapolate: "clamp" });
+        const opacity = scrollX.interpolate({ inputRange, outputRange: [0, 0.36, 1, 0.36, 0], extrapolate: "clamp" });
+        const badge = renderBadge?.(slot, i, i === index);
+        const badgeOpacity = scrollX.interpolate({ inputRange, outputRange: [0, 1, 1, 1, 0], extrapolate: "clamp" });
+        return (
+          <React.Fragment key={slot.key}>
+            <Animated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, { opacity, transform: [{ translateX }, { scale }] }]}
+            >
+              {renderSlot(slot, i, i === index)}
+            </Animated.View>
+            {badge ? (
+              <Animated.View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, { opacity: badgeOpacity, transform: [{ translateX }, { scale }] }]}
+              >
+                {badge}
+              </Animated.View>
+            ) : null}
+          </React.Fragment>
+        );
+      })}
+
+      {/* 3 · the swipe layer */}
+      <Animated.ScrollView
+        ref={pager}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        style={StyleSheet.absoluteFill}
+        contentOffset={{ x: index * W, y: 0 }}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: true })}
+        scrollEventThrottle={16}
+        onMomentumScrollEnd={onMomentumEnd}
+        onLayout={() => {
+          // contentOffset is an initial value only, and Android has not always honoured it — put the
+          // centred car in the middle once the pager has a size.
+          pager.current?.scrollTo({ x: lastSettled.current * W, animated: false });
+        }}
+        accessibilityLabel="Your cars — swipe to look at each one"
+      >
+        {slots.map((slot, i) => (
+          <TouchableWithoutFeedback
+            key={slot.key}
+            onPress={() => { if (i === lastSettled.current) onTapCentre(); }}
+            accessibilityRole="button"
+          >
+            <View style={{ width: W, height: STAGE_H }} />
+          </TouchableWithoutFeedback>
+        ))}
+      </Animated.ScrollView>
+
+      {/* the words for the centred car */}
+      {labels ? (
+        <View style={styles.labels} pointerEvents="none">
+          <LinearGradient
+            colors={skin(labels.pillMetal).colors}
+            locations={skin(labels.pillMetal).locations}
+            style={[styles.pill, { borderColor: skin(labels.pillMetal).rim }]}
+          >
+            <Text style={[styles.pillText, { color: skin(labels.pillMetal).ink }]}>{labels.pill}</Text>
+          </LinearGradient>
+          <Text style={styles.name} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{labels.name}</Text>
+          <Text style={styles.sub} numberOfLines={2}>{labels.sub}</Text>
+        </View>
+      ) : null}
+
+      {/* page dots: the active one is a metal capsule; the locked spot is a lock, the scan spot a plus */}
+      <View style={styles.dots} pointerEvents="none">
+        {slots.map((slot, i) => {
+          if (slot.type === "locked") {
+            return <Ionicons key={slot.key} name="lock-closed" size={10} color={i === index ? sk.accent : "rgba(244,253,255,0.5)"} />;
+          }
+          if (slot.type === "add") {
+            return <Ionicons key={slot.key} name="add" size={12} color={i === index ? sk.accent : "rgba(244,253,255,0.5)"} />;
+          }
+          return (
+            <View
+              key={slot.key}
+              style={[styles.dot, i === index && { width: 18, backgroundColor: sk.accent }]}
+            />
+          );
+        })}
+      </View>
+
+      {overlay}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  stage: { width: "100%", backgroundColor: "#0B0C0E", overflow: "hidden" },
+  lightBar: {
+    position: "absolute",
+    top: 10,
+    width: 220,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#F4FDFF",
+    opacity: 0.8,
+    shadowOpacity: 0.35,
+    shadowRadius: 11,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  labels: { position: "absolute", left: 20, top: 26, right: 20, alignItems: "flex-start", gap: 6 },
+  pill: {
+    height: 22,
+    paddingHorizontal: 10,
+    borderRadius: 11,
+    borderWidth: 1,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  pillText: { fontSize: 10, fontWeight: "800", letterSpacing: 1.5 },
+  name: { color: "#F4FDFF", fontSize: 32, fontWeight: "800", lineHeight: 34, maxWidth: "92%" },
+  sub: { color: "#8FA6B8", fontSize: 14, maxWidth: "92%" },
+  dots: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 12,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+  },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(244,253,255,0.28)" },
+});

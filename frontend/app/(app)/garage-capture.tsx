@@ -36,6 +36,7 @@ import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
 import { ensureCameraPermission } from "../../src/permissionGate";
 import { SCAN_SHOTS, SHOTS_TOTAL, uploadScan, requestScanSlot, type CapturedShot } from "../../src/carScan";
+import { adoptActiveScan } from "../../src/garageCars";
 import { logEvent } from "../../src/crashBreadcrumb";
 import { findColorsForTyped, type CarColor } from "../../src/carDatabase";
 import { MAIN_COLORS, CLUB_PALETTES } from "../../src/paintPalettes";
@@ -298,6 +299,10 @@ export default function GarageCaptureScreen() {
     // An attempt is only spent when the photos are actually IN the bucket. A
     // failed upload must not burn one of the two renders.
     if (r.ok) {
+      // The Showroom garage (2026-09-22): the car this replaces as the phone's scan pointer stays in the
+      // Garage's own list — a scan that /scan/mine never lists (the hand-delivered ones before server
+      // slots) would otherwise be lost the moment the pointer below moves.
+      await adoptActiveScan();
       await updateSettings({
         carScanId: scanId,
         carScanStatus: "submitted",

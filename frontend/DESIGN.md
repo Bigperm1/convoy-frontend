@@ -77,13 +77,14 @@ Both derived from the original by **hue rotation, not tint** — `tintColor` fla
 every non-transparent pixel to one colour and destroys the image. The trail sits at
 125°; gold rotates it to the ultra ramp's 40°, silver desaturates to 16% with the
 premium ramp's cool cast. Only ~3.6% of the image is lit, so the rotation only ever
-touches the road and grid. `TIER_WALLPAPER` in `app/(app)/garage.tsx` holds the three
+touches the road and grid. `TIER_WALLPAPER` in `src/components/GlassBackdrop.tsx` holds the three
 `require()`s — they **must** be static and at module level or Metro cannot bundle them.
 
-Everything tier-coloured on the page follows the same `skin(pageTier).accent`: the
-personal-best number, the call-sign icon, the speed badge, the Apply/Save CTAs.
-The Arrow/Class/3D option tiles keep their OWN artwork colours — a green arrow glyph
-on a gold page is the arrow's identity, not a stray accent.
+The Garage — the Showroom since 2026-09-22 — no longer uses the wallpaper: it sits on the plain stage
+black of the approved design, and everything tier-coloured on it follows ONE lookup,
+`garageMetal(tier)` in `src/components/showroom/tier.ts` (header chip, stage light and turntable
+ring, page dots, plate rim, "Drive this today", the quiet actions, Customize). The cars keep their
+OWN artwork colours — a green arrow on a gold stage is the arrow's identity, not a stray accent.
 
 `accent` is the mid-tone for text/icons on a DARK ground (`#2DEC86` / `#C9D2D8` /
 `#E0A93E`); `ink` is for glyphs riding ON the fill. Never use `ink` on black.
@@ -129,7 +130,10 @@ differ in hue but both are light-on-dark, so colour alone fails anyone who can't
 separate them.)
 
 Today: the Garage Scan flow (`garage-scan` → `garage-consent` → `garage-capture`)
-is **Ultra Premium / gold**. The Garage itself is untiered and stays green.
+is **Ultra Premium / gold**. The Garage itself (the Showroom, 2026-09-22) wears the metal of the tier
+it is drawn for — Free green · Silver silver · Gold gold · Ultra diamond, which renders gold until the
+diamond art merges (`garageMetal`, one line to change) — and says the tier in words on its header chip
+(Jeff, 2026-09-22: "the diamond is only for ultra … skins are already set in place for how they work").
 
 ---
 
@@ -158,8 +162,9 @@ A locked row is a **buy button, not a dead row** — the whole row opens the pay
 
 | Surface | Feature | Metal |
 |---|---|---|
-| Garage → Map Appearance → Class | `class_marker` | silver |
-| Garage → Map Appearance → 3D | `car_3d` | **gold** |
+| Garage Showroom, Free view — the locked last spot + "Up next" | `class_marker` | silver |
+| Garage Showroom, Silver view — the locked last spot + "Up next" | `car_3d` | **gold** |
+| Garage Showroom, Gold view — the locked last spot + "Add Ultra" | `car_scan` | **gold** (diamond with build 80) |
 | Settings → Map Layers → Speed cameras | `speed_cameras` | silver |
 | Settings → Map Layers → Road incidents | `road_incidents` | silver |
 | Settings → Scout & Voice → Hands-free replies | `comms_handsfree` | silver |
@@ -224,7 +229,7 @@ Verde Mantis, Papaya Spark, French Racing Blue, Grigio Telesto.
 > *"each class has the main colors from the popular models/makes from those brands
 > as well as black, white, gray, red, etcetera"*
 
-`CLASS_SWATCHES` in `src/classModels.ts` is what **Garage → Class actually shows** —
+`CLASS_SWATCHES` in `src/classModels.ts` is what **Garage → Customize (class car) actually shows** —
 the flat 20-swatch `PAINT_COLORS` list is retired for classes (Arrow keeps it; it
 isn't a class). Same two doctrines as above; every name was web-verified as a real
 factory paint (adversarial fact-check pass, 2026-08-27), hexes are good-faith sRGB
@@ -323,7 +328,8 @@ its own instead of leaving a gold app behind a dead card, while remembering the 
 
 Jeff: *"if you select from the arrow, the class, or the 3D it should also change the
 skin."* The three Map Appearances already ARE the ladder — Arrow free, Class Premium,
-3D Ultra — so `applyMarkerType` (Garage) calls `setSkinChoice` with the matching metal:
+3D Ultra — so picking one calls `setSkinChoice` with the matching metal (since 2026-09-22 through the
+Showroom's "Drive this today", `driveToday` in `src/garageCars.ts`; `SKIN_FOR_MARKER` unchanged):
 **Arrow → green · Class → silver · 3D → gold.** `photo` is deliberately excluded: it is
 not one of the three tiered appearances. `setSkinChoice` still clamps to entitlement, so
 this can never hand out a metal the account has not bought, and Settings → App Skin

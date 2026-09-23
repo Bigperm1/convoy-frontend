@@ -63,6 +63,13 @@ const DEV_KEY = "convoy.entitlement.devTier"; // manual QA override, survives re
 
 let tier: Tier = "free";
 let hydrated = false;
+// The manual-QA override on its own (DEV_KEY), kept apart from `tier` because hydrate() folds the two
+// together and nothing could tell them apart afterwards. The Garage's Showroom reads it to preview each
+// tier's view while ENTITLEMENTS_ENFORCED is false (2026-09-22) — see getDevTier().
+let devTier: Tier | null = null;
+
+const isTier = (t: unknown): t is Tier =>
+  t === "free" || t === "premium" || t === "gold" || t === "ultra" || t === "club_founder" || t === "beta_og";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -77,14 +84,23 @@ export function getTier(): Tier {
   return tier;
 }
 
+/** The manual-QA override (DEV_KEY / __setDevTier), or null when none is set. Read-only on purpose:
+ *  the Garage uses it to decide WHICH tier's Showroom to draw — never to unlock anything (isUnlocked
+ *  reads `tier`, exactly as before). Null until the async hydrate below finishes; it emits when it does,
+ *  so callers re-render through useEntitlementVersion(). */
+export function getDevTier(): Tier | null {
+  return devTier;
+}
+
 async function hydrate() {
   if (hydrated) return;
   hydrated = true;
   try {
     const dev = await AsyncStorage.getItem(DEV_KEY);
     const stored = await AsyncStorage.getItem(STORE_KEY);
+    devTier = isTier(dev) ? dev : null;
     const t = (dev || stored) as Tier | null;
-    if (t === "free" || t === "premium" || t === "gold" || t === "ultra" || t === "club_founder" || t === "beta_og") {
+    if (isTier(t)) {
       tier = t;
       emit();
     }
@@ -107,6 +123,7 @@ export async function __setDevTier(t: Tier | null) {
     if (t) await AsyncStorage.setItem(DEV_KEY, t);
     else await AsyncStorage.removeItem(DEV_KEY);
   } catch {}
+  devTier = t;
   if (t) {
     tier = t;
     emit();
@@ -183,7 +200,7 @@ export async function syncEntitlement(): Promise<Tier | null> {
   try {
     const r = await api.get("/entitlement");
     const t = r?.data?.tier as Tier | undefined;
-    if (t === "free" || t === "premium" || t === "gold" || t === "ultra" || t === "club_founder" || t === "beta_og") {
+    if (isTier(t)) {
       await setTier(t);
       return t;
     }

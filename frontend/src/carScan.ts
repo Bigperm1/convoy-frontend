@@ -50,8 +50,10 @@
 import { File } from "expo-file-system";
 import { supabase, SUPABASE_ENABLED, SUPABASE_ANON_KEY } from "./supabase";
 import { api } from "./api";
-import { getSettings, updateSettings } from "./settings";
+import { getSettings, updateSettings, getSelfMarkerType } from "./settings";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
+import { setSkinChoice } from "./appSkin";
+import { ensureGarageLoaded, getGarage, updateGarage, SKIN_FOR_MARKER } from "./garageStore";
 
 export const SCAN_BUCKET = "car-scans";
 
@@ -548,19 +550,106 @@ export async function uploadScan(
 // an older backend (pydantic ignores unknown fields, 200 OK) would otherwise look synced
 // forever. Callers: garage.tsx (the moment the scan lands) and map.tsx (every launch,
 // for scans that predate the field — Olaf's).
+// The Showroom garage (2026-09-22) also CLEARS car_scan_id when a scan is parked (garageCars
+// clearProfileScan). The two writes are serialized through this promise so an older "set" still on its
+// way can never land after a newer "clear" (Codex review 2026-09-22).
+// A Set, not one slot: map.tsx and a delivery can both send the same id at once (the duplicate
+// carscan-sync rows noted in reconcileScanState below).
+const _syncsInFlight = new Set<Promise<boolean>>();
+/** Resolves once no car_scan_id "set" is on its way to the backend. */
+export function scanSyncSettled(): Promise<unknown> {
+  return Promise.allSettled([..._syncsInFlight]);
+}
 export async function syncScanIdToBackend(scanId: string): Promise<boolean> {
   if (!scanId) return false;
+  const run = (async () => {
+    try {
+      if (getSettings().carScanBackendId === scanId) return true;
+      const { data } = await api.put("/auth/profile", { car_scan_id: scanId });
+      const echoed = data && typeof data === "object" && (data as any).car_scan_id === scanId;
+      // Recorded only while that scan is still the one on the road — a scan parked while this was in
+      // flight must not look synced, or driving it again would never re-send it after the park's clear.
+      const now = getSettings();
+      if (echoed && now.carScanStatus === "ready" && now.carScanId === scanId) {
+        await updateSettings({ carScanBackendId: scanId });
+      }
+      logEvent(`carscan-sync id=${scanId} ok=${echoed ? 1 : 0}`);
+      return !!echoed;
+    } catch (e: any) {
+      logEvent(`carscan-sync-fail id=${scanId} err=${String(e?.message ?? e).slice(0, 80)}`);
+      return false;
+    }
+  })();
+  _syncsInFlight.add(run);
   try {
-    if (getSettings().carScanBackendId === scanId) return true;
-    const { data } = await api.put("/auth/profile", { car_scan_id: scanId });
-    const echoed = data && typeof data === "object" && (data as any).car_scan_id === scanId;
-    if (echoed) await updateSettings({ carScanBackendId: scanId });
-    logEvent(`carscan-sync id=${scanId} ok=${echoed ? 1 : 0}`);
-    return !!echoed;
-  } catch (e: any) {
-    logEvent(`carscan-sync-fail id=${scanId} err=${String(e?.message ?? e).slice(0, 80)}`);
-    return false;
+    return await run;
+  } finally {
+    _syncsInFlight.delete(run);
   }
+}
+
+// ── LANDING A FINISHED SCAN — one path for the Garage and for launch (2026-09-22) ────────────────────
+// The Showroom garage keeps an invariant every surface depends on: the settings scan fields are 'ready'
+// ONLY while today's car is a scan — 'ready' is exactly what makes the phone map (map.tsx
+// selfScanModelUrl), CarPlay/AA (carStore mirrorSettingsToCar) and peers (presence scanId) draw it.
+// So a scan that finishes is never just flipped to 'ready': it becomes today's car (the marker goes to
+// 'car' and the skin follows, as picking the 3D car does), or — if the member picked another car AFTER
+// submitting it — it lands PARKED, a car waiting in the Garage. Both the Garage's return leg and
+// reconcileScanState (launch) land it through here, so the two can never disagree (Codex review
+// 2026-09-22: launch used to restore it as 'ready' behind an arrow).
+const addId = (xs: string[], x: string) => (xs.includes(x) ? xs : [...xs, x]);
+
+/** Land the scan this phone SUBMITTED, which has finished (both GLBs published). 'stale' = the pointer
+ *  moved on while the files were being checked (a newer pick) — the car is only added to the Garage.
+ *  `owner` = the garage owner the caller saw BEFORE its network checks: if another account claimed the
+ *  garage meanwhile, nothing at all is written (Codex review 2026-09-22 — a stale SELECTION may still
+ *  inventory the scan, a stale ACCOUNT must not). */
+export async function deliverSubmittedScan(
+  id: string,
+  urls: { heroUrl: string; mapUrl: string },
+  owner?: string,
+): Promise<"active" | "parked" | "stale"> {
+  await ensureGarageLoaded();
+  if (owner !== undefined && getGarage().ownerId !== owner) {
+    try { logEvent(`carscan-delivered id=${id} map=1 stale=owner`); } catch {}
+    return "stale";
+  }
+  const s = getSettings();
+  if (s.carScanStatus !== "submitted" || s.carScanId !== id) {
+    await updateGarage((cur) => ({ completeScanIds: addId(cur.completeScanIds, id) }));
+    try { logEvent(`carscan-delivered id=${id} map=1 stale=1`); } catch {}
+    return "stale";
+  }
+  const submittedMs = Date.parse(s.carScanSubmittedAt ?? "");
+  const chosenMs = Date.parse(getGarage().chosenAt ?? "");
+  if (Number.isFinite(submittedMs) && Number.isFinite(chosenMs) && chosenMs > submittedMs) {
+    await updateSettings({ carScanModelUrl: urls.heroUrl, carScanMapUrl: urls.mapUrl, carScanStatus: "none" });
+    await updateGarage((cur) => ({ scanParked: true, completeScanIds: addId(cur.completeScanIds, id) }));
+    try { logEventReliable(`carscan-delivered id=${id} map=1 parked=1`); } catch {}
+    return "parked";
+  }
+  const markerChanges = getSelfMarkerType(s) !== "car";
+  await updateSettings({
+    carScanModelUrl: urls.heroUrl,
+    carScanMapUrl: urls.mapUrl,
+    carScanStatus: "ready",
+    ...(markerChanges ? { selfMarkerType: "car" as const } : {}),
+  });
+  await updateGarage((cur) => ({ scanParked: false, completeScanIds: addId(cur.completeScanIds, id) }));
+  if (markerChanges) {
+    // The rest of what picking the 3D car does (garageCars afterMarkerWrite): the profile's avatar_type
+    // (ignored by today's backend, kept as it was) and the skin that follows the pick.
+    api.put("/auth/profile", { avatar_type: "car" }).catch(() => {});
+    const metal = SKIN_FOR_MARKER.car;
+    if (metal) void setSkinChoice(metal);
+  }
+  // The settings write above is also what flips the MAP marker live — map.tsx and carStore subscribe to
+  // settings, so the car lands on every surface in the same instant.
+  try { logEventReliable(`carscan-delivered id=${id} map=1`); } catch {}
+  // Tell the backend, so the roster shows this car's twin / hero shot to members who are not live on
+  // presence (2026-09-03). Retries from map.tsx if it fails.
+  void syncScanIdToBackend(id);
+  return "active";
 }
 
 // ── RECONCILE WITH THE SERVER (2026-09-03, Olaf's reinstall) ───────────────────────
@@ -571,39 +660,99 @@ export async function syncScanIdToBackend(scanId: string): Promise<boolean> {
 // (GET /scan/mine) and (1) restore the newest DONE scan when the phone has no ready one,
 // (2) mark the scan being polled as 'failed' when the worker says so. Never touches a phone
 // that already has a ready scan. Receipts: carscan-restored / carscan-verdict.
+//
+// THE SHOWROOM GARAGE (2026-09-22 — every scan an account made is now a car in the Garage):
+//   • THE SCAN THIS PHONE IS WAITING ON finished → it lands through deliverSubmittedScan (above), so it
+//     becomes today's car or waits parked — never 'ready' behind an arrow.
+//   • STILL BUILDING → nothing is restored over it. Restoring the newest DONE scan re-pointed carScanId
+//     at the OLD car and the new one never arrived (VERIFIED 2026-09-22 by running the pre-change
+//     reconcileScanState on that sequence: it restored the old car and then stayed a no-op after the new
+//     one published). The only carscan-restored from=submitted row with a known cause, Olaf's 2026-09-04
+//     08:45, restored over enablewhore-20260903-095615, which car_scan_jobs has as failed/user-cap — that
+//     still restores: failed and skipped are terminal.
+//   • PARKED → a finished scan the member took off the road on purpose ("Drive this today" on a non-scan
+//     car, src/garageCars.ts) is not "lost" and is not restored. A reinstall wipes the flag with
+//     everything else, so Olaf's recovery still happens.
+//   • A lost scan restored while today's pick is the ARROW lands parked: back in the Garage, not on the
+//     road behind an arrow. A CLASS driver's restores 'ready', exactly as before the Showroom — CarPlay/AA
+//     cannot draw a class car (CarMapView isArrow / carHasScan, locked), so 'ready' is what keeps their
+//     scan on the head unit and in presence; parking it would swap in the stock GR Corolla there. Same
+//     rule as garageCars.parkStrayScan (review 2026-09-22, verified by running the restore for a class
+//     driver: it came back parked and CarPlay's selfScanMapUrl went undefined).
+//   • 'unknown' (a slot with no car_scan_jobs row, server.py my_scans) counts as STILL BUILDING only for
+//     UNKNOWN_BUILDING_WINDOW_MS after this phone submitted it. Past that — or with no submit time — it
+//     is treated as settled, so a slot that never got a job row cannot hold the member's previous car
+//     off the road forever (review 2026-09-22; before the Showroom every such case restored).
+//   • Every write re-checks that nothing was picked while the requests were in flight (Codex review
+//     2026-09-22: a slow HEAD could otherwise overwrite a "Drive this today" made meanwhile).
+const SCAN_TERMINAL = new Set(["done", "failed", "skipped"]);
+const UNKNOWN_BUILDING_WINDOW_MS = 2 * 60 * 60 * 1000;   // 20× the ~6 min ScanHero estimate
 type MyScan = { scanId: string; status: string; reason?: string | null; createdAt?: string | null };
 let _reconcileBusy = false;
 export async function reconcileScanState(): Promise<"restored" | "failed" | "noop"> {
   if (_reconcileBusy) return "noop";
   _reconcileBusy = true;
   try {
+    await ensureGarageLoaded();
     const cur = getSettings();
     if (cur.carScanStatus === "ready" && cur.carScanId) return "noop";
+    const rev = getGarage().chosenAt;
+    const owner = getGarage().ownerId;
+    // Superseded while we were waiting on the network: a new pick, the pointer moved, or another account
+    // claimed this phone's garage.
+    const superseded = () => {
+      const now = getSettings();
+      return getGarage().chosenAt !== rev || getGarage().ownerId !== owner
+        || now.carScanId !== cur.carScanId || now.carScanStatus !== cur.carScanStatus;
+    };
     const { data } = await api.get("/scan/mine");
     const scans: MyScan[] = Array.isArray(data?.scans) ? data.scans : [];
     if (!scans.length) return "noop";
+    const waiting = cur.carScanStatus === "submitted" && cur.carScanId
+      ? scans.find((x) => x.scanId === cur.carScanId)
+      : undefined;
+    // 0) The scan this phone submitted finished while the Garage was closed — land it as the Garage would.
+    if (waiting && waiting.status === "done") {
+      const ready = await checkScanReady(waiting.scanId);
+      if (!ready || superseded()) return "noop";   // not published yet: the next check lands it
+      const how = await deliverSubmittedScan(waiting.scanId, ready, owner);
+      logEventReliable(`carscan-restored id=${waiting.scanId} from=submitted how=${how}`);
+      return how === "stale" ? "noop" : "restored";
+    }
+    const submittedMs = Date.parse(cur.carScanSubmittedAt ?? "");
+    const unknownExpired = !Number.isFinite(submittedMs) || Date.now() - submittedMs > UNKNOWN_BUILDING_WINDOW_MS;
+    const stillBuilding = !!waiting && !SCAN_TERMINAL.has(waiting.status)
+      && !(waiting.status === "unknown" && unknownExpired);
+    const parked = getGarage().scanParked === true;
     // 1) A finished scan the phone does not know about → restore it.
-    for (const sc of scans) {
+    for (const sc of (parked || stillBuilding) ? [] : scans) {
       if (sc.status !== "done" || !sc.scanId) continue;
       const ready = await checkScanReady(sc.scanId);
       if (!ready) continue;
+      if (superseded()) return "noop";
+      // Park only behind the ARROW (see the header): class, car and photo drivers get it back 'ready'.
+      const parkIt = getSelfMarkerType(getSettings()) === "arrow";
       await updateSettings({
         carScanId: sc.scanId, carScanModelUrl: ready.heroUrl, carScanMapUrl: ready.mapUrl,
-        carScanStatus: "ready", carScanBackendId: undefined,
+        carScanStatus: parkIt ? "none" : "ready", carScanBackendId: undefined,
       });
-      logEventReliable(`carscan-restored id=${sc.scanId} from=${cur.carScanStatus ?? "none"}`);
+      await updateGarage((g) => ({
+        completeScanIds: addId(g.completeScanIds, sc.scanId),
+        ...(parkIt ? { scanParked: true } : {}),
+      }));
+      logEventReliable(`carscan-restored id=${sc.scanId} from=${cur.carScanStatus ?? "none"}${parkIt ? " parked=1" : ""}`);
       // No explicit sync here: clearing carScanBackendId above makes map.tsx's sync effect PUT the
       // id once (sim run 2026-09-03 23:11 showed two identical carscan-sync rows with both).
       return "restored";
     }
     // 2) The one being polled is dead — say so instead of polling forever.
     if (cur.carScanStatus === "submitted" && cur.carScanId) {
-      const mine = scans.find((x) => x.scanId === cur.carScanId);
       // 'skipped' is terminal too (the worker never rendered it: slot-required, junk, probe) —
       // to the phone that is the same verdict: stop the countdown.
-      if (mine && (mine.status === "failed" || mine.status === "skipped")) {
+      if (waiting && (waiting.status === "failed" || waiting.status === "skipped")) {
+        if (superseded()) return "noop";
         await updateSettings({ carScanStatus: "failed" });
-        logEventReliable(`carscan-verdict id=${cur.carScanId} status=${mine.status} reason=${String(mine.reason ?? "").slice(0, 60)}`);
+        logEventReliable(`carscan-verdict id=${cur.carScanId} status=${waiting.status} reason=${String(waiting.reason ?? "").slice(0, 60)}`);
         return "failed";
       }
     }

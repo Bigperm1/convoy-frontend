@@ -55,7 +55,8 @@ const listeners = new Set<Listener>();
 export function entitledSkin(): VisualTier {
   if (!ENTITLEMENTS_ENFORCED) return "ultra";
   switch (getTier()) {
-    case "ultra":
+    case "ultra":      // diamond skin ships with build 80; gold until then
+    case "gold":
     case "club_founder":
     case "beta_og":
       return "ultra";

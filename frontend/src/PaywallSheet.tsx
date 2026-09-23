@@ -21,7 +21,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
 import { PremiumBadge, subscribePaywall } from "./PremiumBadge";
 import { featureTier } from "./entitlements";
-import { redeemCode, type PremiumFeature } from "./entitlements";
+import { redeemCode, featureRung, type PremiumFeature } from "./entitlements";
+import { PRICING, priceLabel, type PaidRung } from "./pricing";
 
 // What the sheet leads with, per feature that opened it.
 const FEATURE_HOOKS: Partial<Record<PremiumFeature, string>> = {
@@ -57,6 +58,7 @@ export default function PaywallSheet() {
   // Premium lock, gold for an Ultra one. A gold "ULTRA PREMIUM" badge over a
   // Premium feature quotes the customer the wrong tier.
   const [tier, setTier] = useState<"premium" | "ultra">("ultra");
+  const [rung, setRung] = useState<PaidRung>("premium");
   const [code, setCode] = useState("");
   const [redeeming, setRedeeming] = useState(false);
   const [showCode, setShowCode] = useState(false);
@@ -66,6 +68,7 @@ export default function PaywallSheet() {
       subscribePaywall((feature) => {
         setHook(FEATURE_HOOKS[feature] ?? null);
         setTier(featureTier(feature));
+        setRung(featureRung(feature));
         setShowCode(false);
         setCode("");
         setVisible(true);
@@ -75,8 +78,8 @@ export default function PaywallSheet() {
 
   const close = () => setVisible(false);
 
-  const buy = (_plan: "monthly" | "yearly") => {
-    // RevenueCat purchase lands with build 74.
+  const buy = (_rung: PaidRung) => {
+    // The billing SDK (RevenueCat) is build-80 native work; the catalog is already the truth.
     Alert.alert("Almost here", "Purchases arrive with the next app update.");
   };
 
@@ -110,21 +113,25 @@ export default function PaywallSheet() {
             ))}
           </View>
 
-          {/* Prices are placeholders until Jeff signs off pricing. */}
-          <TouchableOpacity activeOpacity={0.9} onPress={() => buy("yearly")}>
-            <LinearGradient
-              colors={[COLORS.brand, COLORS.brandDim]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={styles.buyPrimary}
-            >
-              <Text style={styles.buyPrimaryText}>Yearly — $39.99</Text>
-              <Text style={styles.buyPrimarySub}>7 days free · ~$3.33/mo</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.buySecondary} activeOpacity={0.85} onPress={() => buy("monthly")}>
-            <Text style={styles.buySecondaryText}>Monthly — $4.99</Text>
-          </TouchableOpacity>
+          {/* THE LADDER (Jeff, 2026-09-22 — src/pricing.ts): three rungs, the one this feature needs
+              filled. Purchases arrive with build 80's billing SDK; until then every button says so. */}
+          {PRICING.map((p) => {
+            const needed = p.rung === rung;
+            return (
+              <TouchableOpacity key={p.rung} activeOpacity={0.9} onPress={() => buy(p.rung)}>
+                {needed ? (
+                  <LinearGradient colors={[COLORS.brand, COLORS.brandDim]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.buyPrimary}>
+                    <Text style={styles.buyPrimaryText}>{p.name} — {priceLabel(p.monthlyUsd)}</Text>
+                    <Text style={styles.buyPrimarySub}>{p.tagline}</Text>
+                  </LinearGradient>
+                ) : (
+                  <View style={styles.buySecondary}>
+                    <Text style={styles.buySecondaryText}>{p.name} — {priceLabel(p.monthlyUsd)}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
 
           {showCode ? (
             <View style={styles.codeRow}>

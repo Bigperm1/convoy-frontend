@@ -6,13 +6,14 @@
 // the whole free/premium split at once. Do not flip it before the backend can
 // hand out tiers by email — existing testers would see locks.
 //
-// Tiers (build-80 plan, Jeff 8/20; three-rung ladder confirmed 8/20 evening):
+// Tiers (Jeff 2026-09-22, prices in src/pricing.ts — "volume instead of gouging"):
 //   beta_og      — original beta testers; personal codes, never expire. All access.
 //   club_founder — GRC club members; all access until the store launch flag.
-//   ultra        — paid top tier: YOUR exact car on the map (the authored car
-//                  library today, Garage Scan when it ships).
-//   premium      — paid subscriber: Class 3D + palette and every other lock.
-//   free         — green arrow, the store-launch free tier.
+//   ultra        — $4.99/mo: YOUR car scanned to 3D (one Garage Scan included, extras $2.99), diamond skin.
+//   gold         — $2.99/mo: the 3D map and a 3D class car, gold skin.
+//   premium      — $0.99/mo, the SILVER rung (storage key kept from 8/20): class car in your paint on
+//                  the 2D map, every other feature lock, silver skin.
+//   free         — green arrow, 2D map, the store-launch free tier.
 //
 // The truth lives server-side against the account email; this module only
 // caches it. `syncEntitlement()` refreshes the cache from the backend (endpoint
@@ -25,14 +26,15 @@ import { api } from "./api";
 // ── Master switch ────────────────────────────────────────────────────────────
 export const ENTITLEMENTS_ENFORCED = false;
 
-export type Tier = "free" | "premium" | "ultra" | "club_founder" | "beta_og";
+export type Tier = "free" | "premium" | "gold" | "ultra" | "club_founder" | "beta_og";
 
 // Every gated surface names its feature here — one key per lock in the app.
 // (Jeff's free-tier list, 8/20.)
 export type PremiumFeature =
   | "arrow_colors"      // arrow paint — green stays free
   | "class_marker"      // Class 3D map appearance (premium)
-  | "car_3d"            // ULTRA — your exact car (authored library / Garage Scan)
+  | "car_3d"            // GOLD — the 3D map + a 3D car of your class
+  | "car_scan"          // ULTRA — your own car scanned to 3D (Garage Scan)
   | "club_create"       // creating Clubs/Events/Cruises (viewing is free)
   | "top_speed"         // Top Cruise Speed card
   | "map_modes"         // map styles beyond Day
@@ -49,8 +51,9 @@ export type PremiumFeature =
   // premium, gold only at ultra. Modelling it this way means the Settings rows get the
   // right H and the right paywall for free, via the same useFeature/useFeatureTier path
   // every other gate uses.
-  | "app_skin_silver"    // PREMIUM — the silver app skin
-  | "app_skin_gold";     // ULTRA — the gold app skin (silver can never reach it)
+  | "app_skin_silver"    // PREMIUM (Silver) — the silver app skin
+  | "app_skin_gold"      // GOLD — the gold app skin (silver can never reach it)
+  | "app_skin_diamond";  // ULTRA — the diamond app skin (art on the trial branch, ships with build 80)
 
 const STORE_KEY = "convoy.entitlement.v1";
 const DEV_KEY = "convoy.entitlement.devTier"; // manual QA override, survives reload
@@ -78,7 +81,7 @@ async function hydrate() {
     const dev = await AsyncStorage.getItem(DEV_KEY);
     const stored = await AsyncStorage.getItem(STORE_KEY);
     const t = (dev || stored) as Tier | null;
-    if (t === "free" || t === "premium" || t === "ultra" || t === "club_founder" || t === "beta_og") {
+    if (t === "free" || t === "premium" || t === "gold" || t === "ultra" || t === "club_founder" || t === "beta_og") {
       tier = t;
       emit();
     }
@@ -117,16 +120,19 @@ export async function __setDevTier(t: Tier | null) {
 // club_founder sit above ultra — all access, per Jeff (their reward tiers).
 const TIER_RANK: Record<Tier, number> = {
   free: 0,
-  premium: 1,
-  ultra: 2,
+  premium: 1,   // Silver
+  gold: 2,
+  ultra: 3,
   club_founder: 99,
   beta_og: 99,
 };
 
 // Everything defaults to premium (rank 1); only the exact-car experience is ultra.
 const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
-  car_3d: 2,
-  app_skin_gold: 2,
+  car_3d: 2,           // Gold
+  app_skin_gold: 2,    // Gold
+  car_scan: 3,         // Ultra
+  app_skin_diamond: 3, // Ultra
 };
 
 /**
@@ -140,7 +146,15 @@ const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
  * Gold = ultra, Silver = premium. See src/tierTheme.ts and DESIGN.md.
  */
 export function featureTier(feature: PremiumFeature): "premium" | "ultra" {
-  return (FEATURE_RANK[feature] ?? 1) >= TIER_RANK.ultra ? "ultra" : "premium";
+  // Gold and Ultra both wear the gold H until the diamond art lands (build 80) — the badge is the
+  // METAL, not the price. For the price and the name, use featureRung().
+  return (FEATURE_RANK[feature] ?? 1) >= TIER_RANK.gold ? "ultra" : "premium";
+}
+
+/** The rung a feature is sold on — what the paywall quotes (src/pricing.ts). */
+export function featureRung(feature: PremiumFeature): "premium" | "gold" | "ultra" {
+  const r = FEATURE_RANK[feature] ?? 1;
+  return r >= TIER_RANK.ultra ? "ultra" : r >= TIER_RANK.gold ? "gold" : "premium";
 }
 
 export function isUnlocked(feature: PremiumFeature): boolean {
@@ -160,7 +174,7 @@ export async function syncEntitlement(): Promise<Tier | null> {
   try {
     const r = await api.get("/entitlement");
     const t = r?.data?.tier as Tier | undefined;
-    if (t === "free" || t === "premium" || t === "ultra" || t === "club_founder" || t === "beta_og") {
+    if (t === "free" || t === "premium" || t === "gold" || t === "ultra" || t === "club_founder" || t === "beta_og") {
       await setTier(t);
       return t;
     }

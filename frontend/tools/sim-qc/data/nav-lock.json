@@ -1,6 +1,6 @@
 {
   "approvedBy": "Jeff",
-  "approvedAt": "2026-09-22",
+  "approvedAt": "2026-09-23",
   "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
   "approvals": [
     {
@@ -208,6 +208,13 @@
       "quote": "Jeff, 2026-09-22: do 1-3 — lock the new src/speedLimitCover.ts",
       "changes": [
         "src/speedLimitCover.ts: code pending → d2e0860d56c6"
+      ]
+    },
+    {
+      "at": "2026-09-23",
+      "quote": "Jeff, 2026-09-23: make sure the nav is stuck at 60fps for all 4 platforms",
+      "changes": [
+        "src/ConvoyMapbox.tsx#mbx-selfcar-ease-step region 58be470c5ced → a6942ba7085e"
       ]
     }
   ],
@@ -452,7 +459,7 @@
         "mbx-selfcar-bgtick": "sha256:d09c739f75ab5b31435ce0a291bc4cdb430720cb5d88dcb6dc48052681f95481",
         "mbx-car-frame-pump": "sha256:346b94255999305006afb788d45ec9438efbe076c6da75c5b6c5077ae4dc3c4a",
         "mbx-selfcar-pump-guard": "sha256:4712422a4ad991ed31aee4417f7d8e759ccb8614f8a3d2b3196e2de64c9341e6",
-        "mbx-selfcar-ease-step": "sha256:58be470c5ced4e8d452bc49a972f45a4ccdbd7bf41958edebbc3bc3724c73eb3",
+        "mbx-selfcar-ease-step": "sha256:a6942ba7085e16e3b2bb8d012f788dd5b3b2384543aca022256d42091e86032a",
         "mbx-selfcar-target-cadence": "sha256:eb8995890d514d2e35d4097e049375058250e2d50fe221390190f3059b8e755b",
         "mbx-selfcar-hardsnap": "sha256:4bcdf3488f4a397c66d9ca386b34df19422ad85c63c034eecbb9f05c5c265ae5",
         "mbx-selfcar-deadband-scatter": "sha256:b5a409f8359c5459a76472e6af3914a6d25360b1d1dd95c76fa02b57e8f00f61",

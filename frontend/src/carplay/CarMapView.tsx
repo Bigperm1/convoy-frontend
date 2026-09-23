@@ -24,6 +24,7 @@ import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, h
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "../poseSeed";
 import { noteFixAccepted } from "../heatProbe";
+import { navMapFps } from '../framePacer';
 import { Platform, StyleSheet, Image as RNImage, AppState } from 'react-native';
 import Mapbox, {
   MapView,
@@ -426,6 +427,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
 
   const [mapH, setMapH] = useState(0);
   const [mapW, setMapW] = useState(0);
+  // Android Auto drops a MapView's preferredFramesPerSecond set before the map exists (src/framePacer.ts,
+  // navMapFps) — this flips once the map has loaded so the 60 fps cap is sent again to a live map.
+  const [fpsArmed, setFpsArmed] = useState(false);
 
   // ── THE MAP RENDERS IN CARPLAY'S POINT SPACE (2026-08-15) ───────────────────
   // The reasoning is on aaMapScaleFor; this is the wiring. Lay the GL view out at
@@ -2175,8 +2179,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       // Let the GL map present at the head unit's full refresh (clamped by the panel,
       // ~60Hz max — a car display can't do 120). Only meaningful WITH the SelfCarModel
       // interpolation above; on a raw 1Hz feed it just re-renders a stale pose.
-      // ALWAYS 60 (Jeff, 2026-08-14): no eco/premium split anywhere in the render path.
-      preferredFramesPerSecond={60}
+      // ALWAYS 60 (Jeff, 2026-08-14): no eco/premium split anywhere in the render path. On Android Auto the
+      // value is re-sent once the map exists (Jeff, 2026-09-23: "stuck at 60fps for all 4 platforms").
+      preferredFramesPerSecond={navMapFps(Platform.OS, fpsArmed)}
+      onDidFinishLoadingMap={() => setFpsArmed(true)}
       scaleBarEnabled={false}
       compassEnabled={false}
       rotateEnabled={false}

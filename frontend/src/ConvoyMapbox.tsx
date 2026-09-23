@@ -34,6 +34,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
+import { createFramePacer, frameDue, navMapFps } from "./framePacer";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM, rfPredict, rfFix, rfPose, type RfState } from "./poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "./yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
@@ -1492,6 +1493,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // Last pose actually DRAWN (see the sub-pixel skip in the rAF step).
   const lastDrawnRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
   const lastFrameRef = useRef(0); // wall-clock of the last RENDERED ease frame (eco fps cap)
+  // The 60 fps pacer for this loop (src/framePacer.ts) — one per mount, so the phone and car loops each
+  // measure their own panel.
+  const pacerRef = useRef(createFramePacer());
 
   // Shortest signed angular delta a→b in degrees (−180…180].
   // 🔒 NAV-LOCK begin mbx-selfcar-angdelta — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
@@ -1869,6 +1873,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // clock are measured independently.
     noteRafFrame();
     const a = anim.current;
+    // 60 FPS ON EVERY SURFACE (Jeff, 2026-09-23: "make sure the nav is stuck at 60fps for all 4 platforms").
+    // rAF follows the panel — ~120 Hz on Android phones, ~100 on Android Auto in the heat-probe rows — and
+    // this loop assumed 60. A frame the pacer declines does NOTHING (no camera push, no re-render) and asks
+    // for the next one, exactly like the sub-pixel skip below. A 60 Hz panel is never paced (framePacer.ts).
+    if ((a || camGlidePending()) && !frameDue(pacerRef.current, Date.now())) { armNextFrame(); return; }
     if (!a) {
       // Parked: nothing to ease. But if the camera's zoom/pitch glide is still owed, keep the frame
       // loop alive and push the camera at the SAME drawn pose until it settles (2026-09-15,
@@ -2800,6 +2809,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     onHazardPress, onPlacePress, onHeading, resetNorthSignal, fitCrewSignal,
     zoomOffset = 0,
   } = props;
+  // Android drops a MapView's preferredFramesPerSecond set before the map exists (src/framePacer.ts,
+  // navMapFps) — this flips once the map has loaded so the 60 fps cap is sent again to a live map.
+  const [fpsArmed, setFpsArmed] = useState(false);
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const readyRef = useRef(false);
@@ -4195,7 +4207,8 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         // ProMotion iPhone, uncapped, for the whole drive. Same values as CarMapView
         // (premium 60 / eco 30) so plugged-in keeps the premium feel and battery keeps
         // the eco cap. (Eco is gone as of 2026-08-29 — this is now simply the cap.)
-        preferredFramesPerSecond={60}
+        // 60 on every surface (Jeff, 2026-09-23); on Android the value is re-sent once the map exists.
+        preferredFramesPerSecond={navMapFps(Platform.OS, fpsArmed)}
         scaleBarEnabled={false}
         compassEnabled={false}
         logoEnabled
@@ -4204,7 +4217,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         attributionPosition={{ bottom: 8, right: 8 }}
         pitchEnabled
         rotateEnabled
-        onDidFinishLoadingMap={() => { readyRef.current = true; onMapReady?.(); }}
+        onDidFinishLoadingMap={() => { readyRef.current = true; setFpsArmed(true); onMapReady?.(); }}
         // Double-tap belongs to PIN DROP (map.tsx detects two quick presses), so
         // Mapbox's native double-tap-zoom is off — pinch still zooms as always.
         gestureSettings={{ doubleTapToZoomInEnabled: false }}

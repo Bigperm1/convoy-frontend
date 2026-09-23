@@ -1066,6 +1066,12 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BG `c8cbbd88-78a5-403f-9661-8ffe04295b45` (2026-09-22 night — Jeff ran the publish himself; the auto-mode classifier
+  refuses Claude `eas update`), code `93e985f8`, runtime 1.29.0, KEY_PRESENT=1 iOS + Android.** Carries every commit since OTA-BF
+  (`82dc16b3..93e985f8`, 14 app commits, no native change): route-gated ahead alerts (`3d725053`), speed-limit cover + course gate
+  (`0188dc45`), written-directions footer + "Route here" (`07f053d6`), weather (`f679aa4a`), the pricing sheet (paywalls still OFF),
+  the Showroom Garage (`4bb9d9f5`) + art fix + Diamond (`ab782791`, `93e985f8`). ⏳ HANDOFF §4·0 step 2 (lock `src/speedLimitCover.ts`)
+  still to run.
 - **SHIPPED AS OTA-BF `b61b18be` (2026-09-21 ~19:00 PDT, Jeff: "Yes build them and stage 2 for 80 … Ship it"; KEY_PRESENT=1 both platforms; runtime 1.29.0, code `82dc16b3`) — VOICE HEADS-UP FOR RAILWAY CROSSINGS, PLAYGROUND AND SCHOOL ZONES; LONGER SPEED-CAMERA LEAD; SPLASH SAFETY TIMEOUT.**
   Spoken once per kind per drive, then the single speed-ding (Jeff: "Make the chime the same as the speed ding but 1 ding");
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +

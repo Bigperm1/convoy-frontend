@@ -103,6 +103,14 @@ export default function HubScreen() {
       .catch(() => {});
   }, []);
 
+  // The saved meet waiting for the editor to finish dismissing (iOS) — see onCreated below.
+  const reopenAfterEditor = useRef<HubEvent | null>(null);
+  const reopenSavedEvent = useCallback(() => {
+    const ev = reopenAfterEditor.current;
+    reopenAfterEditor.current = null;
+    if (ev) { setOpenEvent(ev); hydrateOpenEvent(ev.id); }
+  }, [hydrateOpenEvent]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try { const { data } = await api.get("/communities/mine"); setMine(data); } catch {}
@@ -368,8 +376,19 @@ export default function HubScreen() {
         editing={editingEvent}
         onClose={() => { setShowCreateSheet(false); setEditingEvent(null); }}
         // Land on the saved meet, as EventsSection did — otherwise "Save changes" drops the host
-        // back on the feed with no sign the edit took (review of the 2026-09-23 wiring).
-        onCreated={(ev) => { setShowCreateSheet(false); setEditingEvent(null); loadFeed(); setOpenEvent(ev); hydrateOpenEvent(ev.id); }}
+        // back on the feed with no sign the edit took (review of the 2026-09-23 wiring). On iOS
+        // the detail sheet presents only once this one has finished dismissing: presenting a
+        // Modal while a sibling is still sliding away can be refused, leaving JS believing an
+        // invisible sheet is open (Codex review of f6f32c99). Android has no such race.
+        onCreated={(ev) => {
+          setShowCreateSheet(false); setEditingEvent(null); loadFeed();
+          if (Platform.OS === "ios") {
+            reopenAfterEditor.current = ev;
+            // Belt and braces: should onDismiss never arrive, still land on the meet.
+            setTimeout(() => reopenSavedEvent(), 1200);
+          } else { setOpenEvent(ev); hydrateOpenEvent(ev.id); }
+        }}
+        onDismiss={() => reopenSavedEvent()}
       />
       <EventDetailModal
         event={openEvent}

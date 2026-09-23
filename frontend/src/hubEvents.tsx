@@ -281,9 +281,11 @@ function isoWithLocalOffset(d: Date): string {
     + `${off >= 0 ? "+" : "-"}${pad(off / 60)}:${pad(off % 60)}`;
 }
 
-export function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
+export function CreateEventModal({ kind, visible, editing, onClose, onCreated, onDismiss }: {
   kind: Kind; visible: boolean; editing?: HubEvent | null;
   onClose: () => void; onCreated: (e: HubEvent) => void;
+  /** iOS: the sheet has finished sliding away — the moment another Modal may present. */
+  onDismiss?: () => void;
 }) {
   const accent = useAccent();
   const skinColors = useAppSkinColors();
@@ -522,7 +524,7 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} onDismiss={onDismiss}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>

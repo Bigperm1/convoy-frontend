@@ -202,6 +202,13 @@
       "changes": [
         "src/speedLimit.ts: code 58431de9ac18 → a5f8f68796a1"
       ]
+    },
+    {
+      "at": "2026-09-22",
+      "quote": "Jeff, 2026-09-22: do 1-3 — lock the new src/speedLimitCover.ts",
+      "changes": [
+        "src/speedLimitCover.ts: code pending → d2e0860d56c6"
+      ]
     }
   ],
   "files": {
@@ -861,6 +868,10 @@
       "ignored": [],
       "watchNew": true,
       "why": "mixed file: tunable literals value-locked, inline drive logic region-locked, new constants forbidden"
+    },
+    "src/speedLimitCover.ts": {
+      "hash": "sha256:d2e0860d56c6d3d02798c2e5721e926e0baad6a51daa845c2a25c632dd49494f",
+      "why": "pure drive-engine module: code-locked (posted-limit cache cover + continue rule, 2026-09-22, Jeff: do 1-3)"
     }
   }
 }

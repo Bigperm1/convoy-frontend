@@ -49,7 +49,7 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { ClassSprite } from "../../classLayers";
 import { scanHeroImageSource } from "../../carScan";
-import { scanStillUri, subscribeScanStills } from "../../scanStill";
+import { forgetScanStill, scanStillUri, subscribeScanStills } from "../../scanStill";
 import CarHero3D from "../../CarHero3D";
 import { MOTION } from "../../motion";
 import type { Class3dKey } from "../../garageCars";
@@ -242,7 +242,15 @@ export function ScanStill({ scanId }: { scanId: string }) {
   const [failed, setFailed] = useState(false);
   if (keyed) {
     // No transition: it must never fade in from nothing — that would be the pop again.
-    return <Image source={{ uri: keyed }} style={StyleSheet.absoluteFill} contentFit="contain" transition={0} />;
+    return (
+      <Image
+        source={{ uri: keyed }}
+        style={StyleSheet.absoluteFill}
+        contentFit="contain"
+        transition={0}
+        onError={() => forgetScanStill(scanId)}
+      />
+    );
   }
   const src = failed ? null : scanHeroImageSource(scanId);
   if (!src) return <StockFramed />;

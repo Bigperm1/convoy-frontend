@@ -302,8 +302,11 @@ function class3dPatch(c: Class3dChoice): { carMake: string; carModel: string; ca
  *  Then settings' identity is NOT the member's car and must not reach the profile (CustomizeSheet's save). */
 export function settingsCarryClass3d(s: Settings): boolean {
   const key = resolveGRCKey(s.carColor);
+  // RECOGNITION reads every bake row, SCAN_BAKES included, though only class3dPalette's may be picked: an install that
+  // drove the Heavy Metal hatch before SCAN_BAKES must still be recognised, or leaving it would drop the member's own
+  // identity instead of putting it back (Codex review of 83da6282).
   return CLASS_3D_KEYS.some((cls) => s.carMake === CLASS_3D_CARS[cls].make && s.carModel === CLASS_3D_CARS[cls].model
-    && class3dPalette(cls).some((e) => e.modelKey === key));
+    && (CLASS_MODEL_3D[cls]?.palette ?? []).some((e) => !!e.modelKey && e.modelKey === key));
 }
 
 /** The member's own identity to keep aside while the class car's is in settings (garageStore ownIdentity): the one

@@ -1,6 +1,7 @@
 // Scratch harness (NOT a repo gate): runs the REAL src/garageCars.ts, src/garageStore.ts, src/carScan.ts,
 // src/components/showroom/tier.ts and src/components/showroom/labels.ts with the native/network edges
 // stubbed (loader.mjs).
+import { readFileSync } from "node:fs";
 import { register } from "node:module";
 register("./garage/loader.mjs", import.meta.url);
 
@@ -728,6 +729,24 @@ console.log("P · the 3D class car");
   const how39 = await cs.reconcileScanState();
   ok("P39 a scan restored at launch over the class car writes NO car to the profile (another account's kept identity must not land there)",
     how39 === "restored" && carPuts().length === 0, `how=${how39} puts=${JSON.stringify(carPuts())}`);
+  // P40 an install that drove the Heavy Metal hatch before SCAN_BAKES (8bcecd77, sim only) is still recognised as carrying
+  // the class car, so leaving it gives the member's own identity back instead of dropping it (Codex review of 83da6282)
+  await resetAll({ selfMarkerType: "car", carYear: OWN.year, carMake: "Toyota", carModel: "GR Corolla", carColor: "Heavy Metal" },
+    { class3dPick: { cls: "hatchback", modelKey: "heavy_metal" }, ownIdentity: OWN });
+  const legacyCarried = gc.settingsCarryClass3d(S());
+  await gc.driveToday({ id: "arrow", kind: "arrow" });
+  ok("P40 a legacy Heavy Metal class car is recognised, and leaving it puts the member's own car back",
+    legacyCarried && eq(gc.identityOfSettings(S()), OWN) && G().ownIdentity === undefined && carPuts().length === 0,
+    `carried=${legacyCarried} own=${JSON.stringify(G().ownIdentity)} puts=${JSON.stringify(carPuts())}`);
+  // P41 the Garage mount's one-time identity sync and the Customize save both skip the car fields while settings hold the
+  // class car (read from the source: app/(app)/garage.tsx and CustomizeSheet.tsx are React screens this harness cannot mount)
+  {
+    const gsrc = readFileSync(new URL("../../app/(app)/garage.tsx", import.meta.url), "utf8");
+    const csrc = readFileSync(new URL("../../src/components/showroom/CustomizeSheet.tsx", import.meta.url), "utf8");
+    ok("P41 Garage mount sync and Customize save never send the class car's identity to the profile",
+      /if \(\(s\.carMake \|\| s\.carModel \|\| s\.carColor\) && !settingsCarryClass3d\(s\)\) \{\s*api\.put\('\/auth\/profile'/.test(gsrc)
+      && /: settingsCarryClass3d\(s\)\s*\? undefined/.test(csrc) && /\.\.\.\(ident \? \{/.test(csrc));
+  }
 }
 
 console.log(fails ? `\nFAIL garage_logic (${fails})` : "\nPASS garage_logic");

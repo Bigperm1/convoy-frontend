@@ -49,7 +49,7 @@ import { getGarage, useGarage } from '../../src/garageStore';
 import {
   activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, class3dOnMap, driveToday, garageViewTier,
   ownedCars, parkStrayScan, pinClass3dIfOnMap, refreshScanList, retryProfileClear, scanCarId, scanCars,
-  type GarageCar,
+  settingsCarryClass3d, type GarageCar,
 } from '../../src/garageCars';
 import Stage, { type StageLabels, type StageSlot } from '../../src/components/showroom/Stage';
 import { AddSlotArt, CarSlotArt, LockedBadge, LockedSlotArt, carGlbUrl } from '../../src/components/showroom/SlotArt';
@@ -137,8 +137,10 @@ export default function GarageScreen() {
     if (!s.carYear && user?.car_year != null) patch.carYear = String(user.car_year);
     if (Object.keys(patch).length) updateSettings(patch);
     // One-time sync of any EXISTING local car identity up to the backend, so users who picked their
-    // car before backend-sync existed get their paint onto the map without re-selecting anything.
-    if (s.carMake || s.carModel || s.carColor) {
+    // car before backend-sync existed get their paint onto the map without re-selecting anything —
+    // never while settings hold the 3D class car's: the profile is the member's real car (garageCars
+    // driveToday; Codex review of 83da6282).
+    if ((s.carMake || s.carModel || s.carColor) && !settingsCarryClass3d(s)) {
       api.put('/auth/profile', {
         car_make: s.carMake || undefined,
         car_model: s.carModel || undefined,

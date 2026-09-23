@@ -172,8 +172,8 @@ ok("E3 picked AFTER submitting → lands parked; the arrow stays on every surfac
   && eq(surfaces(s), { marker: "arrow", mapScan: null, peerScanId: undefined }) && gs.getGarage().completeScanIds.includes("n"));
 await resetAll({ selfMarkerType: "car", carScanId: "n", carScanStatus: "submitted", carScanSubmittedAt: "2026-09-22T10:00:00Z" });
 how = await cs.deliverSubmittedScan("n", { heroUrl: `${MODELS}/scan_n.glb`, mapUrl: `${MODELS}/scan_n_map.glb` });
-ok("E4 never picked in the new Garage (today's flow) → active, no avatar/skin writes (marker already car)",
-  how === "active" && skinStub.skins.length === 0 && putsTo("avatar_type").length === 0);
+ok("E4 never picked in the new Garage (today's flow) → active; marker already car so no avatar_type PUT, but Diamond goes on (Codex 2026-09-22: from the stock 3D car the metal was left gold)",
+  how === "active" && eq(skinStub.skins, ["diamond"]) && putsTo("avatar_type").length === 0);
 
 console.log("F · reconcileScanState guards");
 publish("old"); publish("new");

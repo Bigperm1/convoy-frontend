@@ -63,6 +63,23 @@ sb.__sync(TOPIC_B, { me: [{ lat: 1, lng: 1 }] });
 settings.__reset({ activeCommunityId: "B" });
 ok("O6 switched to club B: A's online member does not count", hub.onlineCrewCount(hub.crewPresenceTopic()) === 0);
 
+// Codex review of 970fbf32: supabase keeps the last presence state through CHANNEL_ERROR / TIMED_OUT, so a member who
+// leaves during the outage stayed green. Offline → nobody; back → only after the next sync says who is there.
+settings.__reset({ activeCommunityId: "A" });
+sb.__sync(TOPIC_A, { me: [{ lat: 1, lng: 1 }], olaf: [{ lat: 1, lng: 1 }] });
+ok("O8 pre: olaf online on A", hub.onlineCrewCount(TOPIC_A) === 1);
+const beforeErr = told;
+sb.__status(TOPIC_A, "CHANNEL_ERROR");
+ok("O8 channel error → 0 at once, and subscribers were told", hub.onlineCrewCount(TOPIC_A) === 0 && told > beforeErr);
+sb.__status(TOPIC_A, "TIMED_OUT");
+ok("O8b still down → 0", hub.onlineCrewCount(TOPIC_A) === 0);
+sb.__status(TOPIC_A, "SUBSCRIBED");
+ok("O9 rejoined but not synced → still 0 (the old list is not trusted)", hub.onlineCrewCount(TOPIC_A) === 0);
+sb.__sync(TOPIC_A, { me: [{ lat: 1, lng: 1 }] });
+ok("O9b first sync: olaf left during the outage → 0", hub.onlineCrewCount(TOPIC_A) === 0);
+sb.__sync(TOPIC_A, { me: [{ lat: 1, lng: 1 }], olaf: [{ lat: 1, lng: 1 }] });
+ok("O9c olaf back → 1", hub.onlineCrewCount(TOPIC_A) === 1);
+
 const beforeLeave = told;
 a.leave();
 ok("O7 leaving a topic tells subscribers (the pill re-reads)", told > beforeLeave);

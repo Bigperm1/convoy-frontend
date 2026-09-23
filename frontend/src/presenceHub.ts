@@ -20,6 +20,10 @@ type Entry = {
   channel: any | null;
   status: string;
   peers: RawPeer[];
+  /** `peers` came from a presence sync on the channel as it is NOW connected. False from any non-SUBSCRIBED status until
+   *  the next sync: supabase keeps the last state through CHANNEL_ERROR / TIMED_OUT, and a member who left during the
+   *  outage would otherwise stay "online" (Codex review of 970fbf32). */
+  live: boolean;
   subs: Set<(peers: RawPeer[]) => void>;
   providers: Provider[];
   // Single-throttle bookkeeping (see TRACK_MIN_MS below).
@@ -89,7 +93,7 @@ export function crewPresenceTopic(): string | null {
 export function onlineCrewCount(topic: string | null): number {
   if (!topic) return 0;
   const e = entries.get(topic);
-  if (!e) return 0;
+  if (!e || !e.live) return 0;
   const ids = new Set<string>();
   for (const p of e.peers) if (p && typeof p.lat === "number" && typeof p.lng === "number") ids.add(p.user_id);
   return ids.size;
@@ -176,11 +180,14 @@ function ensureChannel(e: Entry): void {
             peers.push({ ...p, user_id: uid });
           });
           e.peers = peers;
+          if (e.channel === channel) e.live = true;
           fanout(e);
         } catch {}
       })
       .subscribe((s: string) => {
         e.status = s;
+        // Disconnected (or rejoining, not yet synced): nobody counts as online until the next sync says who is there.
+        if (s !== "SUBSCRIBED" && e.channel === channel && e.live) { e.live = false; notifyCrew(); }
         if (s === "SUBSCRIBED") doTrack(e, true);   // fresh channel holds no retained payload — never throttle this one
         else if (s === "CLOSED" && e.channel === channel && e.subs.size > 0) {
           // Defensive rebuild: a hard CLOSE while consumers still need presence
@@ -221,7 +228,7 @@ export function joinPresence(opts: {
   }
   let e = entries.get(topic);
   if (!e) {
-    e = { topic, selfId, channel: null, status: "idle", peers: [], subs: new Set(), providers: [], lastTrackAt: 0, lastIdKey: "" };
+    e = { topic, selfId, channel: null, status: "idle", peers: [], live: false, subs: new Set(), providers: [], lastTrackAt: 0, lastIdKey: "" };
     entries.set(topic, e);
   }
   const provider: Provider = { priority, get: getPayload };

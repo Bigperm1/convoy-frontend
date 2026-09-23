@@ -34,7 +34,7 @@ import { ensureLocationPermission as askLocationPermission, askPermission } from
 import { useSettings, getSettings, updateSettings as updateGlobalSettings, getMapMode, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { updateCrewWidget, refreshCrewMapSnapshot, type CrewPeer } from "../../src/crewWidgetFeed";
-import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
+import { useConvoyPresence, useOnlineCrewCount, ConvoyPresencePeer } from "../../src/convoyPresence";
 import { BearingTracker } from "../../src/bearing";
 import PeerModal from "../../src/PeerModal";
 import LiveRosterSheet from "../../src/LiveRosterSheet";
@@ -4664,6 +4664,8 @@ export default function MapScreen() {
     } : null,
     presencePos
   );
+  // Other members online right now — the crew pill's colour (presenceHub.onlineCrewCount, the same rule as the car pill).
+  const crewOnlineCount = useOnlineCrewCount();
   const [selectedPeer, setSelectedPeer] = useState<ConvoyPresencePeer | null>(null);
   // Who's-on roster sheet, opened from the "N live" pill under the search bar
   // (tester request: see who's on → talk to them or drive to them).
@@ -5295,9 +5297,9 @@ export default function MapScreen() {
               // OTHER crew members only — never count the viewer. peerList already
               // excludes self (presence keys us out; WS/REST filter our own id).
               const liveCount = peerList.length;
-              // GREEN while another member is online right now (Jeff, 2026-09-23) — presence, the same rule as the car
-              // pill (presenceHub.onlineCrewCount): presence.peers is already self-excluded and position-filtered.
-              const crewOnline = presence.peers.length > 0;
+              // GREEN while another member is online right now (Jeff, 2026-09-23) — presenceHub.onlineCrewCount, the same
+              // rule as the car pill: self excluded, one per member, and nobody while the presence channel is down.
+              const crewOnline = crewOnlineCount > 0;
               // Actual native build number (v66, v67, …) — reads the installed
               // binary's build, so it tracks whatever build the user is on without
               // a code change. Falls back to the app.json value if unavailable.

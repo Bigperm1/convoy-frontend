@@ -31,10 +31,13 @@ const intentLabel = (intent: string | null, query?: string) => {
   if (intent === "report_road") return "Reporting Hazard";
   if (intent === "report_traffic") return "Reporting Traffic";
   if (intent === "open_map") return "Opening Map";
-  if (intent === "open_talk") return "Opening Talk";
-  if (intent === "open_drive") return "Opening Drive";
+  // The banner names the screen the user sees — Comms and Club — while the
+  // intent names stay open_talk / open_hub (Jeff, 2026-09-23: menu reorganization).
+  if (intent === "open_talk") return "Opening Comms";
+  // No "Opening Drive": open_drive is not in ROUTE_MAP, so nothing opens, and the Drive screen
+  // itself was deleted in the same reorganization — the banner shows the transcript alone.
   if (intent === "open_music") return "Opening Music";
-  if (intent === "open_hub") return "Opening Hub";
+  if (intent === "open_hub") return "Opening Club";
   return null;
 };
 

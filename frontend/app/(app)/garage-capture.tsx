@@ -30,7 +30,7 @@ import { router } from "expo-router";
 
 import { COLORS } from "../../src/theme";
 import { CandyCta } from "../../src/components/CandyCta";
-import { TierTitle } from "../../src/PremiumBadge";
+import { TierTitle, openPaywall } from "../../src/PremiumBadge";
 import { skin } from "../../src/tierTheme";
 import { useAuth } from "../../src/auth";
 import { getSettings, updateSettings } from "../../src/settings";
@@ -226,14 +226,18 @@ export default function GarageCaptureScreen() {
       setPhase("capture");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       if (gate.reason === "tier") {
-        // Same destination as a locked 3D tile in the Garage (garage.tsx
-        // handleAppearance): the Ultra pitch, not the plain paywall sheet.
+        // "Add Ultra" names the action (Jeff, 2026-09-23: menu reorganization), so it has to
+        // DO it: the paywall for car_scan, which PaywallSheet sells as the Ultra plan — the
+        // same sheet the Garage's locked Ultra spot opens (garage.tsx openNextPaywall). It
+        // used to push /(app)/garage-scan, which is the scan guide now, with no way to buy:
+        // its one button leads back here into this same tier gate. The body says "Ultra",
+        // not "Ultra Premium" — that is Gold's label (tierTheme.ts), and Scan is Ultra's.
         Alert.alert(
           "Included with Ultra",
-          "Garage Scan — your real car on the map — comes with Ultra Premium. Upgrade, then come back and scan.",
+          "Garage Scan — your real car on the map — comes with Ultra. Upgrade, then come back and scan.",
           [
             { text: "Not now", style: "cancel" },
-            { text: "See Ultra", onPress: () => router.push("/(app)/garage-scan" as any) },
+            { text: "Add Ultra", onPress: () => openPaywall("car_scan") },
           ],
         );
       } else if (gate.reason === "cap") {

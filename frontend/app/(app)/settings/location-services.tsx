@@ -74,7 +74,7 @@ export default function LocationServicesPage() {
         Hairpin needs location to show your car on the convoy map, navigate turn-by-turn, and keep the CarPlay map live while you drive. iOS controls the actual permission — use “Open in iOS Settings” to switch between While Using and Always, or to turn on Precise Location.
       </HelpText>
       <HelpText>
-        Set “Always” so the CarPlay map keeps tracking when your phone is locked in your pocket. Choose who can see you on the map under Visibility &amp; Comms → Avatar Live.
+        Set “Always” so the CarPlay map keeps tracking when your phone is locked in your pocket. Choose whether your crew sees your car — Visible or Ghost — under Visibility &amp; Comms.
       </HelpText>
     </SettingsPage>
   );

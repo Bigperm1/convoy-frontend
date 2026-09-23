@@ -1,7 +1,7 @@
 // Bottom Map tab button with press-and-hold "Avatar" shortcut.
 //
 //   TAP  → open the Map screen (normal tab navigation).
-//   HOLD → open the on-map Avatar visibility panel (Full / Partial / Ghost),
+//   HOLD → open the on-map Avatar visibility panel (Visible / Ghost),
 //          signalled to map.tsx via avatarHoldBus.
 //
 // Mirrors CommsTabButton's structure exactly, reusing the SAME green-smoke

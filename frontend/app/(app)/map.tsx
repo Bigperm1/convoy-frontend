@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { releaseBuildNumber } from "../../src/buildNumber";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, Switch, PanResponder, TextInput, AppState, Pressable } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Image, Animated, Modal, Linking, PanResponder, TextInput, AppState, Pressable } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -29,7 +29,7 @@ import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ensureLocationPermission as askLocationPermission, askPermission } from "../../src/permissionGate";
-import { useSettings, getSettings, updateSettings, updateSettings as updateGlobalSettings, getMapMode, getMapModeChoice, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
+import { useSettings, getSettings, updateSettings as updateGlobalSettings, getMapMode, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { updateCrewWidget, refreshCrewMapSnapshot, type CrewPeer } from "../../src/crewWidgetFeed";
 import { useConvoyPresence, ConvoyPresencePeer } from "../../src/convoyPresence";
@@ -682,13 +682,12 @@ export default function MapScreen() {
   // friend" carousel can show offline members greyed out.
   const [navSearchOpen, setNavSearchOpen] = useState(false);
   const [navRoster, setNavRoster] = useState<{ id: string; handle: string; car_color?: string; is_admin?: boolean; car_scan_id?: string }[]>([]);
-  // Layers control state — driven by the new bottom-right Layers FAB.
-  // mapType:    "hybrid" = satellite + labels (default), "roadmap" = flat road view.
-  // showTraffic / showTransit / showHazards toggle their respective overlays.
-  // layersOpen drives the layers bottom sheet modal.
-  const [showTraffic, setShowTraffic] = useState(true);
-  const [showHazards, setShowHazards] = useState(true);
-  const [layersOpen, setLayersOpen] = useState(false);
+  // Hazard pins/alerts gate. Its only switch lived in the on-map Layers + Settings
+  // sheet, which nothing opened (its Layers FAB had already been removed) — the sheet,
+  // its layersOpen flag and the showTraffic toggle it alone read were deleted
+  // (Jeff, 2026-09-23: menu reorganization). Held at its old default so hazards
+  // behave exactly as they did.
+  const [showHazards] = useState(true);
   // Custom saved-place naming modal (cross-platform; Alert.prompt is iOS-only).
   const [savePlaceModal, setSavePlaceModal] = useState<{ lat: number; lng: number } | null>(null);
   const [savePlaceName, setSavePlaceName] = useState("");
@@ -924,12 +923,10 @@ export default function MapScreen() {
   // the PREDICTIVE row in the search screen (NavSearchScreen), not an on-map banner.
   const [savedPlaces] = useSavedPlaces();
   // Base-map mode is the single source of truth (settings.mapMode), controllable
-  // from the Settings screen AND the on-map Layers sheet. The Mapbox engine uses
-  // mapMode directly (the Google/web engines that consumed the derived
-  // mapType/mapDark were retired along with ConvoyMap.tsx).
+  // from the Settings screen. The Mapbox engine uses mapMode directly (the
+  // Google/web engines that consumed the derived mapType/mapDark were retired
+  // along with ConvoyMap.tsx).
   const mapMode = getMapMode(settings);
-  // The RAW chosen mode (may be "auto") — for the Layers sheet's radio selection.
-  const mapModeChoice = getMapModeChoice(settings);
   // Live map bearing (deg) reported by the engine — drives the Compass FAB's
   // needle rotation. northSignal is a monotonic counter the Compass FAB bumps to
   // ask the engine to animate back to north-up (heading 0).
@@ -5081,7 +5078,7 @@ export default function MapScreen() {
         onHeading={setMapHeading}
         resetNorthSignal={northSignal}
         fitCrewSignal={crewSignal}
-        // Layer controls — driven by the bottom-right Layers FAB.
+        // Base-map mode — settings.mapMode, chosen in Settings (settings/map-mode.tsx).
         mapMode={mapMode}
         // 3D BUILDINGS ARE NOT A POWER SETTING (Jeff, 2026-08-14): "i want 3d buildings no
         // matter what in 3d view". The `powerMode === "premium"` half silently removed them
@@ -5273,7 +5270,6 @@ export default function MapScreen() {
                 // 🔒 NAV-LOCK begin map-search-clear-trip-reset — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
                 onClear={() => { visitedStopsRef.current = new Set(); snappedStopsRef.current = new Map(); stopNearRef.current = new Map(); dismissedStopPillRef.current = null; setDestination(null); setRoute(null); setShowSteps(false); setSearchVisible(true); }}
                 // 🔒 NAV-LOCK end map-search-clear-trip-reset
-                onProfilePress={() => router.push("/(app)/hub" as any)}
                 onPressField={() => setNavSearchOpen(true)}
                 // Departure IQ now lives IN the bar: an "AI" pre-fill + green "Let's go".
                 aiSuggest={departSuggest ? { label: `${departSuggest.reason.charAt(0).toUpperCase()}${departSuggest.reason.slice(1)}?`, eta: departSuggest.etaText } : null}
@@ -5344,6 +5340,9 @@ export default function MapScreen() {
                   hitSlop={8}
                 >
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
+                  {/* "Crew" matches the car pill (Jeff, 2026-08-15: "just say crew with the amount of crew
+                      live"). The build/runtime/OTA tail stays on purpose: tester tools stay until the
+                      club launch (Jeff, 2026-09-23). */}
                   <Text style={styles.liveOverlayText}>{liveCount} Crew · v{buildNo}{rtv ? ` · ${rtv}` : ''}{otaTag ? ` · ${otaTag}` : ''}</Text>
                 </TouchableOpacity>
               );
@@ -5978,17 +5977,13 @@ export default function MapScreen() {
         }
       />
 
-      {/* ===== Bottom-right floating cluster — Layers + Directions =====
-          Layers FAB (top) opens a bottom sheet with map type & overlay
-          toggles. Directions FAB (bottom) opens the search bar (mirrors
-          Google Maps' teal turn-arrow FAB). Both are anchored above the
-          tab bar with explicit bottom-right margins so they never collide
-          with the speedometer HUD on the left. */}
-      {/* Layers / map-settings button - native Google position: top-right,
-          just under the search bar. Opens the layers + settings sheet. Hidden
-          during turn-by-turn so it never crowds the maneuver banner. */}
-      {/* Top-right Layers FAB removed — map layers now live in the Convoy menu
-          (tap the logo in the search bar → "Map Layers"). */}
+      {/* ===== Bottom-right floating cluster =====
+          Anchored above the tab bar with explicit bottom-right margins so it
+          never collides with the speedometer HUD on the left. The old Layers
+          FAB and the Layers + Settings sheet it opened are both gone (the sheet
+          outlived its button, unreachable, until Jeff, 2026-09-23: menu
+          reorganization) — map layers/mode live in Settings
+          (settings/map-layers.tsx, settings/map-mode.tsx). */}
 
       <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
         {/* ORDER: Crew on TOP, compass BELOW — this stack is deliberately ordered to
@@ -6090,191 +6085,6 @@ export default function MapScreen() {
             bar stays pinned at the top until a route is selected (then the
             guidance banner overlaps it), so a re-summon FAB isn't needed. */}
       </View>
-
-      {/* ===== Layers bottom sheet =====
-          Half-screen modal with toggle rows for Satellite, Traffic, Transit,
-          Hazards, and a Waze deep-link action. Backdrop tap to dismiss. */}
-      {/* ===== Layers + Settings bottom sheet =====
-          Full settings panel grouped into sections: MAP LAYERS, PRIVACY,
-          MAP VIEW (radio), ROUTE OPTIONS, ALERTS. Replaces the old minimal
-          layers sheet. Scrollable so all sections are reachable on small
-          phones, capped at 70% of screen height. Waze + external feeds
-          rows removed per spec — those toggles live in the full Settings
-          screen for power users. */}
-      <Modal
-        visible={layersOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setLayersOpen(false)}
-      >
-        <TouchableOpacity
-          activeOpacity={1}
-          style={styles.sheetBackdrop}
-          onPress={() => setLayersOpen(false)}
-        >
-          <TouchableOpacity activeOpacity={1} style={[styles.sheetCard, { maxHeight: '70%' }]} onPress={() => {}}>
-            <View style={styles.sheetGrip} />
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* ----- MAP MODE (radio-style; writes settings.mapMode) ----- */}
-              <Text style={styles.layerSectionHeader}>MAP MODE</Text>
-              {([
-                { key: "auto", label: "Auto", sub: "Follows the time of day" },
-                { key: "satellite", label: "Satellite", sub: "Aerial imagery" },
-                { key: "dawn", label: "Dawn", sub: "Soft morning light" },
-                { key: "day", label: "Day", sub: "Bright daytime" },
-                { key: "dusk", label: "Dusk", sub: "Warm evening light" },
-                { key: "night", label: "Night", sub: "Dark 3D night map" },
-              ] as const).map((m) => (
-                <TouchableOpacity key={m.key} style={styles.layerRow} activeOpacity={0.7}
-                  onPress={() => { void updateGlobalSettings({ mapMode: m.key }); }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.layerRowLabel}>{m.label}</Text>
-                    <Text style={styles.layerRowSub}>{m.sub}</Text>
-                  </View>
-                  <Ionicons name={mapModeChoice === m.key ? "radio-button-on" : "radio-button-off"} size={22}
-                    color={mapModeChoice === m.key ? accent : "#808080"} />
-                </TouchableOpacity>
-              ))}
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Traffic overlay</Text>
-                  <Text style={styles.layerRowSub}>Live congestion colors</Text>
-                </View>
-                <Switch value={showTraffic} onValueChange={setShowTraffic}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              {/* Weather layer */}
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Weather</Text>
-                  <Text style={styles.layerRowSub}>Temperature, wind & precipitation</Text>
-                </View>
-                <Switch
-                  value={showWeatherLayer}
-                  onValueChange={(v) => { void updateSettings({ showWeatherLayer: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Hazards</Text>
-                  <Text style={styles.layerRowSub}>Show community + Waze pins</Text>
-                </View>
-                <Switch value={showHazards} onValueChange={setShowHazards}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              {/* Official BC road events (DriveBC Open511). BC-only; auto-gated by location. */}
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Road incidents</Text>
-                  <Text style={styles.layerRowSub}>Official BC accidents, construction & closures (DriveBC)</Text>
-                </View>
-                <Switch value={settings.roadIncidents !== false}
-                  onValueChange={(v) => { void updateGlobalSettings({ roadIncidents: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-
-              {/* 3D Buildings (Mapbox Standard modes only). Toggle off to
-                  guarantee the self-car is never hidden behind a building. */}
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>3D Buildings</Text>
-                  <Text style={styles.layerRowSub}>Show buildings in 3D (may cover your car)</Text>
-                </View>
-                <Switch value={settings.show3dBuildings !== false}
-                  onValueChange={(v) => { void updateGlobalSettings({ show3dBuildings: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-
-              {/* ----- PRIVACY ----- */}
-              <Text style={styles.layerSectionHeader}>PRIVACY</Text>
-              {/* Avatar visibility now lives in the 3-way Avatar control (Settings
-                  + the Map-tab hold panel), the single source of truth via
-                  avatarMode. The old binary "Avatar Live" switch was removed here
-                  so it can't desync from avatarMode. */}
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Comms Live</Text>
-                  <Text style={styles.layerRowSub}>Mute push-to-talk audio</Text>
-                </View>
-                <Switch value={settings.commsLive !== false} onValueChange={(v) => { void updateGlobalSettings({ commsLive: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-
-              {/* ----- MAP VIEW (radio, not toggle) ----- */}
-              <Text style={styles.layerSectionHeader}>MAP VIEW</Text>
-              {(['heading_up', 'north_up'] as const).map((mode) => (
-                <TouchableOpacity
-                  key={mode}
-                  style={styles.layerRow}
-                  activeOpacity={0.7}
-                  onPress={() => updateGlobalSettings({ mapView: mode })}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.layerRowLabel}>
-                      {mode === 'heading_up' ? '🧭 Heading Up (Chase Cam)' : '⬆️ North Up (Classic)'}
-                    </Text>
-                    <Text style={styles.layerRowSub}>
-                      {mode === 'heading_up' ? '45° behind your car, rotates with you' : 'Top-down, fixed north orientation'}
-                    </Text>
-                  </View>
-                  {settings.mapView === mode && (
-                    <Ionicons name="checkmark" size={18} color={accent} />
-                  )}
-                </TouchableOpacity>
-              ))}
-
-              {/* ----- ROUTE OPTIONS ----- */}
-              <Text style={styles.layerSectionHeader}>ROUTE OPTIONS</Text>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Avoid Tolls</Text>
-                  <Text style={styles.layerRowSub}>Route around toll roads</Text>
-                </View>
-                <Switch value={!!settings.avoidTolls} onValueChange={(v) => { void updateGlobalSettings({ avoidTolls: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Avoid Highways</Text>
-                  <Text style={styles.layerRowSub}>Prefer surface streets</Text>
-                </View>
-                <Switch value={!!settings.avoidHighways} onValueChange={(v) => { void updateGlobalSettings({ avoidHighways: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Avoid Ferries</Text>
-                  <Text style={styles.layerRowSub}>Skip water crossings</Text>
-                </View>
-                <Switch value={!!settings.avoidFerries} onValueChange={(v) => { void updateGlobalSettings({ avoidFerries: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-
-              {/* ----- ALERTS ----- */}
-              <Text style={styles.layerSectionHeader}>ALERTS</Text>
-              <View style={styles.layerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Alert Sound</Text>
-                  <Text style={styles.layerRowSub}>Chime on new hazard nearby</Text>
-                </View>
-                <Switch value={!!settings.alertSound} onValueChange={(v) => { void updateGlobalSettings({ alertSound: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-              <View style={[styles.layerRow, { borderBottomWidth: 0 }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.layerRowLabel}>Highlight Hairpin Reports</Text>
-                  <Text style={styles.layerRowSub}>Gold border on community pins</Text>
-                </View>
-                <Switch value={!!settings.highlightConvoy} onValueChange={(v) => { void updateGlobalSettings({ highlightConvoy: v }); }}
-                  trackColor={{ false: '#3A3A3C', true: accent }} thumbColor="#FFFFFF" ios_backgroundColor="#3A3A3C" />
-              </View>
-            </ScrollView>
-            <TouchableOpacity onPress={() => setLayersOpen(false)} style={styles.sheetClose}>
-              <Text style={styles.sheetCloseText}>Done</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
 
       {/* ===== Report confirmation toast =====
           Brief glassy pill at the bottom-center that confirms a Police or
@@ -6729,23 +6539,6 @@ const styles = StyleSheet.create({
     gap: 10,                     // a touch more breathing room between buttons
     alignItems: "center",
   },
-  // ===== Layers / Settings sheet =====
-  // New grouped section headers + row styles. The legacy `layerRow` (icon +
-  // toggle + chevron) below is left intact for any other consumers, but the
-  // sheet itself now uses these layerRowLabel/Sub styles which take up the
-  // text column when an inline `Switch` is the trailing element.
-  layerSectionHeader: {
-    color: '#808080',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginTop: 18,
-    marginBottom: 6,
-    paddingHorizontal: 18,
-  },
-  layerRowLabel: { color: '#F4F4F4', fontSize: 15, fontWeight: '500' },
-  layerRowSub: { color: '#808080', fontSize: 12, marginTop: 2 },
   // Tiny live-status pill that overlays the top edge of the search bar
   // (replaces the old dark header). Green dot + "X live · Y alerts" in a
   // glassy rounded chip — subtle, glanceable, never blocks the map.
@@ -6778,28 +6571,6 @@ const styles = StyleSheet.create({
   stopDotText: { color: "#2DEC86", fontSize: 11, fontWeight: "800" },
   stopLabel: { color: "#FFFFFF", fontSize: 14, fontWeight: "600", letterSpacing: -0.2 },
   stopHint: { color: COLORS.textDim, fontSize: 10.5, fontWeight: "600", marginTop: 1 },
-  // ===== Layers bottom sheet =====
-  sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
-  sheetCard: {
-    backgroundColor: "#15171A",
-    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28,
-    borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
-  },
-  sheetGrip: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.25)", alignSelf: "center", marginBottom: 14 },
-  layerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.07)',
-  },
-  layerIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  layerLabel: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
-  layerSub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
-  sheetClose: { marginTop: 14, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.10)" },
-  sheetCloseText: { color: COLORS.text, fontWeight: "600", fontSize: 14 },
   // Custom saved-place naming modal
   nameModalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24 },
   nameModalCard: { width: "100%", maxWidth: 420, backgroundColor: "#15171A", borderRadius: 20, padding: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)" },

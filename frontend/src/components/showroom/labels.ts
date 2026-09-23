@@ -46,7 +46,11 @@ export function carName(car: GarageCar, s: Settings, g: GarageState): string {
     case "arrow": return "Arrow";
     case "arrow3d": return "3D Arrow";
     case "class": return classLabel(getVehicleClass(s));
-    case "class3d": return "GR Corolla";
+    // Gold's 3D class car is headlined by the member's class, from the same classLabel the Silver slot
+    // uses — "Supercar · 3D" (Jeff, 2026-09-23: menu reorganization). Only the headline changed: the
+    // model on the stage and the map is still the stock GR Corolla for every class
+    // (getVehicleMapModelUrl resolves GRC keys only), and carSub ("3D class car · …") does not say so.
+    case "class3d": return `${classLabel(getVehicleClass(s))} · 3D`;
     case "scan": {
       if (car.building) return "Building your car";
       const id = identityFor(car.id, s, g);

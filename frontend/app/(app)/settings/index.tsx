@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback } from "react";
 import { Text, StyleSheet, TouchableOpacity, Linking, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { GlassFill } from "../../../src/Glass";
@@ -33,7 +33,10 @@ export default function SettingsMenu() {
 
   const mapModeVal = MAP_MODE_LABEL[getMapModeChoice(settings)] ?? "Auto";
   const mapViewVal = settings.mapView === "north_up" ? "North Up" : "Heading Up";
-  const scoutVal = settings.novaVoice !== false ? "On" : "Off";
+  // Names what it measures: the row is "Scout & Alerts" now (Jeff, 2026-09-23: menu reorganization),
+  // and a bare "Off" would claim the alerts are off too — but novaVoice only gates what Scout SAYS;
+  // speed dings and the road heads-up dings still play (speedDing.ts has no novaVoice gate).
+  const scoutVal = settings.novaVoice !== false ? "Voice on" : "Voice off";
   const routeColor = getRouteColor(settings);
 
   // Jeff 8/20: donations live at the BOTTOM of Settings. External link during
@@ -82,34 +85,28 @@ export default function SettingsMenu() {
 
   return (
     <SettingsPage title="Settings">
-      {/* PROFILE */}
-      <SectionLabel>PROFILE</SectionLabel>
-      <SettingsCard>
-        <MenuRow
-          icon="car-sport" iconColor="#00C46A" title="Garage"
-          subtitle="Year, make, model, color & car icon"
-          onPress={() => go("/(app)/garage")} testID="settings-garage"
-        />
-      </SettingsCard>
+      {/* Grouped by what the driver is doing, not by where the code lives (Jeff, 2026-09-23:
+          menu reorganization). The PROFILE › Garage row that used to head this page is gone —
+          the Garage lives in the H menu now, and two doors to one room read as two rooms. */}
 
-
-      {/* NAVIGATION */}
-      <SectionLabel>NAVIGATION</SectionLabel>
+      {/* MAP — how the map looks and what it shows */}
+      <SectionLabel>MAP</SectionLabel>
       <SettingsCard>
-        <MenuRow icon="color-palette" iconColor="#E0A93E" title="App Skin" subtitle="The metal the whole app wears" onPress={() => go("/(app)/settings/app-skin")} />
-        <Divider />
         <MenuRow icon="map" iconColor="#0A84FF" title="Map Mode" value={mapModeVal} onPress={() => go("/(app)/settings/map-mode")} />
         <Divider />
-        <MenuRow icon="navigate" iconColor="#0A84FF" title="Map View" value={mapViewVal} onPress={() => go("/(app)/settings/map-view")} />
+        {/* Was "Map View" — the page picks Heading Up vs North Up, which is an orientation. */}
+        <MenuRow icon="compass" iconColor="#0A84FF" title="Map Orientation" value={mapViewVal} onPress={() => go("/(app)/settings/map-view")} />
         <Divider />
-        <MenuRow icon="color-palette" iconColor="#BF5AF2" title="Route Color" swatch={routeColor} onPress={() => go("/(app)/settings/route-color")} />
+        <MenuRow icon="layers" iconColor="#5AC8FA" title="Map Layers" subtitle="Weather, cameras, incidents, pins" onPress={() => go("/(app)/settings/map-layers")} />
         <Divider />
-        <MenuRow icon="options" iconColor="#30D158" title="Route Preferences" subtitle="Tolls, highways, ferries" onPress={() => go("/(app)/settings/route-preferences")} />
+        <MenuRow icon="flame" iconColor="#FF9F0A" title="Gas Jockey" subtitle="Filter gas pins by brand & octane" onPress={() => go("/(app)/settings/gas-jockey")} />
       </SettingsCard>
 
-      {/* DRIVING — keep the screen alive + quiet Hairpin on a call */}
+      {/* DRIVING — the route, keep the screen alive, quiet Hairpin on a call */}
       <SectionLabel>DRIVING</SectionLabel>
       <SettingsCard>
+        <MenuRow icon="options" iconColor="#30D158" title="Route Preferences" subtitle="Tolls, highways, ferries & Pitstop timer" onPress={() => go("/(app)/settings/route-preferences")} />
+        <Divider />
         <ToggleRow
           icon="phone-portrait" iconColor="#5AC8FA"
           title="Prevent Auto-Lock"
@@ -140,50 +137,50 @@ export default function SettingsMenu() {
         />
       </SettingsCard>
 
-      {/* MAP & FUEL */}
-      <SectionLabel>MAP &amp; FUEL</SectionLabel>
+      {/* SCOUT & SOUND — what Scout says and how loud everything plays. The road heads-ups
+          (railway / school / playground) moved into Scout & Alerts: they are things Scout
+          SAYS, not things the map draws. */}
+      <SectionLabel>SCOUT &amp; SOUND</SectionLabel>
       <SettingsCard>
-        <MenuRow icon="layers" iconColor="#5AC8FA" title="Map Layers" subtitle="Weather, speed cameras, place pins" onPress={() => go("/(app)/settings/map-layers")} />
+        <MenuRow icon="volume-high" iconColor="#BF5AF2" title="Scout & Alerts" value={scoutVal} subtitle="Voice, speed & road alerts" onPress={() => go("/(app)/settings/scout-voice")} />
         <Divider />
-        <MenuRow icon="flame" iconColor="#FF9F0A" title="Gas Jockey" subtitle="Filter gas pins by brand & octane" onPress={() => go("/(app)/settings/gas-jockey")} />
+        {/* Own icon: 'options' is Route Preferences' glyph, and two rows wearing the same
+            icon read as the same page. */}
+        <MenuRow icon="musical-notes" iconColor="#FF9F0A" title="Audio" subtitle="Tune Scout, dings & comms volume" onPress={() => go("/(app)/settings/audio")} />
       </SettingsCard>
-
-      {/* ASSISTANT */}
-      <SectionLabel>ASSISTANT</SectionLabel>
-      <SettingsCard>
-        <MenuRow icon="volume-high" iconColor="#BF5AF2" title="Scout Voice" value={scoutVal} subtitle="Greeting, speed & mid-drive callouts" onPress={() => go("/(app)/settings/scout-voice")} />
-      </SettingsCard>
-
-      {/* AUDIO — tester calibration for per-source output levels */}
-      <SectionLabel>AUDIO</SectionLabel>
-      <SettingsCard>
-        <MenuRow icon="options" iconColor="#FF9F0A" title="Audio Levels" subtitle="Tune Scout, dings & comms volume" onPress={() => go("/(app)/settings/audio")} />
-      </SettingsCard>
-
 
       {/* PRIVACY */}
       <SectionLabel>PRIVACY</SectionLabel>
       <SettingsCard>
-        <MenuRow icon="eye-off" iconColor="#30D158" title="Visibility & Comms" subtitle="Avatar Live, Comms, Nearby" onPress={() => go("/(app)/settings/privacy")} />
+        <MenuRow icon="eye-off" iconColor="#30D158" title="Visibility & Comms" subtitle="Visible or Ghost · Comms Live · Nearby" onPress={() => go("/(app)/settings/privacy")} />
         <Divider />
         <MenuRow icon="location" iconColor="#FF453A" title="Location Services" onPress={() => go("/(app)/settings/location-services")} />
       </SettingsCard>
 
-      {/* LEGAL */}
-      <SectionLabel>LEGAL</SectionLabel>
+      {/* LOOK — the app's metal and the route line's colour */}
+      <SectionLabel>LOOK</SectionLabel>
       <SettingsCard>
+        {/* The Garage half of the subtitle is the skin-follows-pick rule: "Drive this today"
+            writes the pick's metal (src/garageCars.ts afterMarkerWrite → setSkinChoice). */}
+        <MenuRow icon="color-palette" iconColor="#E0A93E" title="App Skin" subtitle="The metal the app wears. Picking a car in the Garage sets it too." onPress={() => go("/(app)/settings/app-skin")} />
+        <Divider />
+        {/* Own icon: App Skin keeps 'color-palette'. */}
+        <MenuRow icon="brush" iconColor="#BF5AF2" title="Route Color" swatch={routeColor} onPress={() => go("/(app)/settings/route-color")} />
+      </SettingsCard>
+
+      {/* HELP & LEGAL */}
+      <SectionLabel>HELP &amp; LEGAL</SectionLabel>
+      <SettingsCard>
+        <MenuRow icon="chatbox-ellipses" iconColor="#0A84FF" title="Send Feedback" onPress={sendFeedback} />
+        <Divider />
+        <MenuRow icon="shield-checkmark" iconColor="#8E8E93" title="Safety Guidelines" onPress={() => go("/(app)/settings/safety")} />
+        <Divider />
         <MenuRow icon="document-text" iconColor="#8E8E93" title="Privacy Policy" onPress={() => go("/(app)/settings/privacy-policy")} />
         <Divider />
         <MenuRow icon="reader" iconColor="#8E8E93" title="Terms of Service" onPress={() => go("/(app)/settings/terms")} />
         <Divider />
-        <MenuRow icon="shield-checkmark" iconColor="#8E8E93" title="Safety Guidelines" onPress={() => go("/(app)/settings/safety")} />
-      </SettingsCard>
-
-      {/* SUPPORT */}
-      <SectionLabel>SUPPORT</SectionLabel>
-      <SettingsCard>
-        <MenuRow icon="chatbox-ellipses" iconColor="#0A84FF" title="Send Feedback" onPress={sendFeedback} />
-        <Divider />
+        {/* Visible to everyone on purpose — tester tools stay until the club launch (Jeff,
+            2026-09-23: menu reorganization). */}
         <MenuRow icon="bug" iconColor="#8E8E93" title="Developer" subtitle="Debug overlays" onPress={() => go("/(app)/settings/developer")} />
         <Divider />
         {/* The one-tap fresh install (2026-08-21). See src/resetAppData.ts. */}

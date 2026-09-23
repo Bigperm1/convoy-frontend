@@ -12,7 +12,7 @@ export default function PrivacyPage() {
         <Divider />
         <ToggleRow icon="people-outline" iconColor="#30D158" title="Nearby" subtitle="Show how many crew members are near you on the Comms screen." value={settings.showNearby} onChange={(v) => setSettings({ showNearby: v })} />
       </SettingsCard>
-      <HelpText>{`Your car only ever appears on maps inside clubs you've joined — strangers from outside the crew can never see you. Choose how you appear with Avatar Live below.`}</HelpText>
+      <HelpText>{`Your car only ever appears on maps inside clubs you've joined — strangers from outside the crew can never see you. Choose Visible or Ghost below.`}</HelpText>
 
       <SectionLabel>APPEARANCE ON THE CREW MAP</SectionLabel>
       <SettingsCard>

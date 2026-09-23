@@ -1,5 +1,6 @@
-// Scratch harness (NOT a repo gate): runs the REAL src/garageCars.ts, src/garageStore.ts, src/carScan.ts
-// and src/components/showroom/tier.ts with the native/network edges stubbed (loader.mjs).
+// Scratch harness (NOT a repo gate): runs the REAL src/garageCars.ts, src/garageStore.ts, src/carScan.ts,
+// src/components/showroom/tier.ts and src/components/showroom/labels.ts with the native/network edges
+// stubbed (loader.mjs).
 import { register } from "node:module";
 register("./garage/loader.mjs", import.meta.url);
 
@@ -8,6 +9,12 @@ const gc: any = await import(SRC + "garageCars.ts");
 const gs: any = await import(SRC + "garageStore.ts");
 const cs: any = await import(SRC + "carScan.ts");
 const tier: any = await import(SRC + "components/showroom/tier.ts");
+// labels.ts reaches src/vehicleAssets.ts, whose top-level tables require() the car PNGs the Metro way. A
+// Metro asset require is only an id, so a stand-in `require` for the length of this one import is enough:
+// every require() in vehicleAssets runs at load, none inside a function.
+(globalThis as any).require = () => 0;
+const labels: any = await import(SRC + "components/showroom/labels.ts");
+delete (globalThis as any).require;
 const settings: any = await import(new URL("./garage/stubs/settings.mjs", import.meta.url).href);
 const apiStub: any = await import(new URL("./garage/stubs/api.mjs", import.meta.url).href);
 const skinStub: any = await import(new URL("./garage/stubs/appSkin.mjs", import.meta.url).href);
@@ -527,6 +534,23 @@ console.log("N · review fixes (2026-09-22 reviews)");
   await resetAll({ selfMarkerType: "car", carScanId: "old", carScanStatus: "ready", carScanMapUrl: `${MODELS}/scan_old_map.glb` });
   r = await gc.driveToday({ id: "arrow", kind: "arrow" });
   ok("N8 park WITH map twin → remembered complete (unchanged)", r === "ok" && gs.getGarage().completeScanIds.includes("old"));
+}
+
+// ── O · what the stage calls each car (Jeff, 2026-09-23: menu reorganization) ──────────────────────────
+console.log("O · stage labels");
+{
+  await resetAll({ vehicleClass: "supercar" });
+  const slot = (n: number) => gc.ownedCars("gold", settings.getSettings(), gs.getGarage())[n - 1];
+  const name = (n: number) => labels.carName(slot(n), settings.getSettings(), gs.getGarage());
+  const sub = (n: number) => labels.carSub(slot(n), settings.getSettings(), gs.getGarage());
+  ok("O1 a Supercar member's slot 4 reads \"Supercar · 3D\"", slot(4).kind === "class3d" && name(4) === "Supercar · 3D", name(4));
+  ok("O2 slot 4 names the class from the same source as Silver's slot 2", name(2) === "Supercar" && name(4) === `${name(2)} · 3D`);
+  ok("O3 slot 4's sub is unchanged: the 3D class car on the 3D map", sub(4) === "3D class car · 3D map", sub(4));
+  await resetAll({ carColor: "Ice Cap White" });
+  ok("O4 no class picked → the hatchback default, \"Hot Hatch · 3D\"", name(4) === "Hot Hatch · 3D", name(4));
+  ok("O5 a GR Corolla paint still reads in slot 4's sub", sub(4) === "3D class car · Ice Cap White · 3D map", sub(4));
+  await resetAll({ vehicleClass: "supercar" }, { nicknames: { class3d: "Weekend car" } });
+  ok("O6 a nickname still beats the class headline", name(4) === "Weekend car", name(4));
 }
 
 console.log(fails ? `\nFAIL garage_logic (${fails})` : "\nPASS garage_logic");

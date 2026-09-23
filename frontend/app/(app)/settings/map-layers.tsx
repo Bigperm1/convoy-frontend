@@ -37,18 +37,9 @@ export default function MapLayersPage() {
         <ToggleRow icon="cloudy" iconColor="#5AC8FA" title="Weather" subtitle="Current conditions in the map HUD — temperature, wind & precipitation" value={settings.showWeatherLayer} onChange={(v) => setSettings({ showWeatherLayer: v })} />
         <Divider />
         <ToggleRow icon="camera" iconColor="#FF453A" title="Speed cameras" subtitle="Show fixed speed cameras and get a Scout heads-up about 20 seconds before you reach one (OpenStreetMap)" value={settings.speedCameras !== false} onChange={(v) => setSettings({ speedCameras: v })} feature="speed_cameras" />
-        <Divider />
-        {/* AHEAD-ALERTS (2026-09-21, Jeff: "Yes build them and stage 2 for 80. … Give the speed
-            cameras and playground/school zones a good heads up for distance and time."). Same
-            20-second lead as the cameras above, same single speed-ding after the first time a kind
-            comes up in a trip — see src/aheadAlerts.ts. The school subtitle says "when school's in"
-            for the same reason the spoken line does: there is no machine-readable BC school
-            calendar, so the app must not claim the limit is in force. */}
-        <ToggleRow icon="train" iconColor="#FFD60A" title="Railway crossings" subtitle="Scout calls out a level crossing ahead — spoken the first time each drive, a single ding after that" value={settings.alertRailway !== false} onChange={(v) => setSettings({ alertRailway: v })} />
-        <Divider />
-        <ToggleRow icon="school" iconColor="#FF9F0A" title="School zones" subtitle="Heads-up for a marked school zone ahead, weekdays 8am–5pm during the school year (OpenStreetMap)" value={settings.alertSchoolZones !== false} onChange={(v) => setSettings({ alertSchoolZones: v })} />
-        <Divider />
-        <ToggleRow icon="happy" iconColor="#30D158" title="Playground zones" subtitle="Heads-up for a playground zone ahead — 30 km/h dawn to dusk in BC, worked out on the phone from the sun" value={settings.alertPlaygroundZones !== false} onChange={(v) => setSettings({ alertPlaygroundZones: v })} />
+        {/* The railway / school / playground heads-ups that sat here moved to Scout & Alerts →
+            ROAD HEADS-UPS (Jeff, 2026-09-23: menu reorganization) — src/aheadAlerts.ts isOnFor()
+            is their only reader and it gates what Scout speaks or dings, nothing on the map. */}
         <Divider />
         <ToggleRow icon="warning" iconColor="#FF9F0A" title="Road incidents" subtitle="Official BC accidents, construction & closures with a Scout callout for major ones (DriveBC). British Columbia only." value={settings.roadIncidents !== false} onChange={(v) => setSettings({ roadIncidents: v })} feature="road_incidents" />
         {settings.roadIncidents !== false && (
@@ -61,8 +52,14 @@ export default function MapLayersPage() {
         )}
         <Divider />
         <ToggleRow icon="location" iconColor="#2DEC86" title="Place pins" subtitle="Show the pin markers for category search results. Gas prices and place names always stay visible." value={settings.showPlacePins !== false} onChange={(v) => setSettings({ showPlacePins: v })} />
+        {/* No 3D Buildings switch, on purpose. The retired map Layers sheet held one, but nothing
+            ever opened that sheet, so it was never a control anyone had — and the car screen draws
+            buildings unconditionally (src/carplay/CarMapView.tsx show3dObjects: !view2D, "3D buildings
+            ALWAYS ON (Jeff, 2026-08-14)"), so a phone-only switch would split phone and car. It stays
+            out unless Jeff asks for it, with CarPlay/AA reading the same key (Jeff, 2026-09-23: menu
+            reorganization — the plan removes the sheet, it does not move its controls). */}
       </SettingsCard>
-      <HelpText>{`These persist across launches. Traffic and Hazard pins are toggled from the map's own Layers button since you flip those while looking at the map.`}</HelpText>
+      <HelpText>{`These persist across launches.`}</HelpText>
     </SettingsPage>
   );
 }

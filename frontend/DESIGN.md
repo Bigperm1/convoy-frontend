@@ -268,9 +268,8 @@ Blue, Grabber Blue Metallic. A saved hex outside the palette still renders (pain
 hex passthrough); it just shows no check mark and no name.
 
 ⚠️ **`CLASS_MODEL_3D` is read by NOTHING on the map today** — `markerType === 'class'`
-renders the flat top-down sprite, and the only consumer is `showroom.tsx`, which is
-registered `href: null` with nothing routing to it. The class-3D map rendering is still
-to be built.
+renders the flat top-down sprite. Its only consumer was the unrouted showroom screen,
+deleted in the 2026-09-23 menu reorganization. The class-3D map rendering is still to be built.
 
 ---
 

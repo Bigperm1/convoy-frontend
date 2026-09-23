@@ -5,7 +5,9 @@ import { SettingsPage, SectionLabel, SettingsCard, RadioRow, Divider, HelpText }
 export default function MapViewPage() {
   const [settings, setSettings] = useSettings();
   return (
-    <SettingsPage title="Map View">
+    // "Map Orientation" (was "Map View") — Jeff, 2026-09-23: menu reorganization. The route and
+    // the `mapView` key are unchanged.
+    <SettingsPage title="Map Orientation">
       <SectionLabel>ORIENTATION</SectionLabel>
       <SettingsCard>
         <RadioRow

@@ -21,7 +21,7 @@ function img(images?: any[]): string | undefined {
   return images[0]?.url;
 }
 
-export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () => void }) {
+export default function SpotifyMusic() {
   const [now, setNow] = useState<any>(null);          // currently-playing item
   const [isPlaying, setIsPlaying] = useState(false);
   const [tracks, setTracks] = useState<any[]>([]);
@@ -196,12 +196,10 @@ export default function SpotifyMusic({ onSwitchSource }: { onSwitchSource: () =>
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Source switch */}
-      <TouchableOpacity onPress={onSwitchSource} style={styles.switchRow} activeOpacity={0.8}>
-        <Ionicons name="swap-horizontal" size={15} color={SP_GREEN} />
-        <Text style={styles.switchText}>Switch source</Text>
-      </TouchableOpacity>
-
+      {/* No "Switch source" row here any more. The only mount (music.tsx, the Spotify
+          branch) renders the Apple Music | Spotify pills directly above this view in
+          every state, so the row was a second switch for the same job (Jeff,
+          2026-09-23: menu reorganization). */}
       {loading ? (
         <ActivityIndicator color={SP_GREEN} style={{ marginTop: 40 }} />
       ) : (
@@ -373,8 +371,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10,
     borderWidth: 1, borderColor: "rgba(29,185,84,0.35)", backgroundColor: "rgba(29,185,84,0.10)" },
   reauthText: { color: COLORS.text, fontSize: 13, fontWeight: "600", flex: 1 },
-  switchRow: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-end", paddingHorizontal: 20, paddingVertical: 6 },
-  switchText: { color: SP_GREEN, fontSize: 12, fontWeight: "700" },
   section: { marginTop: 18 },
   sectionTitle: { color: COLORS.text, fontSize: 22, fontWeight: "800", letterSpacing: -0.5, paddingHorizontal: 20, marginBottom: 12 },
   hStrip: { paddingHorizontal: 20, gap: 14 },

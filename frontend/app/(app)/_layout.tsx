@@ -17,7 +17,6 @@ import VoiceController from "../../src/VoiceController";
 // iOS 26+ → the tab bar floats on real Liquid Glass; older iOS/Android keep the
 // solid dark surface.
 const LIQUID_GLASS = isLiquidGlassAvailable();
-import VoiceTabButton from "../../src/VoiceTabButton";
 import { Image } from "expo-image";
 
 // ── PREMIUM TAB GLYPHS (2026-08-20) ─────────────────────────────────────────
@@ -464,25 +463,20 @@ export default function AppLayout() {
           tabBarButtonTestID: "tab-music",
           tabBarIcon: ({ focused }) => <TabGlyph kind="music" focused={focused} />,
         }} />
-        {/* Hub is now reached via the circular profile avatar on the right
-            edge of the map search bar (mirrors Google Maps). Hidden from the
-            bottom bar but still navigable via router.push("/(app)/hub"). */}
+        {/* Hub is not a bottom tab. It is pushed with router.push("/(app)/hub") from
+            the menus, the event pushes/deep links above and the voice open_hub intent.
+            (The map search bar's profile avatar that used to open it is gone.) */}
         <Tabs.Screen name="hub" options={{ href: null }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
-        <Tabs.Screen name="drive-mode" options={{ href: null }} />
         <Tabs.Screen name="garage" options={{ href: null }} />
         {/* Garage Scan capture guide + the guided lap it hands off to. Reached
             from the Garage's "Scan your car" link, never a bottom tab. */}
         <Tabs.Screen name="garage-scan" options={{ href: null }} />
         <Tabs.Screen name="garage-consent" options={{ href: null }} />
         <Tabs.Screen name="garage-capture" options={{ href: null }} />
-        {/* Showroom — the swipeable appearance-ladder picker; staged, unlinked. */}
-        <Tabs.Screen name="showroom" options={{ href: null }} />
         {/* Drives (trip history) — reached from the logo menu, not a bottom tab. */}
         <Tabs.Screen name="trips" options={{ href: null }} />
         <Tabs.Screen name="admin" options={{ href: null }} />
-        {/* TEMP (Mapbox migration Phase 1) — throwaway test route, no tab. STRIP BEFORE MERGE. */}
-        <Tabs.Screen name="mapbox-test" options={{ href: null }} />
       </Tabs>
 
       {/* Global voice transcript banner (FAB removed — the elevated mic in the tab bar is the new CTA) */}

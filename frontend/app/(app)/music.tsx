@@ -465,7 +465,7 @@ export default function MusicScreen() {
           </View>
         </View>
         <SourceSwitcher current="spotify" />
-        <SpotifyMusic onSwitchSource={() => updateSettings({ musicSource: null })} />
+        <SpotifyMusic />
       </SafeAreaView>
       <View style={styles.logoBacking}><LogoMenu size={38} align="right" /></View>
       </>
@@ -767,7 +767,8 @@ export default function MusicScreen() {
               stay with Apple Music.
             </Text>
             <TouchableOpacity onPress={() => updateSettings({ musicSource: null })} style={{ alignSelf: "center", marginTop: 10 }} testID="switch-source-apple">
-              <Text style={[styles.footer, { color: SP_GREEN, marginTop: 0 }]}>Switch music source</Text>
+              {/* Same words as the reconnect hero's switch above (Jeff, 2026-09-23: menu reorganization). */}
+              <Text style={[styles.footer, { color: SP_GREEN, marginTop: 0 }]}>Switch source</Text>
             </TouchableOpacity>
           </>
         )}

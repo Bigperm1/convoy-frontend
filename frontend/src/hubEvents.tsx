@@ -632,7 +632,9 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
                 second tap untags; a club-only event always needs one. */}
             <Text style={[styles.label, { marginTop: 14 }]}>Invite your club</Text>
             {clubs.length === 0 ? (
-              <Text style={styles.helpText}>{`You're not in any clubs yet — join or create one in the Clubs tab.`}</Text>
+              // There is no "Clubs tab" — clubs live behind the Clubs chip on the Club
+              // screen (Jeff, 2026-09-23: menu reorganization).
+              <Text style={styles.helpText}>{`You're not in any clubs yet — join or create one from the Clubs chip in Club.`}</Text>
             ) : (
               <>
                 <View style={styles.clubChips}>

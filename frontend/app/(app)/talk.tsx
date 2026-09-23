@@ -672,8 +672,10 @@ export default function TalkScreen() {
               <Text style={styles.communityName} numberOfLines={1}>
                 {communities.length ? 'Choose your convoy' : 'No clubs yet'}
               </Text>
+              {/* "Club", not "Hub" — the screen's user-facing name; the route stays
+                  /(app)/hub (Jeff, 2026-09-23: menu reorganization). */}
               <Text style={styles.connectedMuted} numberOfLines={1}>
-                {communities.length ? 'Tap to pick the crew you’re driving with' : 'Create or join one in the Hub'}
+                {communities.length ? 'Tap to pick the crew you’re driving with' : 'Create or join one in Club'}
               </Text>
             </View>
             {communities.length > 0 && (
@@ -699,7 +701,7 @@ export default function TalkScreen() {
           {communities.length === 0 ? (
             <TouchableOpacity onPress={() => { setDropdownOpen(false); router.push('/(app)/hub'); }} style={styles.switcherEmpty}>
               <Ionicons name="add-circle-outline" size={18} color={accent} />
-              <Text style={styles.switcherEmptyText}>Go to the Hub to create or join a club</Text>
+              <Text style={styles.switcherEmptyText}>Open Club to create or join a club</Text>
             </TouchableOpacity>
           ) : (
             <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>

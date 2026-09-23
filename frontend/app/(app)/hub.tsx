@@ -49,7 +49,7 @@ const SUGGESTED_TAGS = [
 ];
 
 export default function HubScreen() {
-  const { user, logout, refresh } = useAuth();
+  const { user, refresh } = useAuth();
   const accent = useAccent();
   const skinColors = useAppSkinColors();
   const router = useRouter();
@@ -241,13 +241,15 @@ export default function HubScreen() {
 
         {/* ── DRIVER BAND ────────────────────────────────────────────────────
             Also the only entry point to ProfileModal, which was unreachable:
-            setShowProfile(true) was called NOWHERE before this. */}
+            setShowProfile(true) was called NOWHERE before this. The empty-car
+            fallback says "profile", not "Garage": this band opens the profile
+            sheet, never the Garage (Jeff, 2026-09-23: menu reorganization). */}
         <TouchableOpacity testID="hub-profile" onPress={() => setShowProfile(true)} activeOpacity={0.85} style={styles.driverBand}>
           <Image source={getTopDownImage(user?.car_color || "")} style={styles.driverCar} resizeMode="contain" />
           <View style={{ flex: 1 }}>
             <Text style={styles.driverName}>{user?.handle || "Driver"}</Text>
             <Text style={[styles.driverCarTxt, { color: accent }]} numberOfLines={1}>
-              {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Set up your Garage"}
+              {[user?.car_year, user?.car_make, user?.car_model].filter(Boolean).join(" ") || "Set up your profile"}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color="#5A5A5E" />
@@ -357,7 +359,7 @@ export default function HubScreen() {
       />
       <CreateModal visible={showCreate} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); }} />
       <SearchModal visible={showSearch} onClose={() => setShowSearch(false)} onChanged={load} />
-      <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} onSignOut={logout} onSaved={async () => { await refresh(); setShowProfile(false); }} />
+      <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} onSaved={async () => { await refresh(); setShowProfile(false); }} />
       <CommunityDetailModal community={showDetail} onClose={() => setShowDetail(null)} onChanged={load} />
       {joinedName != null && (
         <JoinCelebration clubName={joinedName} onDone={() => setJoinedName(null)} />
@@ -1605,7 +1607,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
             testID="member-search-input"
             value={searchQ}
             onChangeText={doSearch}
-            placeholder="Search Hairpin by handle or email"
+            placeholder="Search Hairpin by call sign or email"
             placeholderTextColor={COLORS.textMute}
             autoCapitalize="none"
             autoCorrect={false}
@@ -1649,7 +1651,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   );
 }
 
-function ProfileModal({ visible, onClose, onSaved, onSignOut }: any) {
+function ProfileModal({ visible, onClose, onSaved }: any) {
   const { user } = useAuth();
   const skinColors = useAppSkinColors();
   const [handle, setHandle] = useState(user?.handle || "");
@@ -1669,6 +1671,16 @@ function ProfileModal({ visible, onClose, onSaved, onSignOut }: any) {
     try {
       setBusy(true);
       await api.put("/auth/profile", { handle, car_make: make, car_model: model, car_year: year ? parseInt(year, 10) : null, car_color: color });
+      // This field and the Garage's are both labelled "Call Sign" now (Jeff, 2026-09-23: menu
+      // reorganization), so a rename here must land where the Garage's lands: settings.callSign is
+      // what Scout speaks and the Garage plate shows, and the Garage sheet pre-fills (and re-PUTs as
+      // `handle`) from it — without this write a Club rename would be undone by the next Garage save.
+      // Only on a CHANGED handle, so saving the car fields never starts Scout saying a name; after the
+      // PUT succeeds, so a failed save leaves both stores as they were.
+      const sign = handle.trim();
+      if (sign && sign !== (user?.handle || "").trim()) {
+        try { await updateSettings({ callSign: sign }); } catch {}
+      }
       onSaved();
     } catch (e) { Alert.alert("Save failed", formatErr(e)); }
     finally { setBusy(false); }
@@ -1683,7 +1695,9 @@ function ProfileModal({ visible, onClose, onSaved, onSignOut }: any) {
             <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.textDim} /></TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-            <ProfileField testID="profile-handle" label="Handle" value={handle} onChange={setHandle} />
+            {/* "Call Sign" is the label only — the field, testID and the API key
+                stay `handle` (Jeff, 2026-09-23: menu reorganization). */}
+            <ProfileField testID="profile-handle" label="Call Sign" value={handle} onChange={setHandle} />
             <ProfileField testID="profile-make" label="Make" value={make} onChange={setMake} />
             <ProfileField testID="profile-model" label="Model" value={model} onChange={setModel} />
             <ProfileField testID="profile-year" label="Year" value={year} onChange={setYear} keyboard="number-pad" />
@@ -1693,13 +1707,9 @@ function ProfileModal({ visible, onClose, onSaved, onSignOut }: any) {
                 <Text style={[styles.btnText, { color: skinColors.ink }]}>{busy ? "Saving…" : "Save"}</Text>
               </LinearGradient>
             </TouchableOpacity>
-            {/* SIGN OUT lives here now. It used to be a full-width saturated red
-                button in the middle of the Hub — the most destructive action given
-                the most visual weight, and the ONLY colour on an empty tab. */}
-            <TouchableOpacity testID="logout-btn" onPress={onSignOut} activeOpacity={0.8} style={styles.signOutRow}>
-              <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
-              <Text style={styles.signOutTxt}>Sign out</Text>
-            </TouchableOpacity>
+            {/* No Sign out here any more. Settings owns the ONE Sign Out, and it
+                confirms first; this one signed out on a single unconfirmed tap
+                (Jeff, 2026-09-23: menu reorganization). */}
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -1769,8 +1779,6 @@ const styles = StyleSheet.create({
   standTogTxt: { fontSize: 12, fontWeight: "700", color: "#C7C7CC" },
   createSheetRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 16, paddingHorizontal: 18 },
   createSheetTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  signOutRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, marginTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.10)" },
-  signOutTxt: { color: COLORS.danger, fontSize: 15, fontWeight: "700" },
   c: { flex: 1, backgroundColor: COLORS.bg },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "700", letterSpacing: -1 },

@@ -18,19 +18,17 @@ type Props = {
   onSelect: (loc: { lat: number; lng: number; label: string }) => void;
   onClear?: () => void;
   initialValue?: string;
-  // Tapping the round profile avatar on the right of the bar opens whatever
-  // the consumer wants (typically the Hub screen).
-  onProfilePress?: () => void;
-  // Optional override for the right-side profile control. When provided, this
-  // node is rendered in place of the default avatar button (used by the map
-  // to drop in the global LogoMenu). Takes precedence over onProfilePress.
+  // Optional node for the logo/menu slot at the LEFT of the bar; without it the
+  // slot shows a search glyph. (onProfilePress — the tap handler for a right-side
+  // avatar this bar no longer renders — was removed: Jeff, 2026-09-23: menu
+  // reorganization.)
   profileSlot?: React.ReactNode;
   // When provided, the text field becomes a button: tapping it fires this
   // instead of typing inline (the map uses it to open the full-screen search
   // screen). The mic + logo remain fully interactive.
   onPressField?: () => void;
   // Departure IQ: when set, the bar shows a premium "AI" suggestion pre-filled in
-  // place of "Search here" (e.g. "Heading to work?") with a green "Let's go" button.
+  // place of "Where to?" (e.g. "Heading to work?") with a green "Let's go" button.
   aiSuggest?: { label: string; eta?: string } | null;
   onAiGo?: () => void;       // tap "Let's go" → route to the suggestion
   onAiDismiss?: () => void;  // tap × → dismiss the suggestion, back to normal search
@@ -121,7 +119,7 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
   } catch { return null; }
 }
 
-export default function DestinationSearch({ origin, onSelect, onClear, initialValue, onProfilePress, profileSlot, onPressField, aiSuggest, onAiGo, onAiDismiss, pillsVisible, onPillsToggle }: Props) {
+export default function DestinationSearch({ origin, onSelect, onClear, initialValue, profileSlot, onPressField, aiSuggest, onAiGo, onAiDismiss, pillsVisible, onPillsToggle }: Props) {
   const [text, setText] = useState(initialValue || "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -261,14 +259,16 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               activeOpacity={0.7}
               onPress={onPressField}
             >
-              <Text maxFontSizeMultiplier={1} style={styles.fieldTapText} numberOfLines={1}>Search here</Text>
+              {/* "Where to?" is the same prompt as the search field of the screen
+                  this opens (NavSearchScreen) — Jeff, 2026-09-23: menu reorganization. */}
+              <Text maxFontSizeMultiplier={1} style={styles.fieldTapText} numberOfLines={1}>Where to?</Text>
             </TouchableOpacity>
           ) : (
             <TextInput allowFontScaling={false}
               testID="destination-input"
               value={text}
               onChangeText={onChangeText}
-              placeholder="Search here"
+              placeholder="Where to?"
               placeholderTextColor="#FFFFFF"
               style={styles.input}
               onFocus={() => setOpen(true)}
@@ -302,7 +302,9 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               </TouchableOpacity>
             </>
           ) : onPillsToggle ? (
-            <TouchableOpacity testID="pills-toggle" onPress={onPillsToggle} hitSlop={6} style={styles.pillsToggle}>
+            // "Category search", not "Places": PLACES is the H menu's section of screens (Garage,
+            // Club, …), and this toggles the Gas / Food / Coffee quick-search pills.
+            <TouchableOpacity testID="pills-toggle" onPress={onPillsToggle} hitSlop={6} style={styles.pillsToggle} accessibilityRole="button" accessibilityLabel="Category search" accessibilityState={{ expanded: !!pillsVisible }}>
               <Ionicons name={pillsVisible ? "apps" : "apps-outline"} size={20} color={accent} />
             </TouchableOpacity>
           ) : null}

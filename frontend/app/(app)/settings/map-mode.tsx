@@ -30,7 +30,9 @@ export default function MapModePage() {
           </React.Fragment>
         ))}
       </SettingsCard>
-      <HelpText>{`Pick how the map looks. Satellite shows aerial imagery; Dawn / Day / Dusk / Night use the Mapbox vector map with time-of-day lighting and 3D buildings. Stays in sync with the map's own Layers button.`}</HelpText>
+      {/* The "stays in sync with the map's own Layers button" sentence went with that sheet (Jeff,
+          2026-09-23: menu reorganization). */}
+      <HelpText>{`Pick how the map looks. Satellite shows aerial imagery; Dawn / Day / Dusk / Night use the Mapbox vector map with time-of-day lighting and 3D buildings.`}</HelpText>
     </SettingsPage>
   );
 }

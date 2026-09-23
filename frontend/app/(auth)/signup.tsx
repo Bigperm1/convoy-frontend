@@ -54,7 +54,8 @@ export default function Signup() {
   // prop identities each render and skip-paint correctly.
   const submit = useCallback(async () => {
     if (!email || !password || !handle) {
-      return Alert.alert("Email, password and handle are required");
+      // Field order on screen, and the field's own label (Jeff, 2026-09-23: menu reorganization).
+      return Alert.alert("Call sign, email and password are required");
     }
     // Dismiss the keyboard so the user sees the spinner without the keyboard
     // partially blocking the bottom of the card.
@@ -106,8 +107,10 @@ export default function Signup() {
 
         <Glass radius={28} style={{ marginTop: 22 }}>
           <View style={{ padding: 20 }}>
+            {/* "Call Sign" is the label only — the state, testID and the register
+                payload stay `handle` (Jeff, 2026-09-23: menu reorganization). */}
             <Field
-              label="Handle"
+              label="Call Sign"
               testID="signup-handle"
               value={handle}
               onChange={setHandle}

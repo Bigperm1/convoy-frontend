@@ -15,7 +15,9 @@ export default function ScoutVoicePage() {
   useEffect(() => () => { void stopNovaPreview(); }, []);
 
   return (
-    <SettingsPage title="Scout Voice">
+    // Titled "Scout & Alerts" (was "Scout Voice") now that the road heads-ups live here too
+    // (Jeff, 2026-09-23: menu reorganization). The route and file name are unchanged.
+    <SettingsPage title="Scout & Alerts">
       <SectionLabel>VOICE</SectionLabel>
       <SettingsCard>
         <ToggleRow
@@ -87,11 +89,34 @@ export default function ScoutVoicePage() {
         <Divider />
         <ToggleRow icon="trending-up" iconColor="#FF9F0A" title="Adaptive alerts" subtitle="Learn your usual pace so the first nudge stops nagging at speeds you always drive (the firmer alert stays fixed)" value={settings.adaptiveSpeedAlerts !== false} onChange={(v) => setSettings({ adaptiveSpeedAlerts: v })} />
       </SettingsCard>
+
+      {/* ROAD HEADS-UPS — moved here from Map Layers (Jeff, 2026-09-23: menu reorganization):
+          their only reader, src/aheadAlerts.ts isOnFor(), gates what Scout speaks or dings, and
+          nothing on the map. Same keys, same handlers, same copy as they had there.
+          AHEAD-ALERTS (2026-09-21, Jeff: "Yes build them and stage 2 for 80. … Give the speed
+          cameras and playground/school zones a good heads up for distance and time."). Same
+          20-second lead as the speed cameras (Settings → Map Layers), same single speed-ding after
+          the first time a kind comes up in a trip — see src/aheadAlerts.ts. The school subtitle
+          hedges ("during the school year") for the same reason the spoken line says "when school's
+          in" (src/aheadAlertRules.ts): there is no machine-readable BC school calendar, so the app
+          must not claim the limit is in force. */}
+      <SectionLabel>ROAD HEADS-UPS</SectionLabel>
+      <SettingsCard>
+        <ToggleRow icon="train" iconColor="#FFD60A" title="Railway crossings" subtitle="Scout calls out a level crossing ahead — spoken the first time each drive, a single ding after that" value={settings.alertRailway !== false} onChange={(v) => setSettings({ alertRailway: v })} />
+        <Divider />
+        <ToggleRow icon="school" iconColor="#FF9F0A" title="School zones" subtitle="Heads-up for a marked school zone ahead, weekdays 8am–5pm during the school year (OpenStreetMap)" value={settings.alertSchoolZones !== false} onChange={(v) => setSettings({ alertSchoolZones: v })} />
+        <Divider />
+        <ToggleRow icon="happy" iconColor="#30D158" title="Playground zones" subtitle="Heads-up for a playground zone ahead — 30 km/h dawn to dusk in BC, worked out on the phone from the sun" value={settings.alertPlaygroundZones !== false} onChange={(v) => setSettings({ alertPlaygroundZones: v })} />
+      </SettingsCard>
       {/* Corrected 2026-08-26: the old copy said turn-by-turn "isn't affected" by the
           master switch — false, speak() gates every spoken line on it (nav.ts) — and it
           steered testers to the map mute as the only nav silencer. Say what each
           control actually does. */}
-      <HelpText>{`The Scout voice switch is the master: off silences everything Scout says, turn-by-turn directions included. The speaker button on the map mutes just the drive callouts and arrival announcements, and the Voice level lives in Settings → Audio.`}</HelpText>
+      {/* The last sentence points at the one heads-up not on this page: the speed-camera callout
+          rides the Speed cameras switch in Map Layers (aheadAlerts.ts isOnFor: camera →
+          settings.speedCameras), which also draws the camera pins (Jeff, 2026-09-23: menu
+          reorganization). */}
+      <HelpText>{`The Scout voice switch is the master: off silences everything Scout says, turn-by-turn directions included. The speaker button on the map mutes just the drive callouts and arrival announcements, and the Voice level lives in Settings → Audio. Speed-camera heads-ups follow the Speed cameras switch in Settings → Map Layers.`}</HelpText>
     </SettingsPage>
   );
 }

@@ -115,12 +115,12 @@ export default function NavSearchScreen({
   };
 
   // Red "Delete" action revealed when a row is swiped left.
-  const renderDelete = (onPress: () => void) => () => (
+  const renderDelete = (onPress: () => void) => function SwipeDelete() { return (
     <TouchableOpacity style={styles.swipeDelete} onPress={onPress} activeOpacity={0.85}>
       <Ionicons name="trash" size={20} color="#fff" />
       <Text style={styles.swipeDeleteText}>Delete</Text>
     </TouchableOpacity>
-  );
+  ); };
 
   const typing = text.trim().length > 0;
   const savedChips = useMemo(() => {

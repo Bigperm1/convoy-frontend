@@ -1071,6 +1071,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **PRICING, same day ~17:30 PDT — Jeff: "volume instead of gouging": Free · Silver $0.99/mo · Gold $2.99/mo · Ultra $4.99/mo with
+  ONE Garage Scan included · extra scans $2.99 each (active Ultra only). Supersedes the 09-17 $5.99/$9.99/$14.99 ladder; rung CONTENTS
+  unchanged.** Built: `src/pricing.ts` (the one catalog + store product ids), Tier "gold" rung + `car_scan`/`app_skin_diamond` features,
+  `featureRung()`, paywall shows the ladder (commit `3db06373`; ENTITLEMENTS_ENFORCED still false). Website: four cards with prices +
+  diamond metal, committed in ~/hairpin-site (NOT pushed — Jeff's OK publishes). Cost model + break-even in memory
+  `pricing-volume-ladder-2026-09-22` (repo is public): break-even ≈ 254 payers at 1000 users AFTER the cost fixes; impossible as built.
+  Build 80: RevenueCat, scan purchase gate, diamond skin merge, store products at these prices, SBP/Google 15 % enrolment.
 - **WEATHER, same day ~17:15 PDT (Jeff: "make sure the weather is correct on arrival and the weather icon on the map screens …
   always shows cloudy even when its sunny … scout mentioned twice it was raining at the end destination but it had not rained
   all day"). Three verified causes, three fixes in `src/weatherLayer.ts` (unlocked) + the two call sites in map.tsx (unlocked):**

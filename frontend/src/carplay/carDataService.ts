@@ -30,13 +30,13 @@ import { api, readTokenState, wsUrl } from '../api';
 import { noteNetOk } from '../netHealth';
 import { refreshCarStatus } from './carStatus';
 import { supabase, SUPABASE_ENABLED } from '../supabase';
-import { getSettings, getAvatarMode, ensureSettingsLoaded } from '../settings';
+import { getSettings, ensureSettingsLoaded } from '../settings';
 // THE gate (src/locationPrivacy). Every outbound position must ask it — this file was
 // the last transport that did not. See buildCarPayload and onStoreTick below.
 import { shareablePosition, noteFix, hydrateLocationPrivacy } from '../locationPrivacy';
 import { toGRCSlug } from '../vehicleAssets';
 import { getCarState, setCarPeers, setCarHazards, subscribeCarState, carFeedWouldAccept, type CarPeer } from './carStore';
-import { joinPresence as hubJoinPresence, type PresenceHandle } from '../presenceHub';
+import { crewPresenceTopic, joinPresence as hubJoinPresence, type PresenceHandle } from '../presenceHub';
 
 // ── throttle cadences (wall-clock, event-driven — NO timers) ────────────────
 const NEARBY_REFRESH_MS = 10_000;   // matches the phone's 10s /users/nearby poll
@@ -316,9 +316,8 @@ function joinHazardsRealtime(): void {
 
 // ── Supabase presence (join + broadcast; same gates as the phone) ────────────
 function presenceChannelName(): string | null {
-  const s = getSettings();
-  if (getAvatarMode(s) === 'ghost') return null;           // never broadcast in ghost
-  return s.activeCommunityId ? `convoy:community:${s.activeCommunityId}` : null; // community-scoped ONLY
+  // Never in ghost; community-scoped ONLY. One rule, shared with the crew pill (presenceHub.crewPresenceTopic).
+  return crewPresenceTopic();
 }
 
 // OUR slim presence payload for the shared hub (priority 1). Returns null when

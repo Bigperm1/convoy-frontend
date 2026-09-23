@@ -26,17 +26,27 @@ BOX_W, BOX_H, TAIL_H, TAIL_W, RADIUS, BORDER = 70, 34, 8, 12, 10, 1.5   # pt
 GLYPH_CX, GLYPH_PT = 21, 22  # glyph centre x, glyph box size (pt)
 TEXT_X, TEXT_CY = 38, 17     # where the app draws the temperature (pt, from the box's top-left)
 BG = (12, 14, 18, 190)
-SKINS = {"brand": ("#8CFFC4", "#2DEC86", "#0E9B58"), "premium": ("#FFFFFF", "#C9D2D8", "#7E878E"), "ultra": ("#F6D77A", "#E0A93E", "#B97F1F")}
+# (stops, locations) per app skin — the TIER_SKIN ramps in src/tierTheme.ts. EVERY VisualTier needs a row: Diamond was added
+# to the skins on 2026-09-22 but not here, so a Diamond driver got the green FLAG bubble (the fallback) with the live
+# temperature over it — Jeff's CarPlay photo, 2026-09-23 ("it shows a flag … green around the border when it should be
+# diamond"). tools/sim-qc/skin_unlock_test.mts (C1) fails if a skin has no bubbles.
+SKINS = {
+    "brand": (("#8CFFC4", "#2DEC86", "#0E9B58"), (0, 0.45, 1)),
+    "premium": (("#FFFFFF", "#C9D2D8", "#7E878E"), (0, 0.45, 1)),
+    "ultra": (("#F6D77A", "#E0A93E", "#B97F1F"), (0, 0.45, 1)),
+    "diamond": (("#FFFFFF", "#E4F7FF", "#B5E6FF", "#4F9FDB", "#79C3EE", "#D3F1FF", "#EFE6FF"), (0, 0.2, 0.47, 0.5, 0.73, 0.9, 1)),
+}
 WX = {"sun": "#FFD60A", "moon": "#DCE3F0", "cloud": "#AEB4BD", "cloudDark": "#8E949E", "rain": "#5AC8FA", "bolt": "#FFD60A", "snow": "#EAF6FF"}
 KINDS = ["none", "clear-day", "clear-night", "partly-day", "partly-night", "cloudy", "fog", "rain", "snow", "thunder"]
 hexrgb = lambda h: tuple(int(h.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
 
 def gradient(w, h, stops, locs=(0, 0.45, 1)):
+    """Vertical gradient through any number of (stop, location) pairs — Diamond has seven."""
     img = Image.new("RGBA", (w, h)); px = img.load(); cs = [hexrgb(c) for c in stops]
     for y in range(h):
         t = y / max(1, h - 1)
-        if t <= locs[1]: u = t / locs[1]; a, b = cs[0], cs[1]
-        else: u = (t - locs[1]) / (1 - locs[1]); a, b = cs[1], cs[2]
+        k = next((i for i in range(1, len(locs)) if t <= locs[i]), len(locs) - 1)
+        span = max(1e-9, locs[k] - locs[k - 1]); u = min(1, max(0, (t - locs[k - 1]) / span)); a, b = cs[k - 1], cs[k]
         col = tuple(int(round(a[i] + (b[i] - a[i]) * u)) for i in range(3)) + (255,)
         for x in range(w): px[x, y] = col
     return img
@@ -70,7 +80,7 @@ def bake_callout(skin, kind):
     d.polygon([(P + w / 2 - TAIL_W * S / 2, P + BOX_H * S - 2), (P + w / 2, P + h - 1), (P + w / 2 + TAIL_W * S / 2, P + BOX_H * S - 2)], fill=255)
     er = fill.filter(ImageFilter.MinFilter(int(BORDER * S) * 2 + 1)); ring = ImageChops.subtract(fill, er)
     big = Image.new("RGBA", fill.size, (0, 0, 0, 0))
-    big.paste(Image.new("RGBA", fill.size, BG), (0, 0), er); big.paste(gradient(fill.size[0], fill.size[1], SKINS[skin]), (0, 0), ring)
+    big.paste(Image.new("RGBA", fill.size, BG), (0, 0), er); big.paste(gradient(fill.size[0], fill.size[1], *SKINS[skin]), (0, 0), ring)
     im = big.crop((P, P, P + w, P + h))
     if kind == "none": draw_wx(im, "none", w / 2, BOX_H * S / 2, GLYPH_PT * S)          # flag, centred, no text
     else: draw_wx(im, kind, GLYPH_CX * S, BOX_H * S / 2, GLYPH_PT * S)
@@ -97,7 +107,9 @@ if __name__ == "__main__":
             lines.append(f'  "{skin}/{kind}": "{s}",')
             sheet.alpha_composite(im, (20 + ki * (BOX_W * S + 20), 20 + si * ((BOX_H + TAIL_H) * S + 20)))
     lines.append("};")
-    lines.append("export function wxCalloutUri(skin: string, kind: string): string { return 'data:image/png;base64,' + (WX_CALLOUT_B64[skin + '/' + kind] ?? WX_CALLOUT_B64['brand/none']); }")
+    # A skin with no bubbles keeps the WEATHER (in green) — never the flag, which means "no forecast" (2026-09-23).
+    lines.append("export const WX_CALLOUT_SKINS = " + json.dumps(list(SKINS)) + " as const;")
+    lines.append("export function wxCalloutUri(skin: string, kind: string): string { return 'data:image/png;base64,' + (WX_CALLOUT_B64[skin + '/' + kind] ?? WX_CALLOUT_B64['brand/' + kind] ?? WX_CALLOUT_B64['brand/none']); }")
     out = os.path.join(ROOT, "src/wxCalloutImages.ts")
     open(out, "w").write("\n".join(lines) + "\n")
     sheet.save(os.path.join(ROOT, "tools/wx-pin/preview.png"))

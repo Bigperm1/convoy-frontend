@@ -5295,6 +5295,9 @@ export default function MapScreen() {
               // OTHER crew members only — never count the viewer. peerList already
               // excludes self (presence keys us out; WS/REST filter our own id).
               const liveCount = peerList.length;
+              // GREEN while another member is online right now (Jeff, 2026-09-23) — presence, the same rule as the car
+              // pill (presenceHub.onlineCrewCount): presence.peers is already self-excluded and position-filtered.
+              const crewOnline = presence.peers.length > 0;
               // Actual native build number (v66, v67, …) — reads the installed
               // binary's build, so it tracks whatever build the user is on without
               // a code change. Falls back to the app.json value if unavailable.
@@ -5336,7 +5339,7 @@ export default function MapScreen() {
                 // Tappable (tester request): opens the who's-on roster sheet —
                 // every live member with YOHB + Drive-to actions.
                 <PressableScale
-                  style={styles.liveOverlay}
+                  style={[styles.liveOverlay, crewOnline && { backgroundColor: 'rgba(48,209,88,0.30)', borderColor: COLORS.success }]}
                   onPress={() => setRosterOpen(true)}
                   hitSlop={8}
                 >

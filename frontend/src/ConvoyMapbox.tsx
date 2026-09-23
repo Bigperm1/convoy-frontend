@@ -2754,6 +2754,9 @@ function GLPinLayers({
         <MBXImage name="neon_place_brand"><NeonPin tone="brand" /></MBXImage>
         <MBXImage name="neon_place_premium"><NeonPin tone="premium" /></MBXImage>
         <MBXImage name="neon_place_ultra"><NeonPin tone="ultra" /></MBXImage>
+        {/* Diamond too (2026-09-23): the place layer asks for neon_place_${tier}, and under Diamond it pointed at a name
+            nothing registered — the same gap as the weather bubble's (wxCalloutImages). */}
+        <MBXImage name="neon_place_diamond"><NeonPin tone="diamond" /></MBXImage>
       </Images>}
 
       {/* All pins are slot="top" so they draw ABOVE the selected-route ribbon (also slot="top", but

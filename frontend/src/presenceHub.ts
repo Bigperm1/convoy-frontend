@@ -10,6 +10,7 @@
 // local consumer, and OUR presence tracked from the highest-priority provider's
 // payload. Two consumers can never double-join → the throw can never happen.
 import { supabase, SUPABASE_ENABLED } from "./supabase";
+import { getSettings, getAvatarMode } from "./settings";
 
 export type RawPeer = Record<string, any> & { user_id: string };
 type Provider = { priority: number; get: () => Record<string, any> | null };
@@ -66,7 +67,38 @@ const idKeyOf = (p: Record<string, any>): string => {
   } catch { return ""; }   // never equal to a real key ("[]" at minimum) → always sends
 };
 
-const fanout = (e: Entry) => { e.subs.forEach((fn) => { try { fn(e.peers); } catch {} }); };
+const fanout = (e: Entry) => { e.subs.forEach((fn) => { try { fn(e.peers); } catch {} }); notifyCrew(); };
+
+// ── WHO IS ONLINE (Jeff, 2026-09-23: "make the 1 crew pill turn green when members are online") ─────────────────────
+// Presence is the one live signal: Supabase holds exactly the payloads of the clients connected to a topic right now,
+// self excluded (the sync handler below). The pill's NUMBER also counts WS/REST peers that are never pruned, so it cannot
+// say who is online; the pill's COLOUR reads this instead. Keyed to the CURRENT community topic (crewPresenceTopic): the
+// car service can briefly still hold the club you just left.
+const crewSubs = new Set<() => void>();
+function notifyCrew(): void { crewSubs.forEach((fn) => { try { fn(); } catch {} }); }
+
+/** The presence topic this phone joins for its crew: the active community's — none in ghost mode. The one rule, shared by
+ *  the car service (carDataService) and the crew pill. */
+export function crewPresenceTopic(): string | null {
+  const s = getSettings();
+  if (getAvatarMode(s) === "ghost") return null;
+  return s.activeCommunityId ? `convoy:community:${s.activeCommunityId}` : null;
+}
+
+/** Other members connected to `topic` right now (with a position, as the map draws them), live or parked. */
+export function onlineCrewCount(topic: string | null): number {
+  if (!topic) return 0;
+  const e = entries.get(topic);
+  if (!e) return 0;
+  const ids = new Set<string>();
+  for (const p of e.peers) if (p && typeof p.lat === "number" && typeof p.lng === "number") ids.add(p.user_id);
+  return ids.size;
+}
+
+export function subscribeOnlineCrew(fn: () => void): () => void {
+  crewSubs.add(fn);
+  return () => { crewSubs.delete(fn); };
+}
 
 function doTrack(e: Entry, force = false): void {
   if (!e.channel || e.status !== "SUBSCRIBED") return;
@@ -208,6 +240,7 @@ export function joinPresence(opts: {
         try { ent.channel?.untrack?.(); } catch {}
         try { if (ent.channel && supabase) supabase.removeChannel(ent.channel); } catch {}
         entries.delete(topic);
+        notifyCrew();
       }
     },
   };

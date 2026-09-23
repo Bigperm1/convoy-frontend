@@ -55,6 +55,7 @@ import { speedLimitVisible } from '../speedLimit';
 import type { RoadEvent } from '../driveBcEvents';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 import { useAccent } from '../appSkin';
+import { useOnlineCrewCount } from '../convoyPresence';
 
 // CarPlay HUD floor — a solid dark tint ONLY on light basemaps (dawn / day / satellite),
 // where clear glass over the bright map would wash out. On DARK basemaps (dusk / night)
@@ -452,6 +453,9 @@ export function CarSurface() {
   // not go away, it just has exactly one home now. Crew is OTHER crew only, matching
   // the phone rule.
   const crewCount = (s.peers || []).length;
+  // GREEN while another member is online right now (Jeff, 2026-09-23: "make the 1 crew pill turn green when members are
+  // online"). Presence — who is connected this moment — not crewCount, which also counts WS/REST peers seen earlier.
+  const crewOnline = useOnlineCrewCount() > 0;
 
   // Measured CPWindow width -> bottom nav-stack width. See CAR_LEFT_INSET: the
   // stack has to fit BETWEEN the speed cluster and the system map buttons, and the
@@ -1000,15 +1004,16 @@ export function CarSurface() {
           this bundle, the crash lives here; re-land the left-anchor behind a verified-safe
           form afterwards. Do NOT restore without a passing head-unit test. */}
       <View style={[styles.topCenterRow, hudFit(IS_AA ? 'left top' : 'center top')]} pointerEvents="none">
-        <View style={[styles.crewPill, { backgroundColor: carHudFloor() }]}>
-          <GlassFill glassStyle="regular" tintColor={undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
+        {/* The pill itself, not the row above (whose AA anchor the mitigation note is about): a border and a glass tint. */}
+        <View style={[styles.crewPill, { backgroundColor: carHudFloor() }, crewOnline && styles.crewPillOnline]}>
+          <GlassFill glassStyle="regular" tintColor={crewOnline ? 'rgba(48,209,88,0.42)' : undefined} style={{ borderRadius: 9, overflow: 'hidden' }} />
           {/* RED until location is set to Always (Jeff, 2026-07-30). This is the one
               setting that decides whether the car marker keeps tracking with the
               phone locked in a mount, and when it is wrong the symptom looks like
               our bug — so it gets a permanent, glanceable tell right where the
               driver already reads the build number. Back to white the moment the
               permission is granted (re-read on every foreground). */}
-          <Text style={[styles.crewPillText, !s.alwaysLocation && styles.crewPillTextWarn]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+          <Text style={[styles.crewPillText, crewOnline && styles.crewPillTextOnline, !s.alwaysLocation && styles.crewPillTextWarn]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {crewCount} Crew
           </Text>
         </View>
@@ -2157,6 +2162,9 @@ const styles = StyleSheet.create({
   // on the PHONE pill only now (map.tsx:3204). Do not re-add fields here.
   crewPillText: { color: '#C7CCD1', fontSize: IS_AA ? 11 : 9, fontWeight: '600' },
   crewPillTextWarn: { color: '#E4002B' },  // candy-apple red — the one red everywhere
+  // Crew online (presence): the system "online" green — the phone pill's live dot. Red (above) still wins for the text.
+  crewPillOnline: { borderColor: 'rgba(48,209,88,0.9)' },
+  crewPillTextOnline: { color: '#FFFFFF' },
   scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },

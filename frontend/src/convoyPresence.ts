@@ -14,10 +14,10 @@
 // The actual channel is owned by presenceHub.ts (ONE per topic) — this hook is
 // just the phone-map consumer of that hub. See presenceHub for why.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { supabase, SUPABASE_ENABLED } from "./supabase";
 import { toGRCSlug } from "./vehicleAssets";
-import { joinPresence, type PresenceHandle } from "./presenceHub";
+import { crewPresenceTopic, joinPresence, onlineCrewCount, subscribeOnlineCrew, type PresenceHandle } from "./presenceHub";
 
 export type ConvoyPresencePeer = {
   user_id: string;
@@ -209,4 +209,11 @@ export function useConvoyPresence(
   }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec, me?.scanId]);
 
   return { peers, status };
+}
+
+/** Other crew members online right now in this phone's community (presenceHub.onlineCrewCount) — what turns the Crew pill
+ *  green on the phone, CarPlay and Android Auto (Jeff, 2026-09-23). 0 in ghost mode or with no community. */
+export function useOnlineCrewCount(): number {
+  const read = () => onlineCrewCount(crewPresenceTopic());
+  return useSyncExternalStore(subscribeOnlineCrew, read, read);
 }

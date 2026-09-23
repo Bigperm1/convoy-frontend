@@ -16,7 +16,9 @@ import { GOOGLE_MAPS_KEY } from "../api";
 import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
 import { GlassFill, hudTint, drawerTint } from "../Glass";
-import { useAccent, useAccentAlpha } from "../appSkin";
+import { useAccentAlpha } from "../appSkin";
+import { skin } from "../tierTheme";
+import { useWaveMetal, useWaveY } from "../ui/SkinWave";
 import { PressableScale } from "../ui/PressableScale";
 import { COLORS } from "../theme";
 
@@ -211,7 +213,9 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
     }
   }, [activeKey, dropAnim]);
 
-  const accent = useAccent();
+  // The pill icons turn as the unlock wave's band crosses this row (src/skinWave.ts); 0.18 until measured.
+  const wavePos = useWaveY(0.18);
+  const accent = skin(useWaveMetal(wavePos.y.current)).accent;
   const accentWell = useAccentAlpha(0.14);
   const accentHairline = useAccentAlpha(0.35);
   const unit = getSettings().speedUnit;
@@ -280,7 +284,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   };
 
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
+    <View ref={wavePos.ref} onLayout={wavePos.onLayout} style={styles.wrap} pointerEvents="box-none">
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}

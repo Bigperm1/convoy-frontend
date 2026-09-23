@@ -198,6 +198,7 @@ export function RadioRow({
   selected,
   onSelect,
   feature,
+  lockedNote,
 }: {
   icon: any;
   iconColor: string;
@@ -205,6 +206,9 @@ export function RadioRow({
   subtitle?: string;
   selected: boolean;
   onSelect: () => void;
+  /** Locked by something other than a plan — Diamond waits for the first 3D scan. Dimmed, a padlock instead of the
+   *  radio, and the tap still goes to onSelect, which explains how to unlock it (no paywall: it cannot be bought). */
+  lockedNote?: boolean;
   /** Premium-gate this choice. Same contract as ToggleRow: the radio is replaced by the
    *  tier's H (silver = Premium, gold = Ultra Premium) and the whole row opens the
    *  paywall instead of selecting. Pass the FEATURE, never a tier — the metal is derived
@@ -214,21 +218,24 @@ export function RadioRow({
   const unlocked = useFeature(feature ?? "arrow_colors");
   const tier = useFeatureTier(feature ?? "arrow_colors");
   const locked = !!feature && !unlocked;
+  const dim = locked || !!lockedNote;
   return (
     <TouchableOpacity
       onPress={() => (locked ? openPaywall(feature!) : onSelect())}
       activeOpacity={0.7}
       style={styles.row}
     >
-      <View style={[styles.iconWrap, { backgroundColor: iconColor + "22" }, locked && styles.iconWrapLocked]}>
-        <Ionicons name={icon} size={20} color={locked ? COLORS.textDim : iconColor} />
+      <View style={[styles.iconWrap, { backgroundColor: iconColor + "22" }, dim && styles.iconWrapLocked]}>
+        <Ionicons name={icon} size={20} color={dim ? COLORS.textDim : iconColor} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.title, locked && styles.titleLocked]}>{title}</Text>
+        <Text style={[styles.title, dim && styles.titleLocked]}>{title}</Text>
         {!!subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
       {locked ? (
         <TierLock tier={tier} size={24} />
+      ) : lockedNote ? (
+        <Ionicons name="lock-closed" size={18} color={COLORS.textDim} />
       ) : (
         <View style={[styles.radioOuter, selected && { borderColor: iconColor }]}>
           {selected && <View style={[styles.radioInner, { backgroundColor: iconColor }]} />}

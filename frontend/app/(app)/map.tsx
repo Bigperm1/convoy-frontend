@@ -88,7 +88,8 @@ import { PoliceBadgeIcon } from "../../src/components/MapControlIcons";
 import CompassNeedle from '../../src/components/CompassNeedle';
 import { syncScanIdToBackend, reconcileScanState } from '../../src/carScan';
 import { startHeatProbe, stopHeatProbe } from '../../src/heatProbe';
-import { useAccent, useAccentAlpha, useAppSkin } from "../../src/appSkin";
+import { useAccent, useAccentAlpha } from "../../src/appSkin";
+import { SkinFade } from "../../src/ui/SkinWave";
 
 // ── MAP FURNITURE WEARS THE APP SKIN (Jeff, 2026-08-25) ──────────────────────
 // "we should also do the crew/2D/3D/compass tiered too". These three are baked candy
@@ -493,7 +494,6 @@ export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const accent = useAccent();
-  const skinTier = useAppSkin();
   const accentTint12 = useAccentAlpha(0.12);
   const navInset = Platform.OS === "android" ? insets.bottom : 0;
   // `acc` = CoreLocation horizontal accuracy in metres, plumbed 2026-08-29 for telemetry
@@ -6024,11 +6024,14 @@ export default function MapScreen() {
               convention for a view switch, so only the icon comes out. */}
           {/* Candy 2D/3D lettering — the CarPlay view button's exact art (8/20).
               Still shows what you GET, per the 8/15 convention. */}
-          <Image
-            source={view2D ? VIEW3D_ART[skinTier] : VIEW2D_ART[skinTier]}
-            style={{ width: 34, height: 34 }}
-            resizeMode="contain"
-          />
+          {/* Turns with the unlock wave as its band crosses the button (src/skinWave.ts). */}
+          <SkinFade render={(t) => (
+            <Image
+              source={view2D ? VIEW3D_ART[t] : VIEW2D_ART[t]}
+              style={{ width: 34, height: 34 }}
+              resizeMode="contain"
+            />
+          )} />
         </PressableScale>
         )}
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
@@ -6053,7 +6056,7 @@ export default function MapScreen() {
           {/* Brand-green people glyph over a white "Crew" label (Jeff, 2026-07-25).
               The CarPlay crew map button uses the SAME green — see CAR_ICON_CREW. */}
           {/* Candy crew glyph — the SAME art as the CarPlay crew button (8/20). */}
-          <Image source={CREW_ART[skinTier]} style={{ width: 26, height: 26 }} resizeMode="contain" />
+          <SkinFade render={(t) => <Image source={CREW_ART[t]} style={{ width: 26, height: 26 }} resizeMode="contain" />} />
           <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Crew</Text>
         </PressableScale>
         {/* Compass — bottom of stack. The needle rotates opposite the live map

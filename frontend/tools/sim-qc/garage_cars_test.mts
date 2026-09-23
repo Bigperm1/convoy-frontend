@@ -783,6 +783,18 @@ console.log("P · the 3D class car");
   await resetAll({ ...ownSettings }, { ownerId: "userA" });
   await gc.claimGarageFor("userA", { car_make: "Subaru" });
   ok("P43d the SAME account re-claiming changes nothing in settings", eq(gc.identityOfSettings(S()), OWN));
+  // P44 the account's FIRST finished scan holds the metal worn (appSkin.holdSkinForUnlock) before it records the scan, so
+  // Diamond arrives as the unlock wave (src/skinWave.ts); a second scan unlocks nothing new and holds nothing
+  publish("h1"); publish("h2");
+  await resetAll({ selfMarkerType: "arrow", carScanId: "h1", carScanStatus: "submitted", carScanSubmittedAt: new Date().toISOString() });
+  skinStub.holds.length = 0;
+  const firstHow = await cs.deliverSubmittedScan("h1", { heroUrl: `${MODELS}/scan_h1.glb`, mapUrl: `${MODELS}/scan_h1_map.glb` });
+  const heldFirst = [...skinStub.holds];
+  await settings.updateSettings({ carScanId: "h2", carScanStatus: "submitted", carScanSubmittedAt: new Date(Date.now() + 1000).toISOString() });
+  await cs.deliverSubmittedScan("h2", { heroUrl: `${MODELS}/scan_h2.glb`, mapUrl: `${MODELS}/scan_h2_map.glb` });
+  ok("P44 the 1st finished scan holds the metal for the unlock wave; the 2nd does not",
+    firstHow === "active" && eq(heldFirst, ["first-scan"]) && eq(skinStub.holds, ["first-scan"]),
+    `first=${firstHow} holds=${JSON.stringify(skinStub.holds)}`);
 }
 
 console.log(fails ? `\nFAIL garage_logic (${fails})` : "\nPASS garage_logic");

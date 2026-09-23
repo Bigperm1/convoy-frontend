@@ -1,10 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Alert } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import {
   SettingsPage, SectionLabel, SettingsCard, RadioRow, Divider, HelpText,
 } from "../../../src/components/settingsKit";
-import { useAppSkin, setSkinChoice, autoSkin, type SkinChoice } from "../../../src/appSkin";
+import {
+  setSkinChoice, autoSkin, appSkinNow, skinForChoice, releaseSkinHold, useDiamondUnlocked, type SkinChoice,
+} from "../../../src/appSkin";
+import { playSkinWave } from "../../../src/skinWave";
+import { canPlayWave } from "../../../src/ui/SkinUnlock";
+import { SkinFade, useWaveMetal } from "../../../src/ui/SkinWave";
+import { useReduceMotion } from "../../../src/motionPrefs";
+import { haptics } from "../../../src/haptics";
 import SkinSheen from "../../../src/components/SkinSheen";
 import { getSettings } from "../../../src/settings";
 import { skin, TIER_SKIN, type VisualTier } from "../../../src/tierTheme";
@@ -42,7 +50,7 @@ const OPTIONS: {
   { key: "brand",   icon: "leaf",     title: SKIN_NAME.brand,   sub: "The original. Always yours." },
   { key: "premium", icon: "sparkles", title: SKIN_NAME.premium, sub: "With Silver", feature: "app_skin_silver" },
   { key: "ultra",   icon: "trophy",   title: SKIN_NAME.ultra,   sub: "With Gold", feature: "app_skin_gold" },
-  { key: "diamond", icon: "diamond",  title: SKIN_NAME.diamond, sub: "With Gold + Ultra", feature: "app_skin_diamond" },
+  { key: "diamond", icon: "diamond",  title: SKIN_NAME.diamond, sub: "Unlocked by your 1st 3D scan", feature: "app_skin_diamond" },
 ];
 
 function Swatch({ tier }: { tier: VisualTier }) {
@@ -59,24 +67,55 @@ function Swatch({ tier }: { tier: VisualTier }) {
 }
 
 export default function AppSkinPage() {
-  const active = useAppSkin();
+  const router = useRouter();
+  const reduce = useReduceMotion();
+  // The preview turns with the wave (src/skinWave.ts) — it is the first thing the band crosses.
+  const active = useWaveMetal(0.14);
+  const diamondOpen = useDiamondUnlocked();
   const [choice, setChoice] = useState<SkinChoice>((getSettings().appSkin ?? "auto") as SkinChoice);
   // Buying a tier mid-screen should light the new row up immediately.
   const [, bump] = useState(0);
   useEffect(() => subscribeEntitlement(() => bump((n) => n + 1)), []);
 
   const autoTier = autoSkin();
+  const waitingForScan = choice === "diamond" && !diamondOpen;
+
+  // A pick carries the whole app to the new metal as the unlock wave (Jeff, 2026-09-23: "all the buttons etc.. on the
+  // screen turning to the next tier skin color in real time") — one tick on the tap, the band does the rest.
+  const pick = (next: SkinChoice) => {
+    haptics.tick();
+    setChoice(next);
+    void playSkinWave({
+      from: appSkinNow(),
+      to: skinForChoice(next),
+      reduce,
+      canPlay: canPlayWave(),
+      apply: async () => { await releaseSkinHold(); await setSkinChoice(next); },
+    });
+  };
+
+  // Diamond is earned, not bought: the first 3D scan unlocks it (Jeff, 2026-09-23).
+  const explainDiamond = () => {
+    haptics.tick();
+    Alert.alert(
+      "Your 1st 3D scan unlocks Diamond",
+      "Scan your car in the Garage. The moment your 3D car is built, the whole app turns Diamond.",
+      [{ text: "Not now", style: "cancel" }, { text: "Go to Garage", onPress: () => router.push("/(app)/garage" as any) }],
+    );
+  };
 
   return (
     <SettingsPage title="App Skin">
       <View style={styles.preview}>
-        <Swatch tier={active} />
+        <SkinFade render={(t) => <Swatch tier={t} />} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.previewTitle, { color: skin(active).accent }]}>
             {SKIN_NAME[active]}
           </Text>
           <Text style={styles.previewSub}>
-            {choice === "auto" ? "Following your tier" : "Your pick"}
+            {waitingForScan
+              ? "Diamond unlocks with your 1st 3D scan"
+              : choice === "auto" ? "Following your plan" : "Your pick"}
           </Text>
         </View>
       </View>
@@ -87,9 +126,9 @@ export default function AppSkinPage() {
           icon="color-wand"
           iconColor={skin(autoTier).accent}
           title="Automatic"
-          subtitle="Always wear the best metal your tier unlocks"
+          subtitle="Always wear the best metal you have unlocked"
           selected={choice === "auto"}
-          onSelect={() => { setChoice("auto"); setSkinChoice("auto"); }}
+          onSelect={() => pick("auto")}
         />
         {OPTIONS.map((o) => (
           <React.Fragment key={o.key}>
@@ -101,14 +140,15 @@ export default function AppSkinPage() {
               subtitle={o.sub}
               selected={choice === o.key}
               feature={o.feature}
-              onSelect={() => { setChoice(o.key); setSkinChoice(o.key); }}
+              lockedNote={o.key === "diamond" && !diamondOpen}
+              onSelect={() => (o.key === "diamond" && !diamondOpen ? explainDiamond() : pick(o.key))}
             />
           </React.Fragment>
         ))}
       </SettingsCard>
 
       <HelpText>
-        {`Your metal arrives with your plan — Silver turns the app silver, Gold turns it gold, and adding Ultra unlocks Diamond. You can always drop back down (gold can wear silver or green), but you can never wear a metal above your plan.\n\nOn the map, the colours that MEAN something never change: the route line, traffic colours, hazards and speed cameras stay exactly as they are, because you read those at speed. Your search pins do wear your metal.`}
+        {`Your metal arrives with your plan — Silver turns the app silver, Gold turns it gold, and your 1st 3D scan unlocks Diamond. You can always drop back down (gold can wear silver or green), but you can never wear a metal above your plan.\n\nOn the map, the colours that MEAN something never change: the route line, traffic colours, hazards and speed cameras stay exactly as they are, because you read those at speed. Your search pins do wear your metal.`}
       </HelpText>
     </SettingsPage>
   );

@@ -84,7 +84,15 @@ export type GarageState = {
   class3dPick?: { cls: string; modelKey: string };
   /** The member's own car identity, set aside while the 3D class car is on the road (see the header). */
   ownIdentity?: CarIdentity;
+  /** An UNLOCK waiting to be shown (Jeff, 2026-09-23: "an animation for each unlock tier … all the buttons … turning
+   *  to the next tier skin color in real time"). While set, the app keeps wearing `from` (appSkin.appSkinNow) so the
+   *  new metal can arrive on screen as the unlock wave (src/skinWave.ts) instead of flipping unseen — mid-drive, or at
+   *  a launch with the phone in a pocket. Cleared by the wave, by an account switch, and ignored once stale. */
+  skinHold?: SkinHold;
 };
+
+/** What an unlock holds back until it is shown: the metal worn before it, and why ('first-scan' = Diamond). */
+export type SkinHold = { key: "first-scan" | "tier"; from: VisualTier; at: string };
 
 const KEY = "convoy.garage.v1";
 const EMPTY: GarageState = { nicknames: {}, identity: {}, scans: [], completeScanIds: [] };
@@ -133,7 +141,16 @@ function sanitize(p: any): GarageState {
     profileClearPending: p?.profileClearPending === true,
     class3dPick,
     ownIdentity: p?.ownIdentity && typeof p.ownIdentity === "object" ? ident(p.ownIdentity) : undefined,
+    skinHold: sanitizeHold(p?.skinHold),
   };
+}
+
+const METALS: readonly VisualTier[] = ["brand", "premium", "ultra", "diamond"];
+function sanitizeHold(v: any): SkinHold | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const key = v.key === "first-scan" || v.key === "tier" ? v.key : undefined;
+  const from = METALS.includes(v.from) ? (v.from as VisualTier) : undefined;
+  return key && from && str(v.at) ? { key, from, at: v.at } : undefined;
 }
 
 const loadPromise: Promise<GarageState> = (async () => {
@@ -186,9 +203,19 @@ export async function claimGarage(userId: string): Promise<"same" | "first" | "r
   await updateGarage({
     ownerId: userId, arrowPick: undefined, scanParked: undefined, chosenAt: undefined,
     nicknames: {}, identity: {}, scans: [], completeScanIds: [], profileClearPending: undefined,
-    class3dPick: undefined, ownIdentity: undefined,
+    class3dPick: undefined, ownIdentity: undefined, skinHold: undefined,
   });
   return "reset";
+}
+
+/** This ACCOUNT has at least one FINISHED 3D scan — what unlocks Diamond (Jeff, 2026-09-23: "when someone actually
+ *  scans their car it unlocks diamond not on the purchase"). completeScanIds only ever holds scans whose hero AND map
+ *  GLBs were checked (carScan.checkScanReady), and a claim by another account empties it. A 'ready' scan in settings
+ *  counts too: it was delivered, and a phone can hold one before the list is filled (including the pre-fix latch —
+ *  'ready' with no carScanMapUrl — which the Garage HEAL repairs later). Pure: settings come in as a parameter, so
+ *  this file keeps no local runtime imports. */
+export function hasCompletedScan(s: { carScanStatus?: string; carScanId?: string }): boolean {
+  return state.completeScanIds.length > 0 || (s.carScanStatus === "ready" && !!s.carScanId);
 }
 
 /** What puts the member's own car identity back into settings (ownIdentity, above). An empty field goes back empty,

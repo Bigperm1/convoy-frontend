@@ -52,8 +52,8 @@ import { supabase, SUPABASE_ENABLED, SUPABASE_ANON_KEY } from "./supabase";
 import { api } from "./api";
 import { getSettings, updateSettings, getSelfMarkerType } from "./settings";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
-import { setSkinChoice } from "./appSkin";
-import { ensureGarageLoaded, getGarage, ownIdentityBack, updateGarage, SKIN_FOR_SCAN } from "./garageStore";
+import { holdSkinForUnlock, setSkinChoice } from "./appSkin";
+import { ensureGarageLoaded, getGarage, hasCompletedScan, ownIdentityBack, updateGarage, SKIN_FOR_SCAN } from "./garageStore";
 
 export const SCAN_BUCKET = "car-scans";
 
@@ -613,6 +613,13 @@ export async function deliverSubmittedScan(
   if (owner !== undefined && getGarage().ownerId !== owner) {
     try { logEvent(`carscan-delivered id=${id} map=1 stale=owner`); } catch {}
     return "stale";
+  }
+  // The account's FIRST finished scan unlocks Diamond (appSkin.diamondUnlocked; Jeff, 2026-09-23). Every path below
+  // records it, so hold the metal worn now BEFORE any of them does: the new metal then arrives as the unlock wave when
+  // the member is looking at the app (skinWave.ts), never as an unseen flip — this runs at launch too, in a pocket.
+  if (!hasCompletedScan(getSettings())) {
+    await holdSkinForUnlock("first-scan");
+    try { logEventReliable(`skin-unlock held key=first-scan id=${id}`); } catch {}
   }
   const s = getSettings();
   if (s.carScanStatus !== "submitted" || s.carScanId !== id) {

@@ -1,7 +1,7 @@
 import React from "react";
 import { ImageBackground, View, StyleSheet, type ImageSourcePropType } from "react-native";
-import { useAppSkin } from "../appSkin";
 import type { VisualTier } from "../tierTheme";
+import { WaveWipe } from "../ui/SkinWave";
 
 /**
  * Full-screen wallpaper shown behind the app's dark pages (Comms, Garage, Hub,
@@ -43,16 +43,12 @@ export default function GlassBackdrop({
   scrim?: number;
   source?: ImageSourcePropType;
 }) {
-  const tier = useAppSkin();
-  return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <ImageBackground
-        source={source ?? TIER_WALLPAPER[tier]}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-      >
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(3,8,7,${scrim})` }]} />
-      </ImageBackground>
-    </View>
+  const paper = (src: ImageSourcePropType) => (
+    <ImageBackground source={src} style={StyleSheet.absoluteFill} resizeMode="cover">
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(3,8,7,${scrim})` }]} />
+    </ImageBackground>
   );
+  // A pinned wallpaper (the login lockup) stays put; the skin's road is wiped in with the unlock wave's band.
+  if (source) return <View pointerEvents="none" style={StyleSheet.absoluteFill}>{paper(source)}</View>;
+  return <WaveWipe render={(t: VisualTier) => paper(TIER_WALLPAPER[t])} />;
 }

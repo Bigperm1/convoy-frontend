@@ -39,7 +39,10 @@
 import { useEffect, useState } from "react";
 import { getTier, subscribeEntitlement, ENTITLEMENTS_ENFORCED } from "./entitlements";
 import { skin, type VisualTier, type TierSkin } from "./tierTheme";
-import { getSettings, updateSettings } from "./settings";
+import { getSettings, updateSettings, subscribeSettings } from "./settings";
+import {
+  ensureGarageLoaded, getGarage, hasCompletedScan, subscribeGarage, updateGarage, type GarageState, type SkinHold,
+} from "./garageStore";
 
 /** What the customer picked. "auto" = follow whatever they are entitled to, which is
  *  the default so the metal ARRIVES with the purchase without them touching a setting. */
@@ -48,14 +51,46 @@ export type SkinChoice = "auto" | "brand" | "premium" | "ultra" | "diamond";
 type Listener = (t: VisualTier) => void;
 const listeners = new Set<Listener>();
 
-/** The highest metal this account has actually paid for. club_founder / beta_og sit at
- *  rank 99 and get the full palette — they are our earliest supporters, not free-riders.
- *  While ENTITLEMENTS_ENFORCED is false every gate answers "unlocked", so honouring that
- *  here too keeps the dev/tester experience consistent with every other gate. */
+// ── DIAMOND IS EARNED BY A SCAN (Jeff, 2026-09-23) ───────────────────────────────
+// "lets gate the diamond to when someone actually scans their car it unlocks diamond not on the purchase."
+// Buying Gold + Ultra buys the SCANS; the member's first finished 3D scan is what unlocks the Diamond metal —
+// with entitlements on or off. Until then the top of the ladder is Gold. One gate, here, because every surface
+// (phone chrome, the map's pins, CarPlay and Android Auto buttons) reads its metal through appSkinNow().
+
+/** The signed-in account, set by the app shell (app/(app)/_layout.tsx). The garage store is per ACCOUNT but is only
+ *  re-claimed when the Garage gains focus, so until then it can still be the previous account's on this phone: a
+ *  store owned by someone else unlocks nothing. Unknown (a car-first launch before the phone UI mounts) = trust the
+ *  store, which is this phone's last claimed account. */
+let account: string | undefined;
+export function setSkinAccount(userId: string | null | undefined): void {
+  const next = userId || undefined;
+  if (next === account) return;
+  account = next;
+  emitIfChanged();
+}
+function storeIsMine(g: GarageState): boolean {
+  return !account || !g.ownerId || g.ownerId === account;
+}
+
+/** True once this account's first 3D scan has finished (garageStore.hasCompletedScan) — and, with entitlements on,
+ *  while it still holds a plan that includes Ultra. */
+export function diamondUnlocked(): boolean {
+  if (!storeIsMine(getGarage()) || !hasCompletedScan(getSettings())) return false;
+  if (!ENTITLEMENTS_ENFORCED) return true;
+  const t = getTier();
+  return t === "ultra" || t === "club_founder" || t === "beta_og";
+}
+
+/** The highest metal this account may wear. club_founder / beta_og sit at rank 99 and get the full palette — they
+ *  are our earliest supporters, not free-riders. While ENTITLEMENTS_ENFORCED is false every PAID metal is open, as
+ *  every other gate answers "unlocked" — but Diamond still waits for the first scan (see above). */
 export function entitledSkin(): VisualTier {
-  if (!ENTITLEMENTS_ENFORCED) return "diamond";
+  const top = ENTITLEMENTS_ENFORCED ? tierCeiling() : "diamond";
+  return top === "diamond" && !diamondUnlocked() ? "ultra" : top;
+}
+function tierCeiling(): VisualTier {
   switch (getTier()) {
-    case "ultra":      // Gold + Ultra — Diamond (Jeff, 2026-09-22: "the diamond is only for ultra")
+    case "ultra":      // Gold + Ultra — Diamond, once scanned (Jeff, 2026-09-22: "the diamond is only for ultra")
     case "club_founder":
     case "beta_og":
       return "diamond";
@@ -70,12 +105,11 @@ export function entitledSkin(): VisualTier {
 
 const ORDER: VisualTier[] = ["brand", "premium", "ultra", "diamond"];
 
-/** What "auto" wears. With entitlements enforced, the best metal the account has paid for. While they
- *  are OFF every metal is selectable, but auto stays GOLD — what every tester's app wore before Diamond
- *  merged (2026-09-22) — so the merge changes nobody's app on its own; Diamond is picked in Settings →
- *  App Skin, or arrives by driving a scanned car (garageCars.ts). */
+/** What "auto" wears: the best metal the account may wear. While entitlements are OFF that is Gold — what every
+ *  tester's app wore before Diamond merged (2026-09-22) — until the first 3D scan unlocks Diamond (2026-09-23), which
+ *  "auto" then wears: the unlock is the whole point, and it arrives as the unlock wave (skinWave.ts). */
 export function autoSkin(): VisualTier {
-  return ENTITLEMENTS_ENFORCED ? entitledSkin() : "ultra";
+  return entitledSkin();
 }
 
 /** Which metals this account may choose, cheapest first. Drives the Settings row.
@@ -84,23 +118,78 @@ export function allowedSkins(): VisualTier[] {
   return ORDER.slice(0, ORDER.indexOf(entitledSkin()) + 1);
 }
 
-/** The metal actually in force. A stored choice is CLAMPED to what is entitled, so an
- *  expired or downgraded subscription falls back on its own instead of leaving a gold
- *  app behind a lapsed card — and the choice is remembered, so re-subscribing restores
- *  it rather than resetting them to green. */
-export function appSkinNow(): VisualTier {
+/** The metal the CHOICE resolves to, ignoring an unlock that is waiting to be shown. A stored choice is CLAMPED to
+ *  what is entitled, so an expired or downgraded subscription falls back on its own instead of leaving a gold app
+ *  behind a lapsed card — and the choice is remembered, so re-subscribing restores it rather than resetting to green. */
+export function appSkinUnheld(): VisualTier {
+  return skinForChoice((getSettings().appSkin ?? "auto") as SkinChoice);
+}
+
+/** The metal a choice resolves to right now (the App Skin page's wave target). */
+export function skinForChoice(choice: SkinChoice): VisualTier {
   const max = entitledSkin();
-  const choice = (getSettings().appSkin ?? "auto") as SkinChoice;
   if (choice === "auto") return autoSkin();
   const want = ORDER.indexOf(choice as VisualTier);
   return want < 0 ? max : ORDER[Math.min(want, ORDER.indexOf(max))];
 }
 
+/** An unlock older than this is shown no more: it simply takes effect (the host could not play it — a long drive,
+ *  the app never opened on a tab screen). The metal must never be held back indefinitely. */
+const HOLD_MAX_MS = 24 * 60 * 60 * 1000;
+
+function activeHold(): SkinHold | undefined {
+  const g = getGarage();
+  const h = g.skinHold;
+  if (!h || !storeIsMine(g)) return undefined;
+  const age = Date.now() - Date.parse(h.at);
+  return age >= 0 && age < HOLD_MAX_MS ? h : undefined;
+}
+
+/** The metal actually in force: the choice (appSkinUnheld) — or, while an unlock waits to be shown, the metal worn
+ *  before it, so every surface (CarPlay and Android Auto included) keeps one metal until the wave carries the new one
+ *  in. Clamped, so a hold can never show a metal the account may no longer wear. */
+export function appSkinNow(): VisualTier {
+  const h = activeHold();
+  if (!h) return appSkinUnheld();
+  return ORDER[Math.min(ORDER.indexOf(h.from), ORDER.indexOf(entitledSkin()))];
+}
+
+/** The unlock waiting to be shown, if it changes what is worn: from → to. */
+export function pendingUnlock(): { key: SkinHold["key"]; from: VisualTier; to: VisualTier } | null {
+  const h = activeHold();
+  if (!h) return null;
+  const from = appSkinNow();
+  const to = appSkinUnheld();
+  return from === to ? null : { key: h.key, from, to };
+}
+
+/** Hold the metal worn NOW while an unlock lands, so it can be shown (src/skinWave.ts). Call BEFORE the write that
+ *  unlocks. A hold already waiting is kept — its `from` is what the member last saw. */
+export async function holdSkinForUnlock(key: SkinHold["key"]): Promise<void> {
+  await ensureGarageLoaded();
+  if (activeHold()) return;
+  await updateGarage({ skinHold: { key, from: appSkinNow(), at: new Date().toISOString() } });
+}
+
+/** The unlock has been shown (or will not be): wear the new metal. */
+export async function releaseSkinHold(): Promise<void> {
+  await ensureGarageLoaded();
+  if (getGarage().skinHold) await updateGarage({ skinHold: undefined });
+}
+
+let lastWorn: VisualTier | null = null;
+
 function emit() {
   const t = appSkinNow();
+  lastWorn = t;
   // One bad listener must never stop the others from re-rendering — a half-applied skin
   // (gold header, green tab bar) is the one state that looks broken rather than plain.
   listeners.forEach((l) => { try { l(t); } catch {} });
+}
+
+/** Repaint only when the metal in force actually changed — the garage and settings stores notify on every write. */
+function emitIfChanged() {
+  if (appSkinNow() !== lastWorn) emit();
 }
 
 /** Persist a choice and repaint every subscribed surface. Rejects a metal the account
@@ -123,6 +212,14 @@ export function subscribeAppSkin(fn: Listener): () => void {
 // Buying (or losing) a tier repaints the app immediately — no relaunch, and no reading
 // of a tier the account no longer holds.
 subscribeEntitlement(() => emit());
+// A scan landing (completeScanIds / a 'ready' scan), an unlock being held or released, an account claim, and both stores
+// finishing their launch load all change what is worn — repaint when they do. The callbacks must not throw
+// (settings.ts notifies synchronously inside updateSettings).
+subscribeGarage(() => { try { emitIfChanged(); } catch {} });
+subscribeSettings(() => { try { emitIfChanged(); } catch {} });
+// Start the garage load as early as anything reads the metal — the CarPlay / Android Auto roots build their buttons
+// from appSkinNow() at connect, possibly before any phone screen has mounted.
+void ensureGarageLoaded();
 
 /** React binding. Re-reads on mount because the value can change between module load
  *  and this mount (a purchase completing while a screen is off-stack, say). */
@@ -133,6 +230,21 @@ export function useAppSkin(): VisualTier {
     return subscribeAppSkin(setT);
   }, []);
   return t;
+}
+
+/** React binding for the Diamond unlock (the App Skin row). Re-renders when a scan lands or the account changes, even
+ *  when the metal worn does not (a member on Gold who has just unlocked Diamond). */
+export function useDiamondUnlocked(): boolean {
+  const [v, setV] = useState<boolean>(diamondUnlocked);
+  useEffect(() => {
+    const read = () => setV(diamondUnlocked());
+    read();
+    const a = subscribeAppSkin(read);
+    const b = subscribeGarage(read);
+    const c = subscribeSettings(read);
+    return () => { a(); b(); c(); };
+  }, []);
+  return v;
 }
 
 /** The whole ramp, for gradients and rims. */

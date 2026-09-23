@@ -32,7 +32,7 @@ const FEATURE_HOOKS: Partial<Record<PremiumFeature, string>> = {
   car_3d: "Drive the map in 3D",
   car_scan: "Put your own car on the map",
   garage: "A garage for every car you own",
-  app_skin_diamond: "The diamond app skin",
+  app_skin_diamond: "The diamond app skin — your 1st 3D scan unlocks it",
   club_create: "Create clubs, events and cruises",
   top_speed: "Track your Top Cruise Speed",
   map_modes: "Dusk, night and satellite maps",

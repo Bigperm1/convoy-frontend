@@ -37,6 +37,21 @@ const FADE_MS = 450;
 // recoverable; a cover over the entire app is not, which is why this one gets a timeout too.
 const SAFETY_MS = 3000;
 
+// ── WHEN THE APP IS ACTUALLY ON SCREEN (2026-09-23) ───────────────────────────
+// The unlock wave (src/ui/SkinUnlock.tsx) must not play behind this cover: on the sim a Diamond unlock held at launch
+// ran its whole band while the splash was still fading, and the member saw only the badge. So the splash says when it
+// has lifted. Module-level, like every other bus here — the host lives in a different subtree.
+let splashDoneAt = 0;
+const splashListeners = new Set<() => void>();
+/** Date.now() when the launch splash lifted, or 0 while it still covers the app. */
+export function splashLiftedAt(): number {
+  return splashDoneAt;
+}
+export function subscribeSplashLifted(fn: () => void): () => void {
+  splashListeners.add(fn);
+  return () => { splashListeners.delete(fn); };
+}
+
 export default function AnimatedSplash({ onDone }: { onDone?: () => void }) {
   // Read inside the component, not at module scope: Dimensions.get('window')
   // throws if the window dimensions aren't set yet, and this module loads
@@ -63,6 +78,8 @@ export default function AnimatedSplash({ onDone }: { onDone?: () => void }) {
       if (doneRef.current) return;
       doneRef.current = true;
       logEvent(`splash-done why=${why} ms=${Date.now() - mountedAtRef.current}`);
+      splashDoneAt = Date.now();
+      splashListeners.forEach((l) => { try { l(); } catch {} });
       setGone(true);
       onDone?.();
     };

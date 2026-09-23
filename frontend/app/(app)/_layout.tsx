@@ -1,5 +1,8 @@
 import React, { useEffect, useRef } from "react";
-import { useAppSkin, useAccent } from "../../src/appSkin";
+import { setSkinAccount } from "../../src/appSkin";
+import { skin } from "../../src/tierTheme";
+import { SkinFade, useWaveMetal } from "../../src/ui/SkinWave";
+import { SkinUnlockHost, SkinWaveOverlay } from "../../src/ui/SkinUnlock";
 import { Tabs, useRouter, Redirect } from "expo-router";
 import * as Linking from "expo-linking";
 import { parseDeepLink, setIntent } from "../../src/deepLinks";
@@ -60,9 +63,16 @@ const TAB_ICON = {
     off:     require("../../assets/images/tabicons/music_off.png"),
   },
 } as const;
+/** Where the tab bar sits for the unlock wave (0 = top of the screen, 1 = bottom): the band reaches it last. */
+const TAB_BAR_Y = 0.94;
 function TabGlyph({ kind, focused, size = 30 }: { kind: keyof typeof TAB_ICON; focused: boolean; size?: number }) {
-  const tier = useAppSkin();
-  return <Image source={focused ? TAB_ICON[kind][tier] : TAB_ICON[kind].off} style={{ width: size, height: size }} contentFit="contain" />;
+  if (!focused) return <Image source={TAB_ICON[kind].off} style={{ width: size, height: size }} contentFit="contain" />;
+  // The active glyph is baked per metal, so it cross-fades to the new one as the unlock wave's band reaches the bar.
+  return (
+    <SkinFade y={TAB_BAR_Y} render={(t) => (
+      <Image source={TAB_ICON[kind][t]} style={{ width: size, height: size }} contentFit="contain" />
+    )} />
+  );
 }
 import CommsTabButton from "../../src/components/CommsTabButton";
 import MapTabButton from "../../src/components/MapTabButton";
@@ -138,8 +148,11 @@ if (Platform.OS !== "web") {
 }
 
 export default function AppLayout() {
-  const tabAccent = useAccent();
+  // The label turns with its glyph: the old metal until the unlock wave's band crosses the bar.
+  const tabAccent = skin(useWaveMetal(TAB_BAR_Y)).accent;
   const { user } = useAuth();
+  // Diamond is unlocked per ACCOUNT (the first 3D scan): tell the skin who is signed in (appSkin.setSkinAccount).
+  useEffect(() => { setSkinAccount(user?.id); }, [user?.id]);
   const router = useRouter();
   const [settings] = useSettings();
   const insets = useSafeAreaInsets();
@@ -502,6 +515,10 @@ export default function AppLayout() {
       {/* Build-80 plan: the one upgrade sheet, opened via openPaywall() from any
           locked surface. Inert while ENTITLEMENTS_ENFORCED is false. */}
       <PaywallSheet />
+      {/* The unlock wave (src/skinWave.ts): the light band + badge over everything, never touchable, and the host that
+          plays a held unlock — the first 3D scan's Diamond — the moment it can be seen. */}
+      <SkinWaveOverlay />
+      <SkinUnlockHost />
     </View>
   );
 }

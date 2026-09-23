@@ -67,7 +67,7 @@ export const PRICING: readonly RungPrice[] = [
       "The live 3D map on the phone and in the car",
       "The 3D arrow, or a 3D car of your class in your paint",
       "The gold app skin",
-      "Go yearly and add Ultra for $5: your own car scanned, the diamond skin, the Ultra garage",
+      "Go yearly and add Ultra for $5: your own car scanned, the Ultra garage — and your 1st 3D scan unlocks the diamond skin",
     ],
   },
 ];
@@ -93,7 +93,7 @@ export const ULTRA = {
     "3 Garage Scans a year — your own car on the map; unused scans carry over",
     "Extra scans $2.99 each",
     "The Ultra garage — every car you scan, pick today's car",
-    "The diamond app skin",
+    "The diamond app skin — your 1st 3D scan unlocks it",
   ],
 };
 

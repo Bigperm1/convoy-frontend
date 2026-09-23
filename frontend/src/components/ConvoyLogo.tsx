@@ -24,8 +24,8 @@
 
 import React from 'react';
 import { Image, ImageStyle, StyleProp } from 'react-native';
-import { useAppSkin } from '../appSkin';
 import type { VisualTier } from '../tierTheme';
+import { SkinFade } from '../ui/SkinWave';
 
 // Static requires — Metro needs literal paths, and all three ship in the bundle.
 // -gold2/-silver2, not -gold/-silver (2026-08-27): two reasons. (1) The first bake's
@@ -72,13 +72,14 @@ interface Props {
 }
 
 export default function ConvoyLogo({ size = 120, style, tier }: Props) {
-  const skin = useAppSkin();
-  const t = tier ?? skin;
-  return (
+  const tile = (t: VisualTier) => (
     <Image
       source={TILE[t] ?? TILE.brand}
       style={[{ width: size, height: size, borderRadius: size * 0.28 }, style]}
       resizeMode="cover"
     />
   );
+  // A forced metal stays put. The app-skin H turns with the unlock wave as the band crosses it (src/skinWave.ts).
+  if (tier) return tile(tier);
+  return <SkinFade render={tile} />;
 }

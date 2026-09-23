@@ -85,14 +85,14 @@ export function upNextCopy(t: GarageTier, scansLeft: number): UpNext {
         return {
           label: "ADD ULTRA · YEARLY",
           title: "Go yearly to add Ultra",
-          body: `Ultra rides on Gold yearly: ${annualLabel(ULTRA.annualUsd)} instead of ${annualLabel(g.annualUsd)} — your own car scanned (${ULTRA.includedScansPerYear} a year), every car in your garage, the diamond skin.`,
+          body: `Ultra rides on Gold yearly: ${annualLabel(ULTRA.annualUsd)} instead of ${annualLabel(g.annualUsd)} — your own car scanned (${ULTRA.includedScansPerYear} a year), every car in your garage — and your 1st 3D scan unlocks the diamond skin.`,
           cta: "See yearly",
         };
       }
       return {
         label: "ADD ULTRA · YEARLY",
         title: "Your own car on the map",
-        body: `Scan your car (${ULTRA.includedScansPerYear} a year), keep every car in your garage, the diamond skin. ${annualLabel(ULTRA.annualUsd)} on Gold yearly.`,
+        body: `Scan your car (${ULTRA.includedScansPerYear} a year) and keep every car in your garage — your 1st 3D scan unlocks the diamond skin. ${annualLabel(ULTRA.annualUsd)} on Gold yearly.`,
         cta: "Add Ultra",
       };
     }

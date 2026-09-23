@@ -1088,6 +1088,9 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   - Receipts (≤ 12 each per launch): `wx-here id= clouds= pop= mm= desc= kind= t=` on every chip fetch, `wx-dest why=plot|arrive
     src=cur|fc eta=<min> …` on every arrival resolve — the next "it said raining" is decidable from the row.
   - Gate: `tools/sim-qc/weather_word_test.mts` (18 checks, the measured rows as fixtures). Rides in tonight's publish (HEAD).
+  - SIM (release binary, keyed export — `expo export:embed` needs `--reset-cache` under env:exec or Metro's cache serves the
+    keyless api.ts): `wx-here id=803 clouds=62 desc=Partly cloudy kind=partly-day t=20` · `wx-dest why=plot src=cur eta=2 …` ·
+    greeting "you'll see partly cloudy skies at 20 degrees when you get there" — the same id 803 that read "cloudy" before.
 - **UI, same day ~16:45 PDT (Jeff): the written-directions face's footer now mirrors the map drawer — Show map (BLUE) · Add stop
   (GREEN) · Arrived · End, left to right (`src/CarDriveList.tsx`); and holding the map with NO route offers "Route here" under
   Custom… (`map.tsx` handleMapLongPress, outside every locked region — it is the dropped-pin `setDestination` verbatim; not offered

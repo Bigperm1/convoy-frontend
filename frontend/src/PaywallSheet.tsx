@@ -22,7 +22,7 @@ import { COLORS } from "./theme";
 import { PremiumBadge, subscribePaywall } from "./PremiumBadge";
 import { featureTier } from "./entitlements";
 import { redeemCode, featureRung, type PremiumFeature } from "./entitlements";
-import { PRICING, priceLabel, annualLabel, annualSavingPct, type PaidRung } from "./pricing";
+import { PRICING, ULTRA, priceLabel, annualLabel, annualSavingPct, type PaidRung } from "./pricing";
 
 // What the sheet leads with, per feature that opened it.
 const FEATURE_HOOKS: Partial<Record<PremiumFeature, string>> = {
@@ -73,6 +73,8 @@ export default function PaywallSheet() {
   const close = () => setVisible(false);
   // The catalog entry for the rung that unlocks this feature; null for Ultra, which is held for later.
   const sold = PRICING.find((p) => p.rung === rung) ?? null;
+  // An Ultra feature (Garage Scan, the Ultra garage, the diamond skin) is sold as the one yearly plan.
+  const ultra = rung === "ultra";
 
   const buy = (_rung: PaidRung) => {
     // The billing SDK (RevenueCat) is build-80 native work; the catalog is already the truth.
@@ -98,13 +100,13 @@ export default function PaywallSheet() {
 
           <PremiumBadge size="md" tier={tier} style={{ alignSelf: "center" }} />
           <Text style={styles.title}>{hook ?? "Unlock all of Hairpin"}</Text>
-          <Text style={styles.sub}>{sold ? sold.tagline : "Arriving in a later update."}</Text>
+          <Text style={styles.sub}>{ultra ? ULTRA.tagline : sold ? sold.tagline : ""}</Text>
 
           {/* What the rung this feature lives on adds — from the catalog, so the sheet can never
               promise something the tier does not carry. */}
-          {sold && (
+          {(ultra || sold) && (
             <View style={styles.perks}>
-              {sold.includes.map((p) => (
+              {(ultra ? ULTRA.includes : sold!.includes).map((p) => (
                 <View key={p} style={styles.perkRow}>
                   <Ionicons name="checkmark-circle" size={16} color={COLORS.brand} />
                   <Text style={styles.perkText}>{p}</Text>
@@ -133,6 +135,14 @@ export default function PaywallSheet() {
               </TouchableOpacity>
             );
           })}
+          {ultra && (
+            <TouchableOpacity activeOpacity={0.9} onPress={() => buy("gold")}>
+              <LinearGradient colors={[COLORS.brand, COLORS.brandDim]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.buyPrimary}>
+                <Text style={styles.buyPrimaryText}>{ULTRA.name} — {annualLabel(ULTRA.annualUsd)}</Text>
+                <Text style={styles.buyPrimarySub}>Yearly only · {ULTRA.includedScansPerYear} scans a year included</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
 
           {showCode ? (
             <View style={styles.codeRow}>

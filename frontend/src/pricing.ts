@@ -17,15 +17,19 @@
 //            Scout voice + hands-free, your class car in your paint, every map style, route colours,
 //            Top Cruise Speed, the silver skin).
 //   Gold   — $9.99/mo or $79.99/yr: the 3D map and a 3D car of your class, the gold skin.
-//   Ultra  — NOT a tier: Gold's add-on (Jeff, 2026-09-22 evening: "lets do the ultra which is add on to
-//            gold when you have gold you have access to ultra, for $2.99 per extra scans also gives you
-//            the diamond skin and a custom garage to house your car scans into. its not a tier."). Every
-//            Gold member gets Garage Scan (one scan a year included — "extra" scans are the $2.99 ones),
-//            the diamond skin, and the custom garage that holds their scanned cars. See ULTRA below.
+//   Ultra  — NOT a tier: GOLD-YEARLY'S ADD-ON, sold as one yearly plan "Gold + Ultra" at $84.99 (Jeff,
+//            2026-09-22, SET IN STONE: "what if ultra was $4.99 and that get 3 more scans would that work at
+//            $84.99?" … "i like your ideas and lets set this in stone"). Includes the diamond skin, the Ultra
+//            garage that holds every scanned car, and 3 Garage Scans a year — unused scans carry over while
+//            Ultra stays active; scans past those are $2.99 each. Monthly Gold cannot add Ultra: switching to
+//            Gold + Ultra is an upgrade (higher level), so it applies at once with a prorated refund.
 //
-// Store mechanics: Silver + Gold are ONE Apple subscription group (Gold the higher level: upgrade
-// immediate, downgrade at renewal); on Play two subscriptions, each with a monthly and a yearly base
-// plan, downgrades DEFERRED. USD list prices; CAD tiers are set by hand in both consoles. Family Sharing
+// Store mechanics: Silver, Gold and Gold + Ultra are ONE Apple subscription group, levels Silver < Gold <
+// Gold + Ultra (Apple: one plan per group at a time; "They're immediately upgraded and receive a refund of
+// the prorated amount"; downgrades wait for renewal). Apple has no add-on subscription, so Ultra is never a
+// second $5 subscription — that would bill on its own date and keep charging after Gold lapses. On Play,
+// Gold + Ultra is its own yearly plan at the same $84.99 (Play's add-ons exist but not in India/Korea and
+// block pause), downgrades DEFERRED. USD list prices; CAD tiers are set by hand in both consoles. Family Sharing
 // stays OFF (once on, Apple never lets it be turned off).
 
 export type PaidRung = "premium" | "gold";   // "premium" is the Silver rung's storage key (unchanged since 8/20)
@@ -57,27 +61,38 @@ export const PRICING: readonly RungPrice[] = [
   {
     rung: "gold", name: "Gold", monthlyUsd: 9.99, annualUsd: 79.99,
     monthlyProductId: "hairpin.gold.monthly", annualProductId: "hairpin.gold.annual",
-    tagline: "The map in 3D, and your own car on it.",
+    tagline: "The map in 3D, and your car on it in 3D.",
     includes: [
       "The live 3D map on the phone and in the car",
       "A 3D car of your class in your paint",
-      "Ultra: Garage Scan — your own car on the map, one scan a year included",
-      "Extra scans $2.99 each, kept in your custom garage",
-      "The gold and diamond app skins",
+      "The gold app skin",
+      "Go yearly and add Ultra for $5: your own car scanned, the diamond skin, the Ultra garage",
     ],
   },
 ];
 
-// ULTRA — Gold's add-on, not a tier (see the header). The scan is a CONSUMABLE bought at the moment of the
-// scan and used at once, never a banked credit (Apple 3.1.1: purchased credits "may not expire"); the app
-// sells it only while Gold is active. What a member has scanned stays theirs if Gold lapses (Jeff 09-17:
-// "i agree" — the car is kept and shown flat from the scan's photo on the 2D map).
+// ULTRA — Gold-yearly's add-on, one plan (see the header). The 3 included scans are a subscription allowance
+// that CARRIES OVER while Ultra stays active (Apple 3.1.1 says purchased credits "may not expire"; whether that
+// reaches a subscription allowance is unverified, so we never expire them). An extra scan is a CONSUMABLE
+// bought at the moment of the scan and used at once — never banked — and sold only while Ultra is active.
+// What a member has scanned stays theirs if Ultra or Gold lapses (Jeff 09-17: "i agree" — the car is kept
+// and shown flat from the scan's photo on the 2D map).
 export const ULTRA = {
-  requiresRung: "gold" as const,
-  includedScansPerYear: 1,
+  name: "Gold + Ultra",
+  annualUsd: 84.99,                    // = Gold yearly $79.99 + $5.00; ONE yearly plan, no monthly
+  annualProductId: "hairpin.gold_ultra.annual",
+  includedScansPerYear: 3,
+  scansCarryOver: true,                // while Ultra stays active
   extraScanUsd: 2.99,
   extraScanProductId: "hairpin.scan.extra",
-  includes: ["Garage Scan of your own car", "The diamond app skin", "A custom garage for every car you scan"],
+  tagline: "Your own car on the map — and every car you own in your garage.",
+  includes: [
+    "Everything in Gold",
+    "3 Garage Scans a year — your own car on the map; unused scans carry over",
+    "Extra scans $2.99 each",
+    "The Ultra garage — every car you scan, pick today's car",
+    "The diamond app skin",
+  ],
 };
 
 // Server-granted access (build 80, through RevenueCat — never store promo codes, which on Play need a card

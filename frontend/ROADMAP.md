@@ -1071,6 +1071,11 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **🔒 PRICING SET IN STONE (Jeff, 2026-09-22: "i like your ideas and lets set this in stone").** Free · Silver $4.99/mo or $39.99/yr ·
+  Gold $9.99/mo or $79.99/yr · **Gold + Ultra $84.99/yr, yearly only** — 3 Garage Scans a year (carry over while active), extra scans
+  $2.99, the Ultra garage, the diamond skin. One Apple subscription group (Silver < Gold < Gold + Ultra); Play: its own yearly plan.
+  Code: src/pricing.ts `ULTRA`, entitlements rank 3 for car_scan / garage / app_skin_diamond, paywall Ultra offer. Website local
+  `11fa255` (unpushed). Memory `pricing-final-set-in-stone-2026-09-22` — every entry below is history.
 - **ULTRA = GOLD'S ADD-ON, NOT A TIER (Jeff, same evening: "lets do the ultra which is add on to gold when you have gold you have
   access to ultra, for $2.99 per extra scans also gives you the diamond skin and a custom garage to house your car scans into. its not a
   tier.").** Every Gold member gets Garage Scan (ASSUMED one scan a year included — his word "extra"; `ULTRA.includedScansPerYear` in

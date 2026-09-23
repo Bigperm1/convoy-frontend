@@ -298,9 +298,18 @@ function class3dPatch(c: Class3dChoice): { carMake: string; carModel: string; ca
   return { carMake: c.make, carModel: c.model, carColor: class3dColor(c) };
 }
 
-/** Settings hold a 3D class car's identity: one of the three classes' make/model, in one of that class's bakes.
- *  Then settings' identity is NOT the member's car and must not reach the profile (CustomizeSheet's save). */
-export function settingsCarryClass3d(s: Settings): boolean {
+/** Settings hold the 3D class car THIS GARAGE PUT THERE: its identity is in settings AND the member's own was kept
+ *  aside for it (ownIdentity — set only by driveToday / applyClass3dToday when the class car goes on the road). Then
+ *  settings' identity is not the member's car and must not reach the profile (Garage mount sync, Customize save).
+ *  Identity alone cannot tell: a real GR Corolla owner in a hatch bake's colour looks exactly like the Hot Hatch class
+ *  car — and must keep syncing (Codex review of 6cdcc831). */
+export function settingsHoldClassCar(s: Settings, g: GarageState): boolean {
+  return !!g.ownIdentity && settingsCarryClass3d(s);
+}
+
+/** Settings' identity matches a 3D class car: one of the three classes' make/model, in one of that class's bake rows.
+ *  A MATCH, not provenance — pair it with ownIdentity (settingsHoldClassCar) before acting on it. */
+function settingsCarryClass3d(s: Settings): boolean {
   const key = resolveGRCKey(s.carColor);
   // RECOGNITION reads every bake row, SCAN_BAKES included, though only class3dPalette's may be picked: an install that
   // drove the Heavy Metal hatch before SCAN_BAKES must still be recognised, or leaving it would drop the member's own
@@ -353,7 +362,7 @@ export async function pinClass3dIfOnMap(): Promise<void> {
  *  opened — the caller's isToday): put the new choice on the map. Writes only when the map draws another bake, so
  *  a save that changed nothing leaves settings alone; keeps the member's own identity aside first. Returns true when
  *  it wrote. Settings only — peers get it from live presence; the profile keeps the member's real car
- *  (settingsCarryClass3d, driveToday). */
+ *  (settingsHoldClassCar, driveToday). */
 export async function applyClass3dToday(): Promise<boolean> {
   await ensureGarageLoaded();
   const s = getSettings();

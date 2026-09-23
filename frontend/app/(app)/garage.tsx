@@ -45,11 +45,11 @@ import { CandyCta } from '../../src/components/CandyCta';
 import {
   checkScanReady, deliverSubmittedScan, fetchScanSlots, reconcileScanState, uploadScanHero, SHOTS_TOTAL,
 } from '../../src/carScan';
-import { getGarage, useGarage } from '../../src/garageStore';
+import { ensureGarageLoaded, getGarage, useGarage } from '../../src/garageStore';
 import {
   activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, class3dOnMap, driveToday, garageViewTier,
   ownedCars, parkStrayScan, pinClass3dIfOnMap, refreshScanList, retryProfileClear, scanCarId, scanCars,
-  settingsCarryClass3d, type GarageCar,
+  settingsHoldClassCar, type GarageCar,
 } from '../../src/garageCars';
 import Stage, { type StageLabels, type StageSlot } from '../../src/components/showroom/Stage';
 import { AddSlotArt, CarSlotArt, LockedBadge, LockedSlotArt, carGlbUrl } from '../../src/components/showroom/SlotArt';
@@ -138,15 +138,19 @@ export default function GarageScreen() {
     if (Object.keys(patch).length) updateSettings(patch);
     // One-time sync of any EXISTING local car identity up to the backend, so users who picked their
     // car before backend-sync existed get their paint onto the map without re-selecting anything —
-    // never while settings hold the 3D class car's: the profile is the member's real car (garageCars
-    // driveToday; Codex review of 83da6282).
-    if ((s.carMake || s.carModel || s.carColor) && !settingsCarryClass3d(s)) {
-      api.put('/auth/profile', {
-        car_make: s.carMake || undefined,
-        car_model: s.carModel || undefined,
-        car_color: s.carColor || undefined,
-        car_year: s.carYear ? (parseInt(s.carYear, 10) || undefined) : undefined,
-      }).catch(() => {});
+    // never while settings hold the 3D class car this Garage put there: the profile is the member's real
+    // car (garageCars settingsHoldClassCar; Codex reviews of 83da6282 / 6cdcc831). The garage store is
+    // awaited first — the class car's provenance lives there, and it may not have loaded yet.
+    if (s.carMake || s.carModel || s.carColor) {
+      void ensureGarageLoaded().then((g) => {
+        if (settingsHoldClassCar(s, g)) return;
+        api.put('/auth/profile', {
+          car_make: s.carMake || undefined,
+          car_model: s.carModel || undefined,
+          car_color: s.carColor || undefined,
+          car_year: s.carYear ? (parseInt(s.carYear, 10) || undefined) : undefined,
+        }).catch(() => {});
+      });
     }
   }, [user]);
 

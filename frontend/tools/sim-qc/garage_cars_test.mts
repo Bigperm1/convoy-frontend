@@ -733,20 +733,31 @@ console.log("P · the 3D class car");
   // the class car, so leaving it gives the member's own identity back instead of dropping it (Codex review of 83da6282)
   await resetAll({ selfMarkerType: "car", carYear: OWN.year, carMake: "Toyota", carModel: "GR Corolla", carColor: "Heavy Metal" },
     { class3dPick: { cls: "hatchback", modelKey: "heavy_metal" }, ownIdentity: OWN });
-  const legacyCarried = gc.settingsCarryClass3d(S());
+  const legacyCarried = gc.settingsHoldClassCar(S(), G());
   await gc.driveToday({ id: "arrow", kind: "arrow" });
   ok("P40 a legacy Heavy Metal class car is recognised, and leaving it puts the member's own car back",
     legacyCarried && eq(gc.identityOfSettings(S()), OWN) && G().ownIdentity === undefined && carPuts().length === 0,
     `carried=${legacyCarried} own=${JSON.stringify(G().ownIdentity)} puts=${JSON.stringify(carPuts())}`);
   // P41 the Garage mount's one-time identity sync and the Customize save both skip the car fields while settings hold the
-  // class car (read from the source: app/(app)/garage.tsx and CustomizeSheet.tsx are React screens this harness cannot mount)
+  // class car this Garage put there (read from the source: both are React screens this harness cannot mount)
   {
     const gsrc = readFileSync(new URL("../../app/(app)/garage.tsx", import.meta.url), "utf8");
     const csrc = readFileSync(new URL("../../src/components/showroom/CustomizeSheet.tsx", import.meta.url), "utf8");
-    ok("P41 Garage mount sync and Customize save never send the class car's identity to the profile",
-      /if \(\(s\.carMake \|\| s\.carModel \|\| s\.carColor\) && !settingsCarryClass3d\(s\)\) \{\s*api\.put\('\/auth\/profile'/.test(gsrc)
-      && /: settingsCarryClass3d\(s\)\s*\? undefined/.test(csrc) && /\.\.\.\(ident \? \{/.test(csrc));
+    ok("P41 Garage mount sync (after the garage store loads) and Customize save gate the profile's car fields on settingsHoldClassCar",
+      /ensureGarageLoaded\(\)\.then\(\(g\) => \{\s*if \(settingsHoldClassCar\(s, g\)\) return;\s*api\.put\('\/auth\/profile'/.test(gsrc)
+      && /: settingsHoldClassCar\(s, await ensureGarageLoaded\(\)\)\s*\? undefined/.test(csrc) && /\.\.\.\(ident \? \{/.test(csrc));
   }
+  // P42 a REAL GR Corolla owner whose own car matches a Hot Hatch bake is not "holding the class car" — their car keeps
+  // syncing to the profile (Codex review of 6cdcc831); the same identity put there by driving the class car is
+  for (const color of ["Heavy Metal", "Supersonic Red"]) {
+    await resetAll({ selfMarkerType: "arrow", carYear: "2023", carMake: "Toyota", carModel: "GR Corolla", carColor: color });
+    const realOwner = gc.settingsHoldClassCar(S(), G());
+    ok(`P42 a real GR Corolla owner in ${color} (no class car driven) is NOT treated as the class car`, realOwner === false);
+  }
+  await resetAll({ selfMarkerType: "arrow", ...ownSettings }, { class3dPick: { cls: "hatchback", modelKey: "supersonic_red" } });
+  await gc.driveToday(C3);
+  ok("P42b …and the Hot Hatch the Garage put on the road IS (so its identity stays off the profile)",
+    gc.settingsHoldClassCar(S(), G()) && S().carModel === "GR Corolla" && S().carColor === "Supersonic Red");
 }
 
 console.log(fails ? `\nFAIL garage_logic (${fails})` : "\nPASS garage_logic");

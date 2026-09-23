@@ -67,7 +67,7 @@ import { CLASS_SWATCHES, classPaintName } from "../../classModels";
 import { CLASS_TOPDOWN } from "../../vehicleAssets";
 import { TopDownClassSnap } from "../../ConvoyMapbox";
 import { getColorsForModel } from "../../carDatabase";
-import { getGarage } from "../../garageStore";
+import { ensureGarageLoaded, getGarage } from "../../garageStore";
 import {
   CLASS_3D_CARS,
   applyClass3dToday,
@@ -79,7 +79,7 @@ import {
   pinClass3dIfOnMap,
   rememberIdentity,
   saveIdentity,
-  settingsCarryClass3d,
+  settingsHoldClassCar,
   setClass3dPick,
   setNickname,
   type Class3dKey,
@@ -306,7 +306,7 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
     const typedToday = showsIdentity && isToday;
     const ident = typedToday
       ? { carYear: year, carMake: make, carModel: model, carColor: color }
-      : settingsCarryClass3d(s)
+      : settingsHoldClassCar(s, await ensureGarageLoaded())
         ? undefined
         : { carYear: s.carYear ?? "", carMake: s.carMake ?? "", carModel: s.carModel ?? "", carColor: s.carColor ?? "" };
     await updateSettings({ ...(typedToday ? ident : {}), callSign: sign });

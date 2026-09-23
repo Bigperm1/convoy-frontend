@@ -17,8 +17,11 @@
 //            Scout voice + hands-free, your class car in your paint, every map style, route colours,
 //            Top Cruise Speed, the silver skin).
 //   Gold   — $9.99/mo or $79.99/yr: the 3D map and a 3D car of your class, the gold skin.
-//   Ultra  — HELD for a later date (Jeff): Garage Scan of your own car and the diamond skin. Not sold;
-//            the "ultra" tier value stays in src/entitlements.ts so the features have somewhere to live.
+//   Ultra  — NOT a tier: Gold's add-on (Jeff, 2026-09-22 evening: "lets do the ultra which is add on to
+//            gold when you have gold you have access to ultra, for $2.99 per extra scans also gives you
+//            the diamond skin and a custom garage to house your car scans into. its not a tier."). Every
+//            Gold member gets Garage Scan (one scan a year included — "extra" scans are the $2.99 ones),
+//            the diamond skin, and the custom garage that holds their scanned cars. See ULTRA below.
 //
 // Store mechanics: Silver + Gold are ONE Apple subscription group (Gold the higher level: upgrade
 // immediate, downgrade at renewal); on Play two subscriptions, each with a monthly and a yearly base
@@ -54,10 +57,28 @@ export const PRICING: readonly RungPrice[] = [
   {
     rung: "gold", name: "Gold", monthlyUsd: 9.99, annualUsd: 79.99,
     monthlyProductId: "hairpin.gold.monthly", annualProductId: "hairpin.gold.annual",
-    tagline: "The map in 3D, and your car on it in 3D.",
-    includes: ["The live 3D map on the phone and in the car", "A 3D car of your class in your paint", "The gold app skin"],
+    tagline: "The map in 3D, and your own car on it.",
+    includes: [
+      "The live 3D map on the phone and in the car",
+      "A 3D car of your class in your paint",
+      "Ultra: Garage Scan — your own car on the map, one scan a year included",
+      "Extra scans $2.99 each, kept in your custom garage",
+      "The gold and diamond app skins",
+    ],
   },
 ];
+
+// ULTRA — Gold's add-on, not a tier (see the header). The scan is a CONSUMABLE bought at the moment of the
+// scan and used at once, never a banked credit (Apple 3.1.1: purchased credits "may not expire"); the app
+// sells it only while Gold is active. What a member has scanned stays theirs if Gold lapses (Jeff 09-17:
+// "i agree" — the car is kept and shown flat from the scan's photo on the 2D map).
+export const ULTRA = {
+  requiresRung: "gold" as const,
+  includedScansPerYear: 1,
+  extraScanUsd: 2.99,
+  extraScanProductId: "hairpin.scan.extra",
+  includes: ["Garage Scan of your own car", "The diamond app skin", "A custom garage for every car you scan"],
+};
 
 // Server-granted access (build 80, through RevenueCat — never store promo codes, which on Play need a card
 // and auto-renew into a charge). A new account gets the Silver trial; a GRC club member gets the club

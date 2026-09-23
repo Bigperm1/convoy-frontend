@@ -9,9 +9,10 @@
 // Tiers (Jeff 2026-09-22, three rungs, prices in src/pricing.ts):
 //   beta_og      — original beta testers; personal codes, never expire. All access.
 //   club_founder — GRC club members; all access until the store launch flag.
-//   ultra        — HELD for a later date (Jeff): YOUR car scanned to 3D (Garage Scan) + the diamond skin.
-//                  Not sold; kept so those features have a rung to sit on.
-//   gold         — $9.99/mo or $79.99/yr: the 3D map and a 3D class car, gold skin.
+//   ultra        — NOT SOLD and not a tier any more (Jeff, 2026-09-22 evening: Ultra is Gold's add-on). The
+//                  value is kept only so a stored "ultra" still reads as at-least-Gold.
+//   gold         — $9.99/mo or $79.99/yr: the 3D map and a 3D class car, gold skin, and ULTRA — Garage Scan
+//                  (one a year included, extras $2.99), the diamond skin, the custom garage.
 //   premium      — $4.99/mo or $39.99/yr, the SILVER rung (storage key kept from 8/20): alerts, voices,
 //                  class car in your paint, map styles, silver skin.
 //   free         — everything you need to drive with the club — NO convoy cap (see maxConvoySize).
@@ -35,7 +36,8 @@ export type PremiumFeature =
   | "arrow_colors"      // arrow paint — green stays free
   | "class_marker"      // Class 3D map appearance (premium)
   | "car_3d"            // GOLD — the 3D map + a 3D car of your class
-  | "car_scan"          // ULTRA — your own car scanned to 3D (Garage Scan)
+  | "car_scan"          // GOLD (Ultra add-on) — your own car scanned to 3D (Garage Scan)
+  | "garage"            // GOLD (Ultra add-on) — the custom garage that holds every scanned car
   | "club_create"       // creating Clubs/Events/Cruises (viewing is free)
   | "top_speed"         // Top Cruise Speed card
   | "map_modes"         // map styles beyond Day
@@ -54,7 +56,7 @@ export type PremiumFeature =
   // every other gate uses.
   | "app_skin_silver"    // PREMIUM (Silver) — the silver app skin
   | "app_skin_gold"      // GOLD — the gold app skin (silver can never reach it)
-  | "app_skin_diamond";  // ULTRA — the diamond app skin (art on the trial branch, ships with build 80)
+  | "app_skin_diamond";  // GOLD (Ultra add-on) — the diamond app skin (art on the trial branch, ships with build 80)
 
 const STORE_KEY = "convoy.entitlement.v1";
 const DEV_KEY = "convoy.entitlement.devTier"; // manual QA override, survives reload
@@ -134,8 +136,9 @@ const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
   convoy_size: 0,      // FREE since 2026-09-22 — no convoy cap (maxConvoySize)
   car_3d: 2,           // Gold
   app_skin_gold: 2,    // Gold
-  car_scan: 3,         // Ultra — held for a later date
-  app_skin_diamond: 3, // Ultra — held for a later date
+  car_scan: 2,         // Gold — Ultra add-on
+  garage: 2,           // Gold — Ultra add-on
+  app_skin_diamond: 2, // Gold — Ultra add-on
 };
 
 /**

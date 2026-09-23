@@ -1071,6 +1071,14 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **ULTRA = GOLD'S ADD-ON, NOT A TIER (Jeff, same evening: "lets do the ultra which is add on to gold when you have gold you have
+  access to ultra, for $2.99 per extra scans also gives you the diamond skin and a custom garage to house your car scans into. its not a
+  tier.").** Every Gold member gets Garage Scan (ASSUMED one scan a year included — his word "extra"; `ULTRA.includedScansPerYear` in
+  src/pricing.ts), extra scans $2.99 each (consumable `hairpin.scan.extra`, bought at scan time, Gold only), the diamond skin and the
+  custom garage. `car_scan` / `garage` / `app_skin_diamond` gated at Gold. Website: three tiers, Ultra lines inside the Gold card in the
+  diamond metal (~/hairpin-site, local, unpushed). NOT BUILT YET: the custom garage (multi-car: today a 2nd scan REPLACES the 1st —
+  three global caps of 2 in backend env, worker per_user_cap, register-scan MAX_SCANS), the diamond skin merge (trial branch), the scan
+  purchase — build 80.
 - **PRICING DECIDED, same evening (Jeff: "go with $4.99 - $9.99 with anaul 3 rung (hold ultra for a later date a features") — after a
   12-agent cited review (memory `pricing-honest-review-2026-09-22`) found the $0.99 ladder converts worse, nets below a user's cost and
   needs ~26 % paying.** Free (no convoy cap, clubs/events/cruises creatable) · Silver $4.99/mo or $39.99/yr · Gold $9.99/mo or

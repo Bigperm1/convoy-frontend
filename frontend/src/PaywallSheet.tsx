@@ -28,7 +28,10 @@ import { PRICING, priceLabel, annualLabel, annualSavingPct, type PaidRung } from
 const FEATURE_HOOKS: Partial<Record<PremiumFeature, string>> = {
   arrow_colors: "Paint your arrow any colour",
   class_marker: "Drive the map as your car class",
-  car_3d: "Put your actual car on the map in 3D",
+  car_3d: "Drive the map in 3D",
+  car_scan: "Put your own car on the map",
+  garage: "A garage for every car you own",
+  app_skin_diamond: "The diamond app skin",
   club_create: "Create clubs, events and cruises",
   top_speed: "Track your Top Cruise Speed",
   map_modes: "Dusk, night and satellite maps",

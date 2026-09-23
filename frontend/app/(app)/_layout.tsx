@@ -372,6 +372,12 @@ export default function AppLayout() {
       //    event id — hub.tsx resolves its kind and auto-opens the detail sheet
       //    with the "I'm showing up" button front and center.
       if (data?.type === "event") {
+        // Receipt for a plain banner tap on an event push (the Going / Not going buttons
+        // log their own row above). `action` is the PUSH's kind from its data (open /
+        // confirm / route / cruise_route / …), not the OS actionIdentifier.
+        try {
+          logEvent(`event-push-open action=${String(data.action || "-").slice(0, 24)} id=${String(data.event_id || "-").slice(0, 48)}`);
+        } catch {}
         // Cruise ARRIVAL push (P3): fetch the cruise and hand its pre-designed
         // route (venue → stops → end) to the map via the cruisePlot one-shot.
         // Falls back to opening the Hub detail if the fetch fails (offline).

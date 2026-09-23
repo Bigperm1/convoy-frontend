@@ -84,6 +84,24 @@ export default function HubScreen() {
   // app-wide and PUT /events/{id} lost its last caller. CreateEventModal already
   // supports editing — it just needed something to hand it.
   const [editingEvent, setEditingEvent] = useState<HubEvent | null>(null);
+  // HYDRATE the open sheet with the full GET /events/{id}. The list rows and the RSVP
+  // responses carry no roster, and their can_manage is creator-only; GET is the one read
+  // that asks the server's _can_manage_event (creator OR admin of the tagged club).
+  // (That server check was False for every non-creator club admin from 2026-09-06 until the
+  // backend fix of 2026-09-23 — its club lookup projected {admin_id, co_admins} while
+  // _is_comm_admin also needs `members`.) Newest request wins (the sequence), and a response
+  // lands only while that SAME event is still the one open — never over a sheet the user has
+  // since closed.
+  const hydrateSeq = useRef(0);
+  const hydrateOpenEvent = useCallback((id: string) => {
+    const seq = ++hydrateSeq.current;
+    getEvent(id)
+      .then((full) => {
+        if (seq !== hydrateSeq.current) return;
+        setOpenEvent((cur) => (cur && cur.id === id ? full : cur));
+      })
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -263,7 +281,7 @@ export default function HubScreen() {
           event={nextUp}
           accent={accent}
           skinColors={skinColors}
-          onOpen={(e) => setOpenEvent(e)}
+          onOpen={(e) => { setOpenEvent(e); hydrateOpenEvent(e.id); }}
           onPlan={() => { setCreateKind("cruise"); setShowCreateSheet(true); }}
           onPlanMeet={() => { setCreateKind("event"); setShowCreateSheet(true); }}
         />
@@ -317,9 +335,9 @@ export default function HubScreen() {
         ) : (
           <FeedList
             events={feedShown} loading={feedLoading} accent={accent}
-            onOpen={async (e) => {
-              setOpenEvent(e);                                    // instant open
-              try { setOpenEvent(await getEvent(e.id)); } catch {} // then hydrate (attendees)
+            onOpen={(e) => {
+              setOpenEvent(e);          // instant open
+              hydrateOpenEvent(e.id);   // then hydrate (attendees, can_manage) — stale-safe
             }}
             emptyLabel={chip === "going" ? "Nothing you're going to yet — tap All to see what's on."
               : chip === "event" ? "No meets posted yet."
@@ -349,14 +367,20 @@ export default function HubScreen() {
         visible={showCreateSheet || !!editingEvent}
         editing={editingEvent}
         onClose={() => { setShowCreateSheet(false); setEditingEvent(null); }}
-        onCreated={() => { setShowCreateSheet(false); setEditingEvent(null); loadFeed(); }}
+        // Land on the saved meet, as EventsSection did — otherwise "Save changes" drops the host
+        // back on the feed with no sign the edit took (review of the 2026-09-23 wiring).
+        onCreated={(ev) => { setShowCreateSheet(false); setEditingEvent(null); loadFeed(); setOpenEvent(ev); hydrateOpenEvent(ev.id); }}
       />
       <EventDetailModal
         event={openEvent}
         onClose={() => setOpenEvent(null)}
-        onChanged={(e) => { setOpenEvent(e); loadFeed(); }}
+        // The RSVP response is set at once for snappiness, then re-fetched: it carries no
+        // roster and a creator-only can_manage.
+        onChanged={(e) => { setOpenEvent(e); hydrateOpenEvent(e.id); loadFeed(); }}
         onDeleted={() => { setOpenEvent(null); loadFeed(); }}
-        onEdit={() => {}}
+        // Close the detail sheet FIRST, then open the editor: two stacked modals leave the
+        // form unreachable behind the detail sheet on iOS (same wiring as EventsSection).
+        onEdit={(ev) => { setOpenEvent(null); setEditingEvent(ev); }}
       />
       <CreateModal visible={showCreate} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); }} />
       <SearchModal visible={showSearch} onClose={() => setShowSearch(false)} onChanged={load} />

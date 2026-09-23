@@ -34,8 +34,10 @@ import { scoutScenicStops } from './scoutScenic';
 import {
   type HubEvent, type EventPoint, createEvent, myEvents, discoverEvents,
   getEvent, attendEvent, confirmEvent, unattendEvent, declineEvent, announceEvent, deleteEvent, updateEvent,
+  messageEventCrew,
 } from './eventsApi';
 import { updateWidgetFeed } from './widgetFeed';
+import { haptics } from './haptics';
 
 type Kind = 'event' | 'cruise';
 
@@ -266,6 +268,19 @@ type ClubLite = { id: string; name: string };
 // had NO CALLER. So this is a UI gap, not a missing feature: pass `editing` and the same
 // form (including the whole cruise stop planner and route-style picker) becomes the edit
 // screen. Duplicating it would have guaranteed the two drifted.
+/** The start time as ISO-8601 WITH the phone's own UTC offset ("2026-09-26T18:30:00.000-07:00"), not
+ *  toISOString()'s "Z". Same instant (the server parses both to start_at_ms), but the offset is the only way the
+ *  server can print the crew's wall clock in a push — from a "Z" string the invite read "Sun Sep 27, 1:30 AM" for a
+ *  Saturday 6:30 PM meet (review of the 2026-09-23 event pushes). Every reader in the app parses with new Date(). */
+function isoWithLocalOffset(d: Date): string {
+  const off = -d.getTimezoneOffset();
+  const pad = (n: number, w = 2) => String(Math.floor(Math.abs(n))).padStart(w, "0");
+  const local = new Date(d.getTime() + off * 60_000);
+  return `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}`
+    + `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}.${pad(local.getUTCMilliseconds(), 3)}`
+    + `${off >= 0 ? "+" : "-"}${pad(off / 60)}:${pad(off % 60)}`;
+}
+
 export function CreateEventModal({ kind, visible, editing, onClose, onCreated }: {
   kind: Kind; visible: boolean; editing?: HubEvent | null;
   onClose: () => void; onCreated: (e: HubEvent) => void;
@@ -285,6 +300,9 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
   const [clubs, setClubs] = useState<ClubLite[]>([]);
   const [clubId, setClubId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // EDIT only: push the new time/spot to everyone going (the server's default). Off =
+  // save quietly (notify_change:false). Re-seeded ON every time the sheet opens.
+  const [tellCrew, setTellCrew] = useState(true);
 
   useEffect(() => {
     if (!visible) return;
@@ -312,10 +330,12 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
       // so plotting the cruise later cannot silently rebuild it as a fastest route.
       setRouteStyle((editing.tags || []).includes('scenic') ? 'scenic' : 'fastest');
       setPlanRoutes({ fastest: null, scenic: null });
+      setTellCrew(true);
     } else {
       setTitle(''); setDesc(''); setVenue(null); setEnd(null); setStops([]);
       setWhen(defaultStart()); setIsPublic(true); setNotify(true); setClubId(null);
       setRouteStyle('fastest'); setPlanRoutes({ fastest: null, scenic: null });
+      setTellCrew(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, editing?.id]);
@@ -428,6 +448,18 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
     }
   };
 
+  // EDIT: did the TIME or the meeting-point COORDINATES move? Only that is news for the
+  // crew — a renamed spot at the same coordinates, a new title or description is not.
+  // The time is compared against the same field the seed effect read it from.
+  const meetChanged = (() => {
+    if (!editing) return false;
+    const was = Date.parse(editing.departure_at || editing.start_at);
+    const timeMoved = !Number.isFinite(was) || when.getTime() !== was;
+    const v0 = editing.venue;
+    const spotMoved = !!venue && (!v0 || venue.lat !== v0.lat || venue.lng !== v0.lng);
+    return timeMoved || spotMoved;
+  })();
+
   const create = async () => {
     if (!title.trim()) return Alert.alert('Name it', `Give your ${copy.one} a title.`);
     if (!venue) return Alert.alert('Where?', kind === 'cruise' ? 'Pick the meeting point (first stop).' : 'Pick a meeting destination.');
@@ -442,10 +474,10 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
         is_public: isPublic,
         club_id: isPublic ? clubId : clubId, // club optional for public, required for club-only
         venue_lat: venue.lat, venue_lng: venue.lng, venue_label: venue.label || '',
-        start_at: when.toISOString(),
+        start_at: isoWithLocalOffset(when),
         notify_enabled: notify,
         ...(kind === 'cruise' && end ? { end_lat: end.lat, end_lng: end.lng, end_label: end.label || '' } : {}),
-        ...(kind === 'cruise' ? { departure_at: when.toISOString(), stops } : {}),
+        ...(kind === 'cruise' ? { departure_at: isoWithLocalOffset(when), stops } : {}),
         // Store the line the creator actually chose. The backend has always accepted
         // `polyline` ("precomputed cruise route") on both create and update, so what the
         // crew drives is the route that was planned — Fastest or Scenic — rather than
@@ -465,10 +497,14 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
       //    plot scenic. exclude_none on the server drops undefined, not [].
       //  - `polyline` only appears in the payload when a route was re-planned in this
       //    session; otherwise the stored line is left exactly as it was.
+      //  - `notify_change` rides only on an edit that moved the time or the spot: the
+      //    "Tell the crew" switch, or false when Attendee notifications is off (the row is
+      //    hidden then, and nobody should be pushed). Absent = the server's default (tell).
       const e = editing
         ? await updateEvent(editing.id, {
             ...payload,
             ...(kind === 'cruise' ? { tags: routeStyle === 'scenic' ? ['scenic'] : [] } : {}),
+            ...(meetChanged ? { notify_change: notify && tellCrew } : {}),
           })
         : await createEvent(payload);
       onCreated(e);
@@ -642,14 +678,18 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
               <>
                 <View style={styles.clubChips}>
                   {clubs.map((c) => (
-                    <TouchableOpacity key={c.id} onPress={() => setClubId(clubId === c.id && isPublic ? null : c.id)}
+                    <TouchableOpacity key={c.id} disabled={!!editing} onPress={() => setClubId(clubId === c.id && isPublic ? null : c.id)}
                       style={[styles.clubChip, clubId === c.id && styles.clubChipOn,
                               clubId === c.id && { backgroundColor: accent, borderColor: accent }]}>
                       <Text style={[styles.clubChipText, clubId === c.id && { color: skinColors.ink }]} numberOfLines={1}>{c.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-                <Text style={styles.helpText}>{clubId
+                {/* EDIT: the server keeps the club chosen at create (PUT has no club_id) and saving
+                    sends no invite — so the chips are fixed here and the copy says what to do instead. */}
+                <Text style={styles.helpText}>{editing
+                  ? `The club is set when the ${copy.one} is created. To ping them again, use \u201cSend the invite to the club\u201d or \u201cMessage the crew\u201d on the ${copy.one}.`
+                  : clubId
                   ? `Every member gets \u201cYou're invited to ${title.trim() || `your ${copy.one}`}\u201d on their phone when you save.`
                   : `Pick a club and the whole crew gets the invite when you save.`}</Text>
               </>
@@ -662,6 +702,18 @@ export function CreateEventModal({ kind, visible, editing, onClose, onCreated }:
               </View>
               <Switch value={notify} onValueChange={setNotify} trackColor={{ false: '#3A3A3C', true: accent + '88' }} thumbColor={notify ? accent : '#f4f3f4'} />
             </View>
+
+            {/* EDIT: the time or the meeting point moved — offer to tell the crew (default ON).
+                Hidden while Attendee notifications is off: those attendees get no pushes. */}
+            {!!editing && meetChanged && notify && (
+              <View style={styles.toggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleTitle}>Tell the crew about this change</Text>
+                  <Text style={styles.toggleSub}>Everyone going gets a push with the new time/spot.</Text>
+                </View>
+                <Switch value={tellCrew} onValueChange={setTellCrew} trackColor={{ false: '#3A3A3C', true: accent + '88' }} thumbColor={tellCrew ? accent : '#f4f3f4'} />
+              </View>
+            )}
 
             <TouchableOpacity onPress={create} disabled={busy} activeOpacity={0.85} style={{ marginTop: 18, marginBottom: 26 }}>
               <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createBtn}>
@@ -685,8 +737,72 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
   const ctaBorder = useAccentAlpha(0.5);
   const accent = useAccent();
   const skinColors = useAppSkinColors();
+  // MESSAGE THE CREW composer — inline in this sheet, never a second Modal (see the
+  // stacked-modal note on EventsSection's onEdit). Its OWN sending flag, so a send in
+  // flight never locks the RSVP buttons that share `busy`. Every hook stays above the
+  // `if (!e) return null` below (rules of hooks).
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [audience, setAudience] = useState<'going' | 'club'>('going');
+  const [note, setNote] = useState('');
+  // The events whose crew message is IN FLIGHT — keyed by id, not one boolean: this
+  // component stays mounted from sheet to sheet, and a slow send (axios allows 60 s; a
+  // Render cold start) must never freeze ANOTHER meet's composer at "Sending…".
+  const [sendingIds, setSendingIds] = useState<string[]>([]);
+  // The event on screen right now, read after the await: a send that finishes only
+  // collapses/clears the composer it was sent FROM, never a sheet opened since.
+  const shownId = useRef<string | undefined>(undefined);
+  // The keyboard would cover the note field (sim, 2026-09-23: the sheet rose but never scrolled):
+  // focusing it scrolls the composer to the top of what the keyboard leaves visible.
+  const sheetScroll = useRef<ScrollView>(null);
+  const composerY = useRef(0);
+  // A different event (or none) = a fresh, collapsed composer.
+  const eventId = e?.id;
+  useEffect(() => {
+    shownId.current = eventId;
+    setComposerOpen(false);
+    setAudience('going');
+    setNote('');
+  }, [eventId]);
   if (!e) return null;
   const copy = KIND_COPY[e.kind] || KIND_COPY.event;
+  // The meet is "over" 12 h after it starts (cruise: its departure).
+  const meetMs = Date.parse(e.departure_at || e.start_at);
+  const canMessage = !!(e.can_manage || e.is_creator) && meetMs + 12 * 3600_000 > Date.now();
+  // "Whole club" only exists on a club-tagged event; anything else goes to the people going.
+  const sendAudience: 'going' | 'club' = e.club_id ? audience : 'going';
+  const sending = sendingIds.includes(e.id);
+  // "Going (N)" counts everyone going EXCEPT the sender (the viewer): the server never
+  // pushes the sender, and a creator auto-attends — a solo host must not read "Going (1)".
+  const goingOthers = Math.max(0, (e.attendee_count || 0) - (e.is_attending ? 1 : 0));
+  const nobodyToTell = sendAudience === 'going' && goingOthers === 0;
+
+  const sendCrewMessage = async () => {
+    if (sending || nobodyToTell) return;
+    const id = e.id;
+    const title = e.title;
+    const to = sendAudience;
+    const text = note.trim();
+    setSendingIds((ids) => [...ids, id]);
+    try {
+      const r = await messageEventCrew(id, { audience: to, ...(text ? { note: text } : {}) });
+      const n = Number(r?.sent) || 0;
+      const stillShown = shownId.current === id;
+      haptics.success();
+      // Moved on to another sheet (or closed it) mid-send: name the meet, touch nothing.
+      Alert.alert(stillShown ? 'Sent' : `Sent · ${title}`, n > 0
+        ? `Pushed to ${n} phone${n === 1 ? '' : 's'}.`
+        : to === 'going' ? 'Nobody else going has notifications on yet.' : 'Nobody there has notifications on yet.');
+      if (stillShown) {
+        setComposerOpen(false);
+        setNote('');
+      }
+    } catch (err) {
+      haptics.failure();
+      Alert.alert(shownId.current === id ? 'Not sent' : `Not sent · ${title}`, formatErr(err));
+    } finally {
+      setSendingIds((ids) => ids.filter((x) => x !== id));
+    }
+  };
 
   const act = async (fn: () => Promise<HubEvent>) => {
     if (busy) return;
@@ -716,7 +832,10 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
   };
 
   const remove = () => {
-    Alert.alert(`Delete ${copy.one}?`, 'Attendees will no longer see it.', [
+    // The server pushes a cancellation to everyone going only for a meet still ahead with
+    // Attendee notifications on — the copy promises exactly that and nothing more.
+    const cancelNotice = e.notify_enabled !== false && meetMs > Date.now();
+    Alert.alert(`Delete ${copy.one}?`, cancelNotice ? 'Everyone going gets a cancellation notice.' : 'Attendees will no longer see it.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => { try { await deleteEvent(e.id); onDeleted(); } catch (err) { Alert.alert('Failed', formatErr(err)); } } },
     ]);
@@ -724,7 +843,8 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalRoot}>
+      {/* Keyboard-safe (the crew-message note field lives in this sheet) — same as CreateEventModal. */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
@@ -733,7 +853,7 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={10}><Ionicons name="close" size={24} color={COLORS.text} /></TouchableOpacity>
           </View>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView ref={sheetScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={styles.detailWhen}>{whenText(e.start_at)}</Text>
             {!!e.venue?.label && (
               <View style={styles.detailRow}>
@@ -830,6 +950,67 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
               </TouchableOpacity>
             )}
 
+            {/* MESSAGE THE CREW — creator or club admin pushes a short note ("running 10 min
+                late", "spot moved") to the people going, or the whole tagged club, until 12 h
+                after the start. Collapsed to one button; opens INLINE (a second Modal would stack
+                behind this one on iOS). Throttled server-side — its 429 text is the alert. */}
+            {canMessage && (composerOpen ? (
+              <View style={[styles.composer, { borderColor: ctaBorder }]} onLayout={(ev) => { composerY.current = ev.nativeEvent.layout.y; }}>
+                <View style={styles.composerHead}>
+                  <Ionicons name="chatbubbles" size={16} color={accent} />
+                  <Text style={styles.composerTitle}>Message the crew</Text>
+                  <TouchableOpacity onPress={() => setComposerOpen(false)} disabled={sending} hitSlop={10}>
+                    <Ionicons name="close" size={20} color={COLORS.textMute} />
+                  </TouchableOpacity>
+                </View>
+                <View style={[styles.segment, { marginTop: 10, marginBottom: 0 }]}>
+                  <TouchableOpacity onPress={() => setAudience('going')} disabled={sending}
+                    style={[styles.segmentBtn, sendAudience === 'going' && styles.segmentBtnOn]}>
+                    <Text style={[styles.segmentText, sendAudience === 'going' && styles.segmentTextOn]}>{`Going (${goingOthers})`}</Text>
+                  </TouchableOpacity>
+                  {!!e.club_id && (
+                    <TouchableOpacity onPress={() => setAudience('club')} disabled={sending}
+                      style={[styles.segmentBtn, sendAudience === 'club' && styles.segmentBtnOn]}>
+                      <Text style={[styles.segmentText, sendAudience === 'club' && styles.segmentTextOn]}>Whole club</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <TextInput
+                  style={[styles.input, styles.noteInput]}
+                  placeholder="Optional note — e.g. running 10 min late"
+                  placeholderTextColor={COLORS.textMute}
+                  value={note}
+                  onChangeText={setNote}
+                  multiline
+                  maxLength={140}
+                  editable={!sending}
+                  onFocus={() => setTimeout(() => sheetScroll.current?.scrollTo({ y: Math.max(0, composerY.current - 8), animated: true }), 150)}
+                />
+                <Text style={styles.noteCount}>{`${note.length}/140`}</Text>
+                {/* Exactly the server's audience: the sender and anyone who said Not going are
+                    always skipped (_event_audience_targets). */}
+                <Text style={[styles.helpText, { marginTop: 2 }]}>{sendAudience === 'club'
+                  ? 'Every club member gets it as a push — except anyone who said Not going.'
+                  : nobodyToTell
+                    ? (e.club_id ? 'Nobody else is going yet — pick Whole club to reach the club.' : 'Nobody else is going yet.')
+                    : 'Everyone else who said Going gets it as a push.'}</Text>
+                <TouchableOpacity onPress={sendCrewMessage} disabled={sending || nobodyToTell} activeOpacity={0.85}>
+                  <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={[styles.createBtn, nobodyToTell && { opacity: 0.45 }]}>
+                    <Text style={styles.createBtnText}>{sending ? 'Sending…' : 'Send'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => setComposerOpen(true)}
+                activeOpacity={0.85}
+                style={[styles.secondaryBtn, { borderColor: ctaBorder }]}
+              >
+                <Ionicons name="chatbubbles" size={16} color={accent} />
+                <Text style={styles.secondaryBtnText}>Message the crew</Text>
+              </TouchableOpacity>
+            ))}
+
             {/* Roster */}
             {!!e.attendees_users?.length && (
               <>
@@ -846,19 +1027,22 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
             )}
 
             {(e.can_manage || e.is_creator) && (
-              <>
-                <TouchableOpacity onPress={() => onEdit(e)} style={[styles.linkBtn, { marginTop: 16 }]}>
-                  <Text style={styles.linkBtnText}>{`Edit ${copy.one}`}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={remove} style={[styles.linkBtn, { marginTop: 4, marginBottom: 24 }]}>
-                  <Text style={[styles.linkBtnText, { color: '#FF5A5A' }]}>{`Delete ${copy.one}`}</Text>
-                </TouchableOpacity>
-              </>
+              <TouchableOpacity onPress={() => onEdit(e)} style={[styles.linkBtn, { marginTop: 16 }, !e.is_creator && { marginBottom: 24 }]}>
+                <Text style={styles.linkBtnText}>{`Edit ${copy.one}`}</Text>
+              </TouchableOpacity>
+            )}
+            {/* DELETE is creator-only on the server (DELETE /events/{id} → 403 "Creator only"),
+                so a club admin gets Edit but never a Delete — or its cancellation promise —
+                that would only fail. */}
+            {e.is_creator && (
+              <TouchableOpacity onPress={remove} style={[styles.linkBtn, { marginTop: 4, marginBottom: 24 }]}>
+                <Text style={[styles.linkBtnText, { color: '#FF5A5A' }]}>{`Delete ${copy.one}`}</Text>
+              </TouchableOpacity>
             )}
             <View style={{ height: 20 }} />
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -940,6 +1124,12 @@ const styles = StyleSheet.create({
   createBtnText: { color: '#0A1A10', fontWeight: '900', fontSize: 15.5 },
   secondaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, paddingVertical: 12, marginTop: 10, borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.5)' },
   secondaryBtnText: { color: COLORS.text, fontWeight: '800', fontSize: 14.5 },
+  // Message-the-crew composer (detail sheet) — the secondaryBtn's outline, opened up.
+  composer: { borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(45,236,134,0.5)', padding: 12, marginTop: 10 },
+  composerHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  composerTitle: { color: COLORS.text, fontWeight: '800', fontSize: 14.5, flex: 1 },
+  noteInput: { minHeight: 64, marginTop: 10, textAlignVertical: 'top' },
+  noteCount: { color: COLORS.textMute, fontSize: 11.5, fontWeight: '600', textAlign: 'right', marginTop: 4 },
   linkBtn: { alignItems: 'center', paddingVertical: 10 },
   linkBtnText: { color: COLORS.textMute, fontWeight: '700', fontSize: 13.5 },
 

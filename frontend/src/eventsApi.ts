@@ -115,7 +115,22 @@ export async function announceEvent(id: string): Promise<{ sent: number }> {
   return data;
 }
 
-export async function updateEvent(id: string, patch: Partial<CreateEventInput>): Promise<HubEvent> {
+/**
+ * "Message the crew" — creator or club admin pushes a short note about this meet
+ * (running late, spot moved) to the people going, or to the whole tagged club. Throttled
+ * server-side; errors come back as {detail} for formatErr to show.
+ */
+export async function messageEventCrew(
+  id: string,
+  body: { audience: 'going' | 'club'; note?: string },
+): Promise<{ sent: number; audience: 'going' | 'club' }> {
+  const { data } = await api.post(`/events/${id}/notify`, body);
+  return data;
+}
+
+/** `notify_change: false` = save a new time/spot WITHOUT pushing it to the attendees;
+ *  leave it out to tell them (the server's default). */
+export async function updateEvent(id: string, patch: Partial<CreateEventInput> & { notify_change?: boolean }): Promise<HubEvent> {
   const { data } = await api.put(`/events/${id}`, patch);
   return data;
 }

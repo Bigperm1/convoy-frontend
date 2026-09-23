@@ -24,6 +24,7 @@ import { BlurView } from "expo-blur";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { GlassFill } from "../../src/Glass";
 import { COLORS, ACTION } from "../../src/theme";
+import { logEventReliable } from "../../src/crashBreadcrumb";
 
 // iOS 26+ ships the real Liquid Glass material (UIGlassEffect); older iOS / Android
 // fall back to the expo-blur frosted panel. Resolved once at module load.
@@ -59,6 +60,89 @@ import {
 } from "../../src/applePlayer";
 import { useFocusEffect } from "expo-router";
 import { shareInbox } from "../../src/shareInbox";
+
+// ── APPLE MUSIC CUSTOM-ART BREADCRUMB (Jeff, 2026-09-23) ──────────────────────
+// "Custom playlist art set in the Music app doesn't show in Hairpin." The native mapper
+// (MusicItemMapper.swift, patched) keeps a playlist's OWN artwork only when
+// Artwork.url(200,200) is http(s); otherwise it substitutes the FIRST TRACK's art, built
+// by the same 200x200 helper — so an equal string means the fallback fired. One row per
+// JS context says which happened, per playlist, WITHOUT a single name, id, description
+// or URL:
+//   pl   = library playlists returned
+//   seq  = one char per strip playlist (first 12, strip order):
+//            n  no artworkUrl at all
+//            ?  has art, but its first song has none to compare against
+//            f  art EQUALS the first song's (the first-track fallback fired)
+//            o  art differs from the first song's (the playlist's own art arrived)
+//            s  has art, SKIPPED: over AM_ART_SONG_CAP tracks (see below)
+//   rpLib / rpCat = Recently Played playlists with art / total, library vs catalog ids
+//   hosts = scheme/host-class:count over every URL looked at (mz = *.mzstatic.com,
+//           apple = *.apple.com, other = anything else)
+//   songs / ms = songs the comparison pulled over the bridge, and the whole row's wall time
+// iOS only, native calls SERIAL (never parallel), fire-and-forget, everything caught:
+// it can never block or break the tab. Lives here, not in applePlayer: tsc resolves
+// applePlayer.ts (the stub), not .ios.ts.
+// COST BOUND: getPlaylistSongs returns EVERY loaded track (LibraryService.swift maps each
+// one; applePlayer.ios.ts maps each again in JS) to read only [0]. trackCount comes from
+// the same `.with([.tracks])` load, so a playlist over the cap is skipped, not fetched —
+// and `songs`/`ms` put the real cost on record.
+let _amArtLogged = false;
+const AM_ART_MAX = 12;
+const AM_ART_SONG_CAP = 300;
+
+function amArtHost(url: string): string {
+  const m = /^([a-z][a-z0-9+.-]*):(?:\/\/([^/?#]*))?/i.exec(url);
+  if (!m) return "none/other";
+  const scheme = m[1].toLowerCase().slice(0, 12);
+  const host = (m[2] || "").replace(/^.*@/, "").replace(/:\d+$/, "").toLowerCase();
+  const cls = host === "mzstatic.com" || host.endsWith(".mzstatic.com") ? "mz"
+    : host === "apple.com" || host.endsWith(".apple.com") ? "apple"
+    : "other";
+  return `${scheme}/${cls}`;
+}
+
+async function reportAmArtOnce(playlists: ApplePlaylist[], recent: RecentItem[]): Promise<void> {
+  try {
+    if (_amArtLogged || Platform.OS !== "ios") return;
+    const rp = (recent || []).filter((it) => it?.type === "playlist");
+    const pls = playlists || [];
+    // Nothing loaded (yet) — don't spend the once-per-context row on an empty read.
+    if (pls.length === 0 && rp.length === 0) return;
+    _amArtLogged = true;
+    const t0 = Date.now();
+    const hosts = new Map<string, number>();
+    const tally = (u: string) => { const k = amArtHost(u); hosts.set(k, (hosts.get(k) || 0) + 1); };
+    let seq = "";
+    let songsPulled = 0;
+    for (const p of pls.slice(0, AM_ART_MAX)) {
+      const own = p?.artworkUrl;
+      if (!own) { seq += "n"; continue; }
+      tally(own);
+      if ((Number(p?.trackCount) || 0) > AM_ART_SONG_CAP) { seq += "s"; continue; }
+      let first: string | undefined;
+      try {
+        const songs = await getPlaylistSongs(p.id);
+        songsPulled += songs.length;
+        first = songs[0]?.artworkUrl;
+      } catch {}
+      seq += !first ? "?" : first === own ? "f" : "o";
+    }
+    let libArt = 0, libTot = 0, catArt = 0, catTot = 0;
+    for (const it of rp) {
+      const lib = isAppleLibraryId(it.id);
+      if (lib) libTot++; else catTot++;
+      if (it.artworkUrl) {
+        tally(it.artworkUrl);
+        if (lib) libArt++; else catArt++;
+      }
+    }
+    const hostList = [...hosts.entries()].map(([k, n]) => `${k}:${n}`).join(",") || "-";
+    logEventReliable(
+      `am-art pl=${pls.length} seq=${seq || "-"} rpLib=${libArt}/${libTot} rpCat=${catArt}/${catTot} hosts=${hostList}`
+        + ` songs=${songsPulled} ms=${Date.now() - t0}`,
+    );
+  } catch {}
+}
 
 // Apple Music brand red → pink.
 const AM_PINK: [string, string] = ["#FB5C74", "#FA2D48"];
@@ -285,6 +369,8 @@ export default function MusicScreen() {
       setLibrarySongs(s.songs);
       setRecent(r.items);
       setLibErrors({ playlists: p.error, songs: s.error, recent: r.error });
+      // Custom-art breadcrumb — once per JS context, never awaited (see reportAmArtOnce).
+      void reportAmArtOnce(p.playlists, r.items);
     } finally {
       setLibLoading(false);
     }

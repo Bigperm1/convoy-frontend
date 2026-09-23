@@ -72,7 +72,7 @@ export const PRICING: readonly RungPrice[] = [
 ];
 
 // ULTRA — Gold-yearly's add-on, one plan (see the header). The 3 included scans are a subscription allowance
-// that CARRIES OVER while Ultra stays active (Apple 3.1.1 says purchased credits "may not expire"; whether that
+// that CARRIES OVER while Ultra stays active and PAUSES if Ultra lapses (back when it is renewed) (Apple 3.1.1 says purchased credits "may not expire"; whether that
 // reaches a subscription allowance is unverified, so we never expire them). An extra scan is a CONSUMABLE
 // bought at the moment of the scan and used at once — never banked — and sold only while Ultra is active.
 // What a member has scanned stays theirs if Ultra or Gold lapses (Jeff 09-17: "i agree" — the car is kept
@@ -83,6 +83,7 @@ export const ULTRA = {
   annualProductId: "hairpin.gold_ultra.annual",
   includedScansPerYear: 3,
   scansCarryOver: true,                // while Ultra stays active
+  scansPauseOnLapse: true,             // Jeff 2026-09-22: "unused scans pause till ultra is back" — kept, not usable, until renewal
   extraScanUsd: 2.99,
   extraScanProductId: "hairpin.scan.extra",
   tagline: "Your own car on the map — and every car you own in your garage.",

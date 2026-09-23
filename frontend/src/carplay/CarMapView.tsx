@@ -427,9 +427,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
 
   const [mapH, setMapH] = useState(0);
   const [mapW, setMapW] = useState(0);
-  // Android Auto drops a MapView's preferredFramesPerSecond set before the map exists (src/framePacer.ts,
-  // navMapFps) — this flips once the map has loaded so the 60 fps cap is sent again to a live map.
+  // Android Auto drops a MapView's preferredFramesPerSecond set before its native map exists
+  // (src/framePacer.ts, navMapFps). The native map is created in the first mount transaction, so flipping
+  // right after the first render re-sends the 60 fps cap to a live map — without waiting for tiles to load.
   const [fpsArmed, setFpsArmed] = useState(false);
+  useEffect(() => { setFpsArmed(true); }, []);
 
   // ── THE MAP RENDERS IN CARPLAY'S POINT SPACE (2026-08-15) ───────────────────
   // The reasoning is on aaMapScaleFor; this is the wiring. Lay the GL view out at
@@ -2182,7 +2184,6 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       // ALWAYS 60 (Jeff, 2026-08-14): no eco/premium split anywhere in the render path. On Android Auto the
       // value is re-sent once the map exists (Jeff, 2026-09-23: "stuck at 60fps for all 4 platforms").
       preferredFramesPerSecond={navMapFps(Platform.OS, fpsArmed)}
-      onDidFinishLoadingMap={() => setFpsArmed(true)}
       scaleBarEnabled={false}
       compassEnabled={false}
       rotateEnabled={false}

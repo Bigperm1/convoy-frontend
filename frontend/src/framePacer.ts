@@ -16,13 +16,19 @@
 //     60 Hz grid of slots: the long-run rate is 60, and two drawn frames are never closer than
 //     MIN_GAP_MS. A declined frame does nothing — the caller just asks for the next one.
 //
+//     msUntilDue() tells a TIMER standing in for rAF (ConvoyMapbox's pump guard, which falls back to
+//     setTimeout when rAF callbacks run away at 1–3 ms) when the next slot is — a flat 16 ms timer on top
+//     of eight declined runaway callbacks settled at ~42 fps (Codex review of 39cdbc34).
+//
 //  2. navMapFps() — the Mapbox MapView `preferredFramesPerSecond` value. rnmapbox 10.3.1 on ANDROID
 //     applies that prop only when its MapView already exists (RNMBXMapView.setReactPreferredFramesPerSecond:
 //     `if (this::mMapView.isInitialized)`), and a mount's first props land BEFORE the map is created
 //     (RNMBXMapViewManager.onAfterUpdateTransaction → applyAllChanges → createMapView). A constant 60
 //     was therefore dropped on every Android mount and never sent again, so Mapbox drew at the panel's
-//     rate. The value starts one below the cap and becomes the cap once the map has loaded, so the
-//     setter runs against a live map. iOS applies the prop at any time and gets the cap from the start.
+//     rate. The value starts one below the cap and becomes the cap right after the MapView's first render
+//     (its native MapView is created in that first mount transaction), so the setter runs against a live
+//     map — not after the map "loads", which waits for every visible tile and could leave a slow network
+//     uncapped (Codex review of 39cdbc34). iOS applies the prop at any time and gets the cap from the start.
 
 export const NAV_FPS = 60;
 const FRAME_MS = 1000 / NAV_FPS;
@@ -75,7 +81,12 @@ export function frameDue(p: FramePacer, now: number): boolean {
   return true;
 }
 
+/** Milliseconds until frameDue() would next say yes (0 if it would now) — for a timer standing in for rAF. */
+export function msUntilDue(p: FramePacer, now: number): number {
+  return Math.max(0, p.next - SLACK_MS - now, p.drawnAt + MIN_GAP_MS - now);
+}
+
 /** preferredFramesPerSecond for a nav MapView. See piece 2 in the header for why Android starts one below. */
-export function navMapFps(platformOS: string, mapLoaded: boolean): number {
-  return platformOS === "android" && !mapLoaded ? NAV_FPS - 1 : NAV_FPS;
+export function navMapFps(platformOS: string, mapMounted: boolean): number {
+  return platformOS === "android" && !mapMounted ? NAV_FPS - 1 : NAV_FPS;
 }

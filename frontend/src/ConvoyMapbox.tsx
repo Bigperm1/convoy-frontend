@@ -34,7 +34,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
-import { createFramePacer, frameDue, navMapFps } from "./framePacer";
+import { createFramePacer, frameDue, msUntilDue, navMapFps } from "./framePacer";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM, rfPredict, rfFix, rfPose, type RfState } from "./poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "./yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
@@ -1840,7 +1840,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // failure, and must not push a healthy loop onto a timer.
       if (++fastPumpRun.current >= FAST_PUMP_RUN) {
         rafIsTimer.current = true;
-        raf.current = setTimeout(step, 16) as unknown as number;
+        // Wait for the 60 fps pacer's next slot, not a flat 16 ms: after eight declined runaway callbacks
+        // a flat 16 settled at ~42 fps (Codex review 2026-09-23). Unpaced, this is ≈16 ms as before.
+        raf.current = setTimeout(step, Math.min(16, Math.max(1, Math.ceil(msUntilDue(pacerRef.current, now))))) as unknown as number;
         return;
       }
     } else {
@@ -2809,9 +2811,11 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     onHazardPress, onPlacePress, onHeading, resetNorthSignal, fitCrewSignal,
     zoomOffset = 0,
   } = props;
-  // Android drops a MapView's preferredFramesPerSecond set before the map exists (src/framePacer.ts,
-  // navMapFps) — this flips once the map has loaded so the 60 fps cap is sent again to a live map.
+  // Android drops a MapView's preferredFramesPerSecond set before its native map exists (src/framePacer.ts,
+  // navMapFps). The native map is created in the first mount transaction, so flipping right after the first
+  // render re-sends the 60 fps cap to a live map — without waiting for tiles to load.
   const [fpsArmed, setFpsArmed] = useState(false);
+  useEffect(() => { setFpsArmed(true); }, []);
 
   const cameraRef = useRef<React.ElementRef<typeof Camera>>(null);
   const readyRef = useRef(false);
@@ -4217,7 +4221,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         attributionPosition={{ bottom: 8, right: 8 }}
         pitchEnabled
         rotateEnabled
-        onDidFinishLoadingMap={() => { readyRef.current = true; setFpsArmed(true); onMapReady?.(); }}
+        onDidFinishLoadingMap={() => { readyRef.current = true; onMapReady?.(); }}
         // Double-tap belongs to PIN DROP (map.tsx detects two quick presses), so
         // Mapbox's native double-tap-zoom is off — pinch still zooms as always.
         gestureSettings={{ doubleTapToZoomInEnabled: false }}

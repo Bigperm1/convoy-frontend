@@ -1066,6 +1066,21 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BL `e3a0b8a1-f1a5-4607-8408-b8b97a74a034` (2026-09-23 — Jeff: "GO FOR BOTH"), code `51194a6b`, runtime 1.29.0,
+  KEY_PRESENT=1 iOS + Android; the live bundle carries "Message the crew" / "Tell the crew about this change" / `event-push-open`
+  (+ `am-art pl=` on iOS only — Platform-gated, stripped from Android), OTA-BK's carries none. BACKEND deployed first: convoy-backend
+  `2e11f70` pushed 16:06 PDT, live 16:08 (POST /api/events/x/notify 404 → 401). Jeff's ask: "Is it possible to make it when a
+  meet/cruise is made it has a toggle to force notify the crew that's attending the meet/cruise?" → Message the crew (creator or
+  club admin; Going = everyone else going, or Whole club; 140-char note; 5 min/event), an automatic push to attendees when a
+  meet's TIME or meeting-point COORDINATES change ("Tell the crew about this change", default on; one per 5 min, the sweep flushes
+  folded edits; a correction near the start still goes at ≥1 min), a cancellation push on delete (no event_id → opens the Hub).
+  Honors Attendee notifications. Fixed on the way: Edit meet was a dead button in Club (onEdit no-op); every non-creator club admin
+  was refused since 466f2a3 (09-06: `_can_manage_event` never loaded `members`); push times printed UTC ("Sun 1:30 AM" for a Sat
+  6:30 PM meet) → the app now sends start_at with its own offset and the server prints a clock only from such a string (old 'Z'
+  meets: no clock until edited). Receipts: `event-push-open` on a plain event-push tap; `am-art` (Apple Music custom playlist art:
+  seq o/f/n/?/s per strip playlist — needs Jeff to say which position has the custom cover). Backend 95 tests; sim-verified with a
+  preview-only fake meet (composer, keyboard, toggle, Edit → Save → reopen ×3); Codex ×2 (3 real findings, fixed). NOT verified:
+  a real push on a phone, Android UI, am-art on a device. Time-sensitive (break-through-Focus) delivery = build 80 (entitlement).
 - **SHIPPED AS OTA-BK `936eb956-f8a1-484f-ab97-ad09d587db6f` (2026-09-23 — Jeff: "GO"), code `f952f855`, runtime 1.29.0,
   KEY_PRESENT=1 iOS + Android; the live bundle carries `diamond/cloudy` and `neon_place_diamond`.** Jeff's CarPlay photo: the
   destination weather bubble showed the green FLAG while he wore Diamond — Diamond (added 09-22) was never baked in

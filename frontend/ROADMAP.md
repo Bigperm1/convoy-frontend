@@ -1066,6 +1066,16 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BK `936eb956-f8a1-484f-ab97-ad09d587db6f` (2026-09-23 — Jeff: "GO"), code `f952f855`, runtime 1.29.0,
+  KEY_PRESENT=1 iOS + Android; the live bundle carries `diamond/cloudy` and `neon_place_diamond`.** Jeff's CarPlay photo: the
+  destination weather bubble showed the green FLAG while he wore Diamond — Diamond (added 09-22) was never baked in
+  tools/wx-pin/bake.py, so wxCalloutUri fell back to brand/none although the forecast was there (telemetry `wx-dest kind=cloudy
+  t=12`). `970fbf32`: Diamond baked (white → ice-blue rim), an unbaked skin now falls back to the green bubble WITH the weather,
+  `neon_place_diamond` registered; gate `tools/sim-qc/skin_assets_test.mts` (fails on 17dadb6f). Same OTA: the Crew pill (CarPlay
+  + phone) turns GREEN while another member is online — presenceHub.onlineCrewCount (Supabase presence, self excluded, one per
+  member); `f952f855` (Codex review): nobody counts while the channel is down, until the next sync — `crew_online_test.mts`
+  O8–O9c fail on 970fbf32. Sim-verified on the phone (Diamond bubble 17° partly cloudy; pill green with 2 online); CarPlay and AA
+  NOT runtime-verified. The pill's NUMBER still counts unpruned WS/REST peers (unchanged). AA keeps the brand pin (WX_PIN_ON_CAR, locked).
 - **SHIPPED AS OTA-BJ `0df234e8-02fc-40fe-ba9c-38cb5da4dc5b` (2026-09-23 — Jeff: "go"), code `c621575e`, runtime 1.29.0,
   KEY_PRESENT=1 iOS + Android; the live bundle carries the new strings ("DIAMOND UNLOCKED", "Unlocked by your 1st 3D scan",
   `skin-unlock shown`), OTA-BI's does not.** Diamond is unlocked by the member's 1st finished 3D scan, not the purchase

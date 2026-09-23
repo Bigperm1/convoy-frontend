@@ -1066,6 +1066,15 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BJ `0df234e8-02fc-40fe-ba9c-38cb5da4dc5b` (2026-09-23 — Jeff: "go"), code `c621575e`, runtime 1.29.0,
+  KEY_PRESENT=1 iOS + Android; the live bundle carries the new strings ("DIAMOND UNLOCKED", "Unlocked by your 1st 3D scan",
+  `skin-unlock shown`), OTA-BI's does not.** Diamond is unlocked by the member's 1st finished 3D scan, not the purchase
+  (`84dccea4`, src/appSkin.ts diamondUnlocked — entitlements on or off; testers who picked Diamond without a scan now wear
+  Gold, choice kept), and the unlock plays as a WAVE: a light band sweeps down and the skinned chrome turns under it, then
+  "DIAMOND UNLOCKED · Your 1st 3D scan" (src/skinWave.ts, ui/SkinWave.tsx, ui/SkinUnlock.tsx; App Skin picks play it too).
+  Review fixes `c621575e` (Codex ×2 + a 3-lens workflow: 7 findings, each reproduced and fixed). Website copy pushed live the
+  same day (hairpin-site `ad428ea`, with the pricing section from 09-22). Purchase-triggered tier unlocks wait for build 80
+  billing. NOT runtime-verified on Android.
 - **SHIPPED AS OTA-BI `6be8e905-76cb-4840-89f9-fc81f57be5d5` (2026-09-23 — Jeff: "IM AT WORK SO I CANT RUN IT.. PLEASE DO IT"),
   code `fe665daa`, runtime 1.29.0, KEY_PRESENT=1 iOS + Android; the live bundle carries fe665daa's own log string (OTA-BH's does
   not).** Apple feel batch 1 (`e0f87237`: shared motion/haptics, the H menu grows from the H and navigates at once, Back goes where

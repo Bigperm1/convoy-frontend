@@ -24,7 +24,8 @@ import { skin } from "./tierTheme";
 import { COLORS } from "./theme";
 import { CandyCta } from "./components/CandyCta";
 
-const GOLD = skin("ultra");
+// The scan is Ultra's — Diamond (2026-09-22; was gold while "ultra" named gold).
+const METAL = skin("diamond");
 
 // The countdown's promise. Measured 2026-08-29 on the first real scan: generate ~3 min
 // + two converts ~1 min + publish seconds. 6 minutes is the honest middle — long enough
@@ -53,7 +54,7 @@ export function ScanPlaceholder() {
     <View style={styles.fill}>
       <Animated.View style={[styles.pulseRing, { transform: [{ scale }], opacity: glow }]} />
       <Animated.View style={{ transform: [{ scale }] }}>
-        <MaterialCommunityIcons name="car-sports" size={64} color={GOLD.accent} />
+        <MaterialCommunityIcons name="car-sports" size={64} color={METAL.accent} />
       </Animated.View>
       <Text style={styles.title}>Your car belongs here</Text>
       <Text style={styles.hint}>Four photos. A few minutes. Then it's your marker on the map.</Text>
@@ -109,7 +110,7 @@ export function ScanCountdown({ submittedAt }: { submittedAt?: string | null }) 
           {/* remaining arc, clock-style from 12 o'clock */}
           <AnimatedCircle
             cx={88} cy={88} r={R}
-            stroke={GOLD.accent}
+            stroke={METAL.accent}
             strokeWidth={7}
             fill="none"
             strokeLinecap="round"
@@ -121,7 +122,7 @@ export function ScanCountdown({ submittedAt }: { submittedAt?: string | null }) 
         <View style={styles.clockCenter}>
           {overtime ? (
             <Animated.View style={{ opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] }), alignItems: "center" }}>
-              <Ionicons name="hammer" size={26} color={GOLD.accent} />
+              <Ionicons name="hammer" size={26} color={METAL.accent} />
               <Text style={styles.clockOver}>still building</Text>
             </Animated.View>
           ) : (
@@ -154,13 +155,13 @@ export function ScanReadyOverlay({ onDismiss }: { onDismiss: () => void }) {
       pointerEvents="box-none"
     >
       <View style={styles.readyCard}>
-        <Ionicons name="checkmark-circle" size={34} color={GOLD.accent} />
+        <Ionicons name="checkmark-circle" size={34} color={METAL.accent} />
         <Text style={styles.readyTitle}>Your car is built</Text>
         <Text style={styles.readyBody}>
           It's live everywhere, right now — spinning here in your Garage, and it's your
           marker on the map and on CarPlay. No restart needed.
         </Text>
-        <CandyCta label="Show me the map" onPress={onDismiss} height={44} tier="ultra" />
+        <CandyCta label="Show me the map" onPress={onDismiss} height={44} tier="diamond" />
       </View>
     </Animated.View>
   );
@@ -171,18 +172,18 @@ const styles = StyleSheet.create({
   pulseRing: {
     position: "absolute",
     width: 168, height: 168, borderRadius: 84,
-    borderWidth: 1.5, borderColor: GOLD.rim,
+    borderWidth: 1.5, borderColor: METAL.rim,
   },
   title: { color: COLORS.text, fontSize: 17, fontWeight: "800", marginTop: 10 },
   hint: { color: COLORS.textDim, fontSize: 13, textAlign: "center", paddingHorizontal: 36, lineHeight: 18 },
   clockCenter: { position: "absolute", alignItems: "center" },
   clockTime: { color: COLORS.text, fontSize: 34, fontWeight: "800", fontVariant: ["tabular-nums"] },
-  clockUnder: { color: GOLD.accent, fontSize: 11, fontWeight: "700", letterSpacing: 2, textTransform: "uppercase" },
-  clockOver: { color: GOLD.accent, fontSize: 11, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase", marginTop: 4 },
+  clockUnder: { color: METAL.accent, fontSize: 11, fontWeight: "700", letterSpacing: 2, textTransform: "uppercase" },
+  clockOver: { color: METAL.accent, fontSize: 11, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase", marginTop: 4 },
   readyWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   readyCard: {
     backgroundColor: "rgba(11,12,14,0.94)",
-    borderColor: GOLD.rim, borderWidth: 1, borderRadius: 18,
+    borderColor: METAL.rim, borderWidth: 1, borderRadius: 18,
     paddingHorizontal: 20, paddingVertical: 18,
     alignItems: "center", gap: 8, maxWidth: 300,
   },

@@ -6,10 +6,6 @@
 // existing skin ladder (src/appSkin.ts / src/tierTheme.ts). Locks and the "Up next" card are paywall
 // surfaces and wear the FEATURE's metal instead (useFeatureTier), never this one.
 //
-// ⚠ DIAMOND IS NOT MERGED. The diamond metal lives on local branch trial/diamond-skin (TIER_SKIN.diamond,
-// TIER_H.diamond). Until it lands, Ultra renders in the gold metal: when it merges, change the 'ultra'
-// line in garageMetal() to 'diamond' and nothing else in the Garage needs to move.
-//
 // Prices come ONLY from src/pricing.ts — no price literal lives in this file.
 
 import type { VisualTier } from "../../tierTheme";
@@ -22,7 +18,7 @@ export function garageMetal(t: GarageTier): VisualTier {
     case "free": return "brand";
     case "silver": return "premium";
     case "gold": return "ultra";
-    case "ultra": return "ultra";   // → "diamond" when trial/diamond-skin merges (build 80)
+    case "ultra": return "diamond";
   }
 }
 

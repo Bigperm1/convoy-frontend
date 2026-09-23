@@ -11,6 +11,7 @@ import { TIER_SKIN, type VisualTier } from "../tierTheme";
 import { View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path, Circle, G } from "react-native-svg";
+import SkinSheen from "./SkinSheen";
 
 export type ManeuverDir =
   | "straight" | "left" | "right" | "slight-left" | "slight-right" | "uturn"
@@ -163,6 +164,7 @@ export function ManeuverBox({
         locations={sk.locations}
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
       />
+      <SkinSheen sk={sk} />
       {children}
     </View>
   );

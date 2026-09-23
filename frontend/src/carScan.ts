@@ -53,7 +53,7 @@ import { api } from "./api";
 import { getSettings, updateSettings, getSelfMarkerType } from "./settings";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { setSkinChoice } from "./appSkin";
-import { ensureGarageLoaded, getGarage, updateGarage, SKIN_FOR_MARKER } from "./garageStore";
+import { ensureGarageLoaded, getGarage, updateGarage, SKIN_FOR_SCAN } from "./garageStore";
 
 export const SCAN_BUCKET = "car-scans";
 
@@ -638,10 +638,10 @@ export async function deliverSubmittedScan(
   await updateGarage((cur) => ({ scanParked: false, completeScanIds: addId(cur.completeScanIds, id) }));
   if (markerChanges) {
     // The rest of what picking the 3D car does (garageCars afterMarkerWrite): the profile's avatar_type
-    // (ignored by today's backend, kept as it was) and the skin that follows the pick.
+    // (ignored by today's backend, kept as it was) and the skin that follows the pick — a scan is Ultra's
+    // car, so Diamond.
     api.put("/auth/profile", { avatar_type: "car" }).catch(() => {});
-    const metal = SKIN_FOR_MARKER.car;
-    if (metal) void setSkinChoice(metal);
+    void setSkinChoice(SKIN_FOR_SCAN);
   }
   // The settings write above is also what flips the MAP marker live — map.tsx and carStore subscribe to
   // settings, so the car lands on every surface in the same instant.

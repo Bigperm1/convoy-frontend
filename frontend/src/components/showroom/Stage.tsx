@@ -33,6 +33,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { skin, type VisualTier } from "../../tierTheme";
+import SkinSheen from "../SkinSheen";
 
 export const STAGE_H = 400;
 /** Where the turntable sits (its centre line) — every car is placed to stand on it. */
@@ -176,38 +177,58 @@ export default function Stage({
         style={[styles.lightBar, { left: (W - 220) / 2, shadowColor: sk.accent }]}
       />
 
-      {/* 2 · the cars */}
-      {slots.map((slot, i) => {
-        if (Math.abs(i - index) > 2) return null;
-        const inputRange = [(i - 2) * W, (i - 1) * W, i * W, (i + 1) * W, (i + 2) * W];
-        const translateX = scrollX.interpolate({
-          inputRange,
-          outputRange: [PEEK * 2, PEEK, 0, -PEEK, -PEEK * 2],
-          extrapolate: "extend",
-        });
-        const scale = scrollX.interpolate({ inputRange, outputRange: [0.5, 0.6, 1, 0.6, 0.5], extrapolate: "clamp" });
-        const opacity = scrollX.interpolate({ inputRange, outputRange: [0, 0.36, 1, 0.36, 0], extrapolate: "clamp" });
-        const badge = renderBadge?.(slot, i, i === index);
-        const badgeOpacity = scrollX.interpolate({ inputRange, outputRange: [0, 1, 1, 1, 0], extrapolate: "clamp" });
+      {/* 2 · the cars — the centred one drawn LAST, so it sits over its neighbours (in list order the next
+          spot painted across a wide car's tail — the 3D class still, 2026-09-22); then the lock marks, over
+          every car */}
+      {(() => {
+        const near = slots
+          .map((slot, i) => ({ slot, i }))
+          .filter(({ i }) => Math.abs(i - index) <= 2);
+        const anim = (i: number) => {
+          const inputRange = [(i - 2) * W, (i - 1) * W, i * W, (i + 1) * W, (i + 2) * W];
+          return {
+            translateX: scrollX.interpolate({
+              inputRange,
+              outputRange: [PEEK * 2, PEEK, 0, -PEEK, -PEEK * 2],
+              extrapolate: "extend",
+            }),
+            scale: scrollX.interpolate({ inputRange, outputRange: [0.5, 0.6, 1, 0.6, 0.5], extrapolate: "clamp" }),
+            opacity: scrollX.interpolate({ inputRange, outputRange: [0, 0.36, 1, 0.36, 0], extrapolate: "clamp" }),
+            badgeOpacity: scrollX.interpolate({ inputRange, outputRange: [0, 1, 1, 1, 0], extrapolate: "clamp" }),
+          };
+        };
+        const drawOrder = [...near.filter(({ i }) => i !== index), ...near.filter(({ i }) => i === index)];
         return (
-          <React.Fragment key={slot.key}>
-            <Animated.View
-              pointerEvents="none"
-              style={[StyleSheet.absoluteFill, { opacity, transform: [{ translateX }, { scale }] }]}
-            >
-              {renderSlot(slot, i, i === index)}
-            </Animated.View>
-            {badge ? (
-              <Animated.View
-                pointerEvents="none"
-                style={[StyleSheet.absoluteFill, { opacity: badgeOpacity, transform: [{ translateX }, { scale }] }]}
-              >
-                {badge}
-              </Animated.View>
-            ) : null}
-          </React.Fragment>
+          <>
+            {drawOrder.map(({ slot, i }) => {
+              const a = anim(i);
+              return (
+                <Animated.View
+                  key={slot.key}
+                  pointerEvents="none"
+                  style={[StyleSheet.absoluteFill, { opacity: a.opacity, transform: [{ translateX: a.translateX }, { scale: a.scale }] }]}
+                >
+                  {renderSlot(slot, i, i === index)}
+                </Animated.View>
+              );
+            })}
+            {near.map(({ slot, i }) => {
+              const badge = renderBadge?.(slot, i, i === index);
+              if (!badge) return null;
+              const a = anim(i);
+              return (
+                <Animated.View
+                  key={`${slot.key}:badge`}
+                  pointerEvents="none"
+                  style={[StyleSheet.absoluteFill, { opacity: a.badgeOpacity, transform: [{ translateX: a.translateX }, { scale: a.scale }] }]}
+                >
+                  {badge}
+                </Animated.View>
+              );
+            })}
+          </>
         );
-      })}
+      })()}
 
       {/* 3 · the swipe layer */}
       <Animated.ScrollView
@@ -246,6 +267,7 @@ export default function Stage({
             locations={skin(labels.pillMetal).locations}
             style={[styles.pill, { borderColor: skin(labels.pillMetal).rim }]}
           >
+            <SkinSheen sk={skin(labels.pillMetal)} />
             <Text style={[styles.pillText, { color: skin(labels.pillMetal).ink }]}>{labels.pill}</Text>
           </LinearGradient>
           <Text style={styles.name} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{labels.name}</Text>

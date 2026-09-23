@@ -41,11 +41,13 @@ const MIC_GLOW = {
   brand:   require('../../assets/images/mic-glow.png'),
   premium: require('../../assets/images/mic-glow_silver.png'),
   ultra:   require('../../assets/images/mic-glow_gold.png'),
+  diamond: require('../../assets/images/mic-glow_diamond.png'),
 } as const;
 const MIC_CANDY = {
   brand:   require('../../assets/images/premium/mic_candy.png'),
   premium: require('../../assets/images/premium/mic_candy_silver.png'),
   ultra:   require('../../assets/images/premium/mic_candy_gold.png'),
+  diamond: require('../../assets/images/premium/mic_candy_diamond.png'),
 } as const;
 
 type Community = {

@@ -56,7 +56,7 @@ export type PremiumFeature =
   // every other gate uses.
   | "app_skin_silver"    // PREMIUM (Silver) — the silver app skin
   | "app_skin_gold"      // GOLD — the gold app skin (silver can never reach it)
-  | "app_skin_diamond";  // ULTRA — the diamond app skin (art on the trial branch, ships with build 80)
+  | "app_skin_diamond";  // ULTRA — the diamond app skin
 
 const STORE_KEY = "convoy.entitlement.v1";
 const DEV_KEY = "convoy.entitlement.devTier"; // manual QA override, survives reload
@@ -168,10 +168,11 @@ const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
  *
  * Gold = ultra, Silver = premium. See src/tierTheme.ts and DESIGN.md.
  */
-export function featureTier(feature: PremiumFeature): "premium" | "ultra" {
-  // Gold and Ultra both wear the gold H until the diamond art lands (build 80) — the badge is the
-  // METAL, not the price. For the price and the name, use featureRung().
-  return (FEATURE_RANK[feature] ?? 1) >= TIER_RANK.gold ? "ultra" : "premium";
+export function featureTier(feature: PremiumFeature): "premium" | "ultra" | "diamond" {
+  // The badge is the METAL, not the price: Silver features wear silver ("premium"), Gold features gold
+  // ("ultra"), Ultra features diamond. For the price and the name, use featureRung().
+  const r = FEATURE_RANK[feature] ?? 1;
+  return r >= TIER_RANK.ultra ? "diamond" : r >= TIER_RANK.gold ? "ultra" : "premium";
 }
 
 /** The rung a feature is sold on — what the paywall quotes (src/pricing.ts). */

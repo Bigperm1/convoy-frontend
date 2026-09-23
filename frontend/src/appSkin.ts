@@ -43,7 +43,7 @@ import { getSettings, updateSettings } from "./settings";
 
 /** What the customer picked. "auto" = follow whatever they are entitled to, which is
  *  the default so the metal ARRIVES with the purchase without them touching a setting. */
-export type SkinChoice = "auto" | "brand" | "premium" | "ultra";
+export type SkinChoice = "auto" | "brand" | "premium" | "ultra" | "diamond";
 
 type Listener = (t: VisualTier) => void;
 const listeners = new Set<Listener>();
@@ -53,13 +53,14 @@ const listeners = new Set<Listener>();
  *  While ENTITLEMENTS_ENFORCED is false every gate answers "unlocked", so honouring that
  *  here too keeps the dev/tester experience consistent with every other gate. */
 export function entitledSkin(): VisualTier {
-  if (!ENTITLEMENTS_ENFORCED) return "ultra";
+  if (!ENTITLEMENTS_ENFORCED) return "diamond";
   switch (getTier()) {
-    case "ultra":      // diamond skin ships with build 80; gold until then
-    case "gold":
+    case "ultra":      // Gold + Ultra — Diamond (Jeff, 2026-09-22: "the diamond is only for ultra")
     case "club_founder":
     case "beta_og":
-      return "ultra";
+      return "diamond";
+    case "gold":
+      return "ultra";  // the gold metal
     case "premium":
       return "premium";
     default:
@@ -67,10 +68,18 @@ export function entitledSkin(): VisualTier {
   }
 }
 
-const ORDER: VisualTier[] = ["brand", "premium", "ultra"];
+const ORDER: VisualTier[] = ["brand", "premium", "ultra", "diamond"];
+
+/** What "auto" wears. With entitlements enforced, the best metal the account has paid for. While they
+ *  are OFF every metal is selectable, but auto stays GOLD — what every tester's app wore before Diamond
+ *  merged (2026-09-22) — so the merge changes nobody's app on its own; Diamond is picked in Settings →
+ *  App Skin, or arrives by driving a scanned car (garageCars.ts). */
+export function autoSkin(): VisualTier {
+  return ENTITLEMENTS_ENFORCED ? entitledSkin() : "ultra";
+}
 
 /** Which metals this account may choose, cheapest first. Drives the Settings row.
- *  free → [green] · premium → [green, silver] · ultra → [green, silver, gold] */
+ *  free → [green] · silver → [green, silver] · gold → [+ gold] · gold + ultra → [+ diamond] */
 export function allowedSkins(): VisualTier[] {
   return ORDER.slice(0, ORDER.indexOf(entitledSkin()) + 1);
 }
@@ -82,7 +91,7 @@ export function allowedSkins(): VisualTier[] {
 export function appSkinNow(): VisualTier {
   const max = entitledSkin();
   const choice = (getSettings().appSkin ?? "auto") as SkinChoice;
-  if (choice === "auto") return max;
+  if (choice === "auto") return autoSkin();
   const want = ORDER.indexOf(choice as VisualTier);
   return want < 0 ? max : ORDER[Math.min(want, ORDER.indexOf(max))];
 }

@@ -9,14 +9,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { getClassPaint, getVehicleClass, type Settings } from "../../settings";
 import { scanHeroUrl } from "../../carScan";
 import { getVehicleModelUrl } from "../../vehicleAssets";
-import { skin, type VisualTier } from "../../tierTheme";
+import { skin, type LockMetal, type VisualTier } from "../../tierTheme";
 import { withAlpha } from "../../appSkin";
 import { TierLock } from "../../PremiumBadge";
 import { ScanCountdown, ScanPlaceholder } from "../../ScanHero";
 import { identityFor, type GarageCar, type GarageTier } from "../../garageCars";
 import type { GarageState } from "../../garageStore";
 import { CarBox } from "./Stage";
-import { Arrow2D, Arrow3D, Car3DStill, ClassCar, GRC_ASPECT, LiveCar, ScanStill } from "./CarArt";
+import { Arrow2D, Arrow3D, Car3DStill, ClassCar, GRC_ASPECT, LiveCar, ScanStill, classStillAspect, stillHeight } from "./CarArt";
 
 /** The GLB the live view and the 360° spin load for a car, or null when it has none on this screen
  *  (arrows: the arrow GLB is bundled-only; building scans: not published yet). */
@@ -27,6 +27,21 @@ export function carGlbUrl(car: GarageCar, s: Settings, g: GarageState): string |
 }
 
 const STILL_W = 330;
+const ARROW_2D_W = 136;
+const ARROW_3D_W = 230;
+/** The class still is drawn a little under STILL_W: at full width its tail reached the next spot's peek. */
+const CLASS_W = 300;
+
+/** The class car in its class paint — the 3D still where the class has one, else the laid-back sprite. */
+function ClassSlot({ s }: { s: Settings }) {
+  const p = getClassPaint(s);
+  const cls = getVehicleClass(s);
+  const aspect = classStillAspect(cls);
+  const car = <ClassCar width={CLASS_W} spriteSize={240} vehicleClass={cls} primary={p.primary} secondary={p.secondary} />;
+  return aspect
+    ? <CarBox width={CLASS_W} height={Math.round(CLASS_W * aspect)}>{car}</CarBox>
+    : <CarBox width={240} height={240} lift={-24}>{car}</CarBox>;
+}
 
 /** Live 3D box: taller than the car so model-viewer's framing leaves it standing on the turntable. */
 function LiveBox({ glbUrl, still, onSnapshot }: {
@@ -57,25 +72,20 @@ export function CarSlotArt({ car, centred, live = centred, s, g, metal, onHeroSh
 }) {
   switch (car.kind) {
     case "arrow":
+      // Flat, straight down — it hovers over the turntable like the 2D map's arrow over the road.
       return (
-        <CarBox width={150} height={150} lift={-38}>
-          <Arrow2D size={150} primary={s.arrowPaint?.primary} secondary={s.arrowPaint?.secondary} />
+        <CarBox width={ARROW_2D_W} height={stillHeight("arrow", ARROW_2D_W)} lift={22}>
+          <Arrow2D width={ARROW_2D_W} primary={s.arrowPaint?.primary} secondary={s.arrowPaint?.secondary} />
         </CarBox>
       );
     case "arrow3d":
       return (
-        <CarBox width={176} height={172}>
-          <Arrow3D width={176} primary={s.arrowPaint?.primary} secondary={s.arrowPaint?.secondary} />
+        <CarBox width={ARROW_3D_W} height={stillHeight("arrow3d", ARROW_3D_W)} lift={-6}>
+          <Arrow3D width={ARROW_3D_W} primary={s.arrowPaint?.primary} secondary={s.arrowPaint?.secondary} />
         </CarBox>
       );
-    case "class": {
-      const p = getClassPaint(s);
-      return (
-        <CarBox width={240} height={240} lift={-24}>
-          <ClassCar size={240} vehicleClass={getVehicleClass(s)} primary={p.primary} secondary={p.secondary} />
-        </CarBox>
-      );
-    }
+    case "class":
+      return <ClassSlot s={s} />;
     case "class3d": {
       const url = carGlbUrl(car, s, g);
       if (live && url) return <LiveBox key={car.id} glbUrl={url} still={stillFor3D()} />;
@@ -132,14 +142,7 @@ export function LockedSlotArt({ next, centred, live = centred, s }: {
   live?: boolean;
   s: Settings;
 }) {
-  if (next === "silver") {
-    const p = getClassPaint(s);
-    return (
-      <CarBox width={240} height={240} lift={-24}>
-        <ClassCar size={240} vehicleClass={getVehicleClass(s)} primary={p.primary} secondary={p.secondary} />
-      </CarBox>
-    );
-  }
+  if (next === "silver") return <ClassSlot s={s} />;
   if (next === "gold") {
     return live
       ? <LiveBox key="locked-gold" glbUrl={getVehicleModelUrl(s.carColor)} still={stillFor3D()} />
@@ -164,7 +167,7 @@ export function LockedSlotArt({ next, centred, live = centred, s }: {
  *  edge, drawn at 0.6 about the stage centre and pushed 0.48 W right (Stage.tsx); this is placed in the
  *  slot's own coordinates so that, after that transform, the H lands where the approved drawing has it
  *  (≈12 pt in from the right edge, ≈190 pt down, 34 pt tall). Centred, it sits top-right of the car. */
-export function LockedBadge({ lockTier, centred }: { lockTier: "premium" | "ultra"; centred: boolean }) {
+export function LockedBadge({ lockTier, centred }: { lockTier: LockMetal; centred: boolean }) {
   const { width: W } = useWindowDimensions();
   const at = centred ? { top: 140, right: 26 } : { top: 183, left: W / 2 - 63 };
   return (

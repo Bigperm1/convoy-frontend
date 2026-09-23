@@ -99,16 +99,19 @@ const CREW_ART = {
   brand:   require("../../assets/images/premium/crew_candy.png"),
   premium: require("../../assets/images/premium/crew_candy_silver.png"),
   ultra:   require("../../assets/images/premium/crew_candy_gold.png"),
+  diamond: require("../../assets/images/premium/crew_candy_diamond.png"),
 } as const;
 const VIEW2D_ART = {
   brand:   require("../../assets/images/premium/view2d_candy.png"),
   premium: require("../../assets/images/premium/view2d_candy_silver.png"),
   ultra:   require("../../assets/images/premium/view2d_candy_gold.png"),
+  diamond: require("../../assets/images/premium/view2d_candy_diamond.png"),
 } as const;
 const VIEW3D_ART = {
   brand:   require("../../assets/images/premium/view3d_candy.png"),
   premium: require("../../assets/images/premium/view3d_candy_silver.png"),
   ultra:   require("../../assets/images/premium/view3d_candy_gold.png"),
+  diamond: require("../../assets/images/premium/view3d_candy_diamond.png"),
 } as const;
 
 type RouteInfo = {

@@ -15,7 +15,7 @@ import Svg, { Path } from "react-native-svg";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import type { VisualTier } from "../tierTheme";
 
-export type NeonTone = "brand" | "camera" | "roadwork" | "incident" | "weather" | "premium" | "ultra";
+export type NeonTone = "brand" | "camera" | "roadwork" | "incident" | "weather" | "premium" | "ultra" | "diamond";
 export type NeonGlyph = keyof typeof MaterialCommunityIcons.glyphMap;
 
 /** rim = the candy ramp's LIGHT stop (the neon line and the glyph); glow = the MID stop, behind it. */
@@ -27,6 +27,7 @@ export const NEON_TONE: Record<NeonTone, { rim: string; glow: string }> = {
   weather:  { rim: "#DDEFFF", glow: "#8CC5FF" },
   premium:  { rim: "#FFFFFF", glow: "#C9D2D8" },
   ultra:    { rim: "#F6D77A", glow: "#E0A93E" },
+  diamond:  { rim: "#F4FDFF", glow: "#A9E7FF" },
 };
 
 /** Design height, tip to the top of the head, in pt. Every size is a multiple of this. */
@@ -113,4 +114,4 @@ export const INCIDENT_PIN: Record<"incident" | "construction" | "road" | "weathe
 export const INCIDENT_PIN_KINDS = Object.keys(INCIDENT_PIN) as (keyof typeof INCIDENT_PIN)[];
 
 /** Place pins (the search pills' results): the page's metal, like every other place pin. */
-export const PLACE_TONE: Record<VisualTier, NeonTone> = { brand: "brand", premium: "premium", ultra: "ultra" };
+export const PLACE_TONE: Record<VisualTier, NeonTone> = { brand: "brand", premium: "premium", ultra: "ultra", diamond: "diamond" };

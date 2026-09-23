@@ -23,6 +23,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { skin, type VisualTier } from "../tierTheme";
+import SkinSheen from "./SkinSheen";
 
 export function CandyCta({
   label,
@@ -71,6 +72,7 @@ export function CandyCta({
             style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
           />
         )}
+        {!off && <SkinSheen sk={sk} radius={radius} />}
         {busy ? (
           <ActivityIndicator color={off ? "#4A4A4A" : sk.ink} />
         ) : (

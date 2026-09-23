@@ -12,10 +12,11 @@ import {
   subscribeEntitlement,
   type PremiumFeature,
 } from "./entitlements";
-import { skin, tierH, type VisualTier } from "./tierTheme";
+import { skin, tierH, type LockMetal, type VisualTier } from "./tierTheme";
+import SkinSheen from "./components/SkinSheen";
 
 /** The tier that would unlock a feature, live across tier changes. */
-export function useFeatureTier(feature: PremiumFeature): "premium" | "ultra" {
+export function useFeatureTier(feature: PremiumFeature): LockMetal {
   useEntitlementVersion();
   return featureTier(feature);
 }
@@ -56,7 +57,7 @@ export function TierLock({
   size = 22,
   style,
 }: {
-  tier: "premium" | "ultra";
+  tier: LockMetal;
   size?: number;
   style?: ImageStyle;
 }) {
@@ -65,7 +66,7 @@ export function TierLock({
       source={tierH(tier)}
       style={[{ width: size, height: size }, style]}
       resizeMode="contain"
-      accessibilityLabel={tier === "ultra" ? "Ultra Premium" : "Premium"}
+      accessibilityLabel={tier === "diamond" ? "Ultra" : tier === "ultra" ? "Gold" : "Silver"}
     />
   );
 }
@@ -99,7 +100,7 @@ export function PremiumBadge({
   style,
 }: {
   size?: "sm" | "md";
-  tier?: "premium" | "ultra";
+  tier?: LockMetal;
   style?: ViewStyle;
 }) {
   const sm = size === "sm";
@@ -110,8 +111,9 @@ export function PremiumBadge({
       locations={sk.locations}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
-      style={[styles.pill, sm ? styles.pillSm : styles.pillMd, { borderColor: sk.rim }, style]}
+      style={[styles.pill, sm ? styles.pillSm : styles.pillMd, { borderColor: sk.rim, overflow: "hidden" }, style]}
     >
+      <SkinSheen sk={sk} />
       <Ionicons name="diamond" size={sm ? 8 : 10} color={sk.ink} />
       <Text style={[styles.label, sm ? styles.labelSm : styles.labelMd, { color: sk.ink }]}>
         {sk.label.toUpperCase()}
@@ -125,7 +127,7 @@ export function PremiumCornerBadge({
   tier = "ultra",
   style,
 }: {
-  tier?: "premium" | "ultra";
+  tier?: LockMetal;
   style?: ViewStyle;
 }) {
   return (

@@ -19,6 +19,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
+import type { LockMetal } from "./tierTheme";
 import { PremiumBadge, subscribePaywall } from "./PremiumBadge";
 import { featureTier } from "./entitlements";
 import { redeemCode, featureRung, type PremiumFeature } from "./entitlements";
@@ -51,7 +52,7 @@ export default function PaywallSheet() {
   // The sheet wears the metal of the feature that OPENED it — silver for a
   // Premium lock, gold for an Ultra one. A gold "ULTRA PREMIUM" badge over a
   // Premium feature quotes the customer the wrong tier.
-  const [tier, setTier] = useState<"premium" | "ultra">("ultra");
+  const [tier, setTier] = useState<LockMetal>("ultra");
   const [rung, setRung] = useState<PaidRung | "ultra">("premium");
   const [code, setCode] = useState("");
   const [redeeming, setRedeeming] = useState(false);

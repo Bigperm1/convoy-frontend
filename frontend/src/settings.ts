@@ -216,7 +216,7 @@ selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
 // a setting. An explicit choice is CLAMPED to entitlement at read time, so this can never
 // hold a metal they no longer pay for. Deliberately NOT in DEFAULT_SETTINGS: undefined
 // already means 'auto', so no migration flag is needed for existing installs.
-appSkin?: 'auto' | 'brand' | 'premium' | 'ultra';
+appSkin?: 'auto' | 'brand' | 'premium' | 'ultra' | 'diamond';
 // "Class" map appearance (Garage): a top-down sprite of the vehicle class,
 // painted with user-picked PRIMARY (accent band) + SECONDARY (second band)
 // colors. Stored PER CLASS so switching class remembers each one's paint.

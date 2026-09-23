@@ -33,6 +33,7 @@ export const TIER_WALLPAPER: Record<VisualTier, ImageSourcePropType> = {
   brand:   require("../../assets/images/glass-bgt.png"),
   premium: require("../../assets/images/glass-bgt-silver.png"),
   ultra:   require("../../assets/images/glass-bgt-gold.png"),
+  diamond: require("../../assets/images/glass-bgt-diamond.png"),
 };
 
 export default function GlassBackdrop({

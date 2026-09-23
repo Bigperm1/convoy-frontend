@@ -4,7 +4,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import {
   SettingsPage, SectionLabel, SettingsCard, RadioRow, Divider, HelpText,
 } from "../../../src/components/settingsKit";
-import { useAppSkin, setSkinChoice, entitledSkin, type SkinChoice } from "../../../src/appSkin";
+import { useAppSkin, setSkinChoice, autoSkin, type SkinChoice } from "../../../src/appSkin";
+import SkinSheen from "../../../src/components/SkinSheen";
 import { getSettings } from "../../../src/settings";
 import { skin, TIER_SKIN, type VisualTier } from "../../../src/tierTheme";
 import { subscribeEntitlement } from "../../../src/entitlements";
@@ -27,6 +28,7 @@ const SKIN_NAME: Record<VisualTier, string> = {
   brand: "Hairpin Green",
   premium: "Silver",
   ultra: "Gold",
+  diamond: "Diamond",
 };
 
 const OPTIONS: {
@@ -34,11 +36,12 @@ const OPTIONS: {
   icon: any;
   title: string;
   sub: string;
-  feature?: "app_skin_silver" | "app_skin_gold";
+  feature?: "app_skin_silver" | "app_skin_gold" | "app_skin_diamond";
 }[] = [
   { key: "brand",   icon: "leaf",     title: SKIN_NAME.brand,   sub: "The original. Always yours." },
-  { key: "premium", icon: "sparkles", title: SKIN_NAME.premium, sub: "Premium", feature: "app_skin_silver" },
-  { key: "ultra",   icon: "trophy",   title: SKIN_NAME.ultra,   sub: "Ultra Premium", feature: "app_skin_gold" },
+  { key: "premium", icon: "sparkles", title: SKIN_NAME.premium, sub: "With Silver", feature: "app_skin_silver" },
+  { key: "ultra",   icon: "trophy",   title: SKIN_NAME.ultra,   sub: "With Gold", feature: "app_skin_gold" },
+  { key: "diamond", icon: "diamond",  title: SKIN_NAME.diamond, sub: "With Gold + Ultra", feature: "app_skin_diamond" },
 ];
 
 function Swatch({ tier }: { tier: VisualTier }) {
@@ -47,8 +50,10 @@ function Swatch({ tier }: { tier: VisualTier }) {
     <LinearGradient
       colors={sk.colors}
       locations={sk.locations}
-      style={[styles.swatch, { borderColor: sk.rim }]}
-    />
+      style={[styles.swatch, { borderColor: sk.rim, overflow: "hidden" }]}
+    >
+      <SkinSheen sk={sk} />
+    </LinearGradient>
   );
 }
 
@@ -59,7 +64,7 @@ export default function AppSkinPage() {
   const [, bump] = useState(0);
   useEffect(() => subscribeEntitlement(() => bump((n) => n + 1)), []);
 
-  const maxTier = entitledSkin();
+  const autoTier = autoSkin();
 
   return (
     <SettingsPage title="App Skin">
@@ -79,7 +84,7 @@ export default function AppSkinPage() {
       <SettingsCard>
         <RadioRow
           icon="color-wand"
-          iconColor={skin(maxTier).accent}
+          iconColor={skin(autoTier).accent}
           title="Automatic"
           subtitle="Always wear the best metal your tier unlocks"
           selected={choice === "auto"}
@@ -102,7 +107,7 @@ export default function AppSkinPage() {
       </SettingsCard>
 
       <HelpText>
-        {`Your metal arrives with your tier — buy Premium and the app turns silver, buy Ultra Premium and it turns gold. You can always drop back down (gold can wear silver or green), but you can never wear a metal above your tier.\n\nOn the map, the colours that MEAN something never change: the route line, traffic colours, hazards and speed cameras stay exactly as they are, because you read those at speed. Your search pins do wear your metal.`}
+        {`Your metal arrives with your plan — Silver turns the app silver, Gold turns it gold, and adding Ultra unlocks Diamond. You can always drop back down (gold can wear silver or green), but you can never wear a metal above your plan.\n\nOn the map, the colours that MEAN something never change: the route line, traffic colours, hazards and speed cameras stay exactly as they are, because you read those at speed. Your search pins do wear your metal.`}
       </HelpText>
     </SettingsPage>
   );

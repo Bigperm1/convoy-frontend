@@ -46,8 +46,8 @@ import { MAIN_COLORS, CLUB_PALETTES } from "../../src/paintPalettes";
 import CarViewfinder from "../../src/components/CarViewfinder";
 import { guidedCameraAvailable } from "../../src/guidedCamera";
 
-// This is an ULTRA PREMIUM page — gold, not brand green (Jeff 8/23).
-const ULTRA = skin("ultra");
+// Scanning is Ultra's, so this page wears Diamond (2026-09-22) — it was gold while "ultra" named gold.
+const ULTRA = skin("diamond");
 
 // BASE name, not @3x (build-74 failure, 2026-08-27): an explicit density-suffixed
 // require resolves in dev Metro but "Unable to resolve module" kills the RELEASE
@@ -453,7 +453,7 @@ export default function GarageCaptureScreen() {
             onPress={() => send(paintSel)}
             disabled={!paintSel}
             height={50}
-            tier="ultra"
+            tier="diamond"
             style={styles.sendBtn}
           />
           <TouchableOpacity style={styles.ghostBtn} onPress={() => send(null)} activeOpacity={0.85}>
@@ -509,7 +509,7 @@ export default function GarageCaptureScreen() {
                   <Text style={styles.ghostText}>Try again</Text>
                 </TouchableOpacity>
               )}
-              <CandyCta label="Done" onPress={() => router.back()} height={52} tier="ultra" style={styles.doneBtn} />
+              <CandyCta label="Done" onPress={() => router.back()} height={52} tier="diamond" style={styles.doneBtn} />
             </>
           )}
         </View>
@@ -546,7 +546,7 @@ export default function GarageCaptureScreen() {
       <View style={styles.track}>
         <View style={[styles.trackFill, { width: `${(captured / SHOTS_TOTAL) * 100}%` }]} />
       </View>
-      <TierTitle tier="ultra" style={styles.tierTitle} />
+      <TierTitle tier="diamond" style={styles.tierTitle} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Overhead ring — where to stand for this shot. */}
@@ -634,7 +634,7 @@ export default function GarageCaptureScreen() {
           label={shots[shot.id] ? `Re-shoot ${shot.label.toLowerCase()}` : "Take photo"}
           icon="camera"
           onPress={takePhoto}
-          tier="ultra"
+          tier="diamond"
           style={styles.shutterWrap}
         />
 
@@ -649,7 +649,7 @@ export default function GarageCaptureScreen() {
           onPress={() => setPhase("paint")}
           disabled={!complete}
           height={50}
-          tier="ultra"
+          tier="diamond"
           style={styles.sendBtn}
         />
       </ScrollView>

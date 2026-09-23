@@ -42,18 +42,21 @@ const TAB_ICON = {
     brand:   require("../../assets/images/tabicons/map_on.png"),
     premium: require("../../assets/images/tabicons/map_on_silver.png"),
     ultra:   require("../../assets/images/tabicons/map_on_gold.png"),
+    diamond: require("../../assets/images/tabicons/map_on_diamond.png"),
     off:     require("../../assets/images/tabicons/map_off.png"),
   },
   mic: {
     brand:   require("../../assets/images/tabicons/mic_on.png"),
     premium: require("../../assets/images/tabicons/mic_on_silver.png"),
     ultra:   require("../../assets/images/tabicons/mic_on_gold.png"),
+    diamond: require("../../assets/images/tabicons/mic_on_diamond.png"),
     off:     require("../../assets/images/tabicons/mic_off.png"),
   },
   music: {
     brand:   require("../../assets/images/tabicons/music_on.png"),
     premium: require("../../assets/images/tabicons/music_on_silver.png"),
     ultra:   require("../../assets/images/tabicons/music_on_gold.png"),
+    diamond: require("../../assets/images/tabicons/music_on_diamond.png"),
     off:     require("../../assets/images/tabicons/music_off.png"),
   },
 } as const;

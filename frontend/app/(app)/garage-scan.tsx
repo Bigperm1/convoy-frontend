@@ -42,8 +42,8 @@ import { TierTitle } from "../../src/PremiumBadge";
 import { skin } from "../../src/tierTheme";
 import { SCAN_SHOTS, SHOTS_TOTAL } from "../../src/carScan";
 
-// This is an ULTRA PREMIUM page, so it is GOLD, not brand green (Jeff 8/23).
-const ULTRA = skin("ultra");
+// Scanning is Ultra's, so these pages wear Diamond (2026-09-22) — they were gold while "ultra" named gold.
+const ULTRA = skin("diamond");
 
 /** The tier fill as an absolute layer, same candy construction in gold. */
 function CandyFillAbs() {
@@ -157,7 +157,7 @@ export default function GarageScan() {
           <View style={styles.backBtn} />
         </View>
 
-        <TierTitle tier="ultra" style={styles.tierTitle} />
+        <TierTitle tier="diamond" style={styles.tierTitle} />
         <Text style={styles.title}>Garage Scan</Text>
         <Text style={styles.subtitle}>Your actual car. On the map.</Text>
 
@@ -275,7 +275,7 @@ export default function GarageScan() {
             },
           ]}
         >
-          <CandyCta label="Start Capture" icon="scan" onPress={startCapture} tier="ultra" />
+          <CandyCta label="Start Capture" icon="scan" onPress={startCapture} tier="diamond" />
         </Animated.View>
         <Text style={styles.finePrint}>{SHOTS_TOTAL} photos · about three minutes · one rescan included</Text>
       </ScrollView>

@@ -61,6 +61,7 @@ const TILE: Record<VisualTier, any> = {
   brand: require('../../assets/HAIRPIN-tile3.png'),
   premium: require('../../assets/HAIRPIN-silver3.png'),
   ultra: require('../../assets/HAIRPIN-gold3.png'),
+  diamond: require('../../assets/HAIRPIN-diamond3.png'),
 };
 
 interface Props {

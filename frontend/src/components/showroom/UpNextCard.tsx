@@ -8,7 +8,7 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { skin, type VisualTier } from "../../tierTheme";
+import { skin, type LockMetal, type VisualTier } from "../../tierTheme";
 import { withAlpha } from "../../appSkin";
 import { TierLock } from "../../PremiumBadge";
 import type { UpNext } from "./tier";
@@ -19,7 +19,7 @@ export default function UpNextCard({ copy, variant, metal, lockTier, onPress }: 
   /** upsell: the next rung's metal (from useFeatureTier) · scan: the page metal. */
   metal: VisualTier;
   /** The H that states the rung (upsell only). */
-  lockTier?: "premium" | "ultra";
+  lockTier?: LockMetal;
   onPress: () => void;
 }) {
   const sk = skin(metal);

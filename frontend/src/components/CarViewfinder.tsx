@@ -47,7 +47,8 @@ import {
   type LevelReading, type Vec3,
 } from "../carViewfinderLevel";
 
-const ULTRA = skin("ultra");
+// The scan camera is Ultra's — Diamond (2026-09-22).
+const ULTRA = skin("diamond");
 
 /** Sensor cadence. Faster than the old 100 ms because the reading is now smoothed:
  *  more samples make the average calmer AND more responsive, not noisier. */

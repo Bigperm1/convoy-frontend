@@ -40,6 +40,9 @@ export type MarkerType = "car" | "arrow" | "photo" | "class";
 export const SKIN_FOR_MARKER: Partial<Record<MarkerType, VisualTier>> = {
   arrow: "brand", class: "premium", car: "ultra",
 };
+/** A SCANNED car is a "car" marker too, but it is Ultra's — it wears Diamond (2026-09-22: "the diamond
+ *  is only for ultra"). The stock 3D car keeps SKIN_FOR_MARKER.car (gold). */
+export const SKIN_FOR_SCAN: VisualTier = "diamond";
 
 export type GarageScan = {
   scanId: string;

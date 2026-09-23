@@ -115,7 +115,7 @@ ok("D9 every surface draws scan a again", eq(surfaces(s), { marker: "car", mapSc
 ok("D10 back on a parked scan → carScanBackendId empty, so map.tsx re-sends car_scan_id (parking cleared it on the profile)",
   s.carScanBackendId === undefined && putsTo('"car_scan_id":""').length === 0);
 ok("D11 its identity came back (settings + profile PUT)", s.carMake === "Toyota" && s.carModel === "GR Corolla" && putsTo('"car_make":"Toyota"').length === 1);
-ok("D12 unparked, gold skin", gs.getGarage().scanParked === false && eq(skinStub.skins, ["ultra"]));
+ok("D12 unparked, diamond skin (a scan is Ultra's)", gs.getGarage().scanParked === false && eq(skinStub.skins, ["diamond"]));
 
 settings.writes.length = 0;
 r = await gc.driveToday(B);
@@ -127,6 +127,7 @@ ok("D13 → a different scan: its URLs, ready, backend id cleared for map.tsx's 
 r = await gc.driveToday({ id: "class3d", kind: "class3d" });
 s = settings.getSettings();
 ok("D14 → stock 3D car: marker car, scan parked everywhere", eq(surfaces(s), { marker: "car", mapScan: null, peerScanId: undefined }) && gc.activeCarId(s, gs.getGarage()) === "class3d");
+ok("D14b the stock 3D car keeps the GOLD metal — only a scan wears diamond", skinStub.skins[skinStub.skins.length - 1] === "ultra");
 r = await gc.driveToday({ id: "class3d", kind: "class3d" });
 ok("D15 driving today's car again is a no-op", r === "same");
 r = await gc.driveToday({ id: "class", kind: "class" });
@@ -161,8 +162,8 @@ let how = await cs.deliverSubmittedScan("n", { heroUrl: `${MODELS}/scan_n.glb`, 
 s = settings.getSettings();
 ok("E1 picked BEFORE submitting → the new car becomes today's car everywhere", how === "active"
   && eq(surfaces(s), { marker: "car", mapScan: `${MODELS}/scan_n_map.glb`, peerScanId: "n" }), JSON.stringify(surfaces(s)));
-ok("E2 unparked; avatar_type + gold skin because the marker changed; car_scan_id synced",
-  gs.getGarage().scanParked === false && eq(skinStub.skins, ["ultra"]) && putsTo('"car_scan_id":"n"').length === 1);
+ok("E2 unparked; avatar_type + diamond skin because the marker changed; car_scan_id synced",
+  gs.getGarage().scanParked === false && eq(skinStub.skins, ["diamond"]) && putsTo('"car_scan_id":"n"').length === 1);
 await resetAll({ selfMarkerType: "arrow", carScanId: "n", carScanStatus: "submitted", carScanSubmittedAt: "2026-09-22T10:00:00Z" },
   { chosenAt: "2026-09-22T10:05:00Z" });
 how = await cs.deliverSubmittedScan("n", { heroUrl: `${MODELS}/scan_n.glb`, mapUrl: `${MODELS}/scan_n_map.glb` });
@@ -232,8 +233,8 @@ ok("I2 silver → Gold $9.99/mo or $79.99/yr", c("silver").body.includes("$9.99/
 ok("I3 gold → Add Ultra $84.99/yr, 3 a year", c("gold").body.includes("$84.99/yr") && c("gold").body.includes("3 a year") && c("gold").label === "ADD ULTRA · YEARLY");
 ok("I4 ultra → scans left, carry over, $2.99", c("ultra").body === "2 scans left this year — unused ones carry over. After that, $2.99 a scan.", c("ultra").body);
 ok("I5 ultra, 1 left / 0 left wording", c("ultra", 1).body.startsWith("1 scan left") && c("ultra", 0).body.startsWith("No included scans left"));
-ok("I6 one metal lookup: free green, silver silver, gold gold, ultra gold until diamond",
-  eq(["free", "silver", "gold", "ultra"].map(tier.garageMetal), ["brand", "premium", "ultra", "ultra"]));
+ok("I6 one metal lookup: free green, silver silver, gold gold, ultra diamond",
+  eq(["free", "silver", "gold", "ultra"].map(tier.garageMetal), ["brand", "premium", "ultra", "diamond"]));
 ok("I7 next rung + the paywall feature it opens",
   eq(["free", "silver", "gold", "ultra"].map((t) => tier.nextRung(t)?.feature ?? null), ["class_marker", "car_3d", "car_scan", null]));
 

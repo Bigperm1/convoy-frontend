@@ -36,6 +36,7 @@ import {
   getGarage,
   updateGarage,
   SKIN_FOR_MARKER,
+  SKIN_FOR_SCAN,
   type CarIdentity,
   type GarageScan,
   type GarageState,
@@ -219,9 +220,9 @@ function identityPatch(id: CarIdentity): Pick<Settings, "carYear" | "carMake" | 
 /** The rest of the old applyMarkerType, after the settings write: the profile's avatar_type (the
  *  backend ignores the field today — CarUpdate has no avatar_type — kept exactly as it was) and the
  *  skin that follows the pick. setSkinChoice clamps to what the account is entitled to. */
-function afterMarkerWrite(type: MarkerType) {
+function afterMarkerWrite(type: MarkerType, scan: boolean) {
   api.put("/auth/profile", { avatar_type: type }).catch(() => {});
-  const metal = SKIN_FOR_MARKER[type];
+  const metal = scan ? SKIN_FOR_SCAN : SKIN_FOR_MARKER[type];
   if (metal) void setSkinChoice(metal);
 }
 
@@ -310,7 +311,7 @@ export async function driveToday(car: GarageCar): Promise<DriveResult> {
   }
   if (incoming) mirrorIdentityToProfile(identityPatch(incoming));
   const markerNow: MarkerType = car.kind === "class" ? "class" : car.kind === "arrow" || car.kind === "arrow3d" ? "arrow" : "car";
-  afterMarkerWrite(markerNow);
+  afterMarkerWrite(markerNow, car.kind === "scan");
   try { logEventReliable(`garage-drive car=${car.id} from=${outgoing} parked=${getGarage().scanParked ? 1 : 0}`); } catch {}
   return "ok";
 }

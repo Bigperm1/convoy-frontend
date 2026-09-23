@@ -24,11 +24,15 @@ change the values here only with his say-so, and change them *here* — never pe
 > ⚠ **2026-09-17 — the ladder changed; this doc is updated with the build-80 tier work.** Jeff's four rungs:
 > Free (green) · **Silver** (subscription) · **Gold** (subscription — no longer "Ultra Premium") · **Ultra** (one-time add-on
 > that needs Gold). Ultra's look is **DIAMOND** (Jeff: platinum or diamond → Diamond), and after seeing it rendered Jeff
-> decided **"yes ultra unlocks diamond skin"** — Diamond is a fourth WHOLE-APP skin, unlocked by Ultra (trial on the local
-> branch `trial/diamond-skin`; build-80 work). Made reflective on his ask ("a little more reflective like a diamond"): a
+> decided **"yes ultra unlocks diamond skin"** — Diamond is a fourth WHOLE-APP skin, unlocked by Ultra (**merged
+> 2026-09-22** from the local trial branch, on Jeff's "where is the ultra skin?": `TIER_SKIN.diamond`, `TIER_H.diamond`,
+> the diamond twin of every metal's art, the CarPlay glyphs, `scripts/skin_metals.py` makes them from the gold set). Made reflective on his ask ("a little more reflective like a diamond"): a
 > 7-stop gradient with a hard horizon, a facets-and-glints texture over every fill (`SkinSheen`), faceted/prismatic images.
 > Obsidian and Damascus were previewed and **scrapped** (Jeff: "go with diamond scrap the other 2"). Measured why not platinum: ΔE76 5–9 from the silver mid `#C9D2D8`, diamond ~18.
-> The tables below still carry the 2026-08-23 names until that work lands.
+> **The metal keys keep their 2026-08-23 names:** `premium` = the silver metal, `ultra` = the GOLD metal (the Gold
+> tier's), `diamond` = Ultra's. `featureTier()` answers silver / gold / diamond by rank (Silver · Gold · Ultra features).
+> While entitlements are off every metal is selectable but **"Automatic" stays gold** (`autoSkin()`), so the merge changed
+> no tester's app on its own; Diamond arrives by picking it in Settings → App Skin or by driving a scanned car.
 
 ---
 
@@ -85,6 +89,12 @@ black of the approved design, and everything tier-coloured on it follows ONE loo
 `garageMetal(tier)` in `src/components/showroom/tier.ts` (header chip, stage light and turntable
 ring, page dots, plate rim, "Drive this today", the quiet actions, Customize). The cars keep their
 OWN artwork colours — a green arrow on a gold stage is the arrow's identity, not a stray accent.
+Their stills are RENDERS of the map's own models (model-viewer headless, keyed; `src/components/showroom/CarArt.tsx`),
+each with the class-sprite paint layers so any paint hex shows: the 2D arrow straight down (green, white rim —
+exactly the 2D map's arrow), the 3D arrow from the chase cam (behind and above at the map's 48°), and the Silver
+class car as a 3/4 render of its class's white 3D model where one exists (hatch, supercar, exotic, muscle; the
+top-down sprite for the rest). Jeff, 2026-09-22: "fix the 2d arrow so its top view 2d with a white outline / fix
+the 3d silver car so it look 3d … / fix the 3d arrow so its chase cam view".
 
 `accent` is the mid-tone for text/icons on a DARK ground (`#2DEC86` / `#C9D2D8` /
 `#E0A93E`); `ink` is for glyphs riding ON the fill. Never use `ink` on black.
@@ -129,10 +139,10 @@ reinforcement, the word is the fact. (It is also the accessible path: the metals
 differ in hue but both are light-on-dark, so colour alone fails anyone who can't
 separate them.)
 
-Today: the Garage Scan flow (`garage-scan` → `garage-consent` → `garage-capture`)
-is **Ultra Premium / gold**. The Garage itself (the Showroom, 2026-09-22) wears the metal of the tier
-it is drawn for — Free green · Silver silver · Gold gold · Ultra diamond, which renders gold until the
-diamond art merges (`garageMetal`, one line to change) — and says the tier in words on its header chip
+Today: the Garage Scan flow (`garage-scan` → `garage-consent` → `garage-capture`, the viewfinder and the
+scan hero/countdown) is **Ultra / diamond** (gold until 2026-09-22). The Garage itself (the Showroom, 2026-09-22)
+wears the metal of the tier it is drawn for — Free green · Silver silver · Gold gold · Ultra diamond
+(`garageMetal`) — and says the tier in words on its header chip
 (Jeff, 2026-09-22: "the diamond is only for ultra … skins are already set in place for how they work").
 
 ---
@@ -164,7 +174,7 @@ A locked row is a **buy button, not a dead row** — the whole row opens the pay
 |---|---|---|
 | Garage Showroom, Free view — the locked last spot + "Up next" | `class_marker` | silver |
 | Garage Showroom, Silver view — the locked last spot + "Up next" | `car_3d` | **gold** |
-| Garage Showroom, Gold view — the locked last spot + "Add Ultra" | `car_scan` | **gold** (diamond with build 80) |
+| Garage Showroom, Gold view — the locked last spot + "Add Ultra" | `car_scan` | **diamond** |
 | Settings → Map Layers → Speed cameras | `speed_cameras` | silver |
 | Settings → Map Layers → Road incidents | `road_incidents` | silver |
 | Settings → Scout & Voice → Hands-free replies | `comms_handsfree` | silver |
@@ -330,7 +340,8 @@ Jeff: *"if you select from the arrow, the class, or the 3D it should also change
 skin."* The three Map Appearances already ARE the ladder — Arrow free, Class Premium,
 3D Ultra — so picking one calls `setSkinChoice` with the matching metal (since 2026-09-22 through the
 Showroom's "Drive this today", `driveToday` in `src/garageCars.ts`; `SKIN_FOR_MARKER` unchanged):
-**Arrow → green · Class → silver · 3D → gold.** `photo` is deliberately excluded: it is
+**Arrow → green · Class → silver · 3D → gold · a scanned car → diamond** (`SKIN_FOR_SCAN`, 2026-09-22 —
+the scan is Ultra's; it lands the same way when a new scan is delivered). `photo` is deliberately excluded: it is
 not one of the three tiered appearances. `setSkinChoice` still clamps to entitlement, so
 this can never hand out a metal the account has not bought, and Settings → App Skin
 remains the explicit override (both write the same setting).

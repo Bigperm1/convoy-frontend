@@ -6,6 +6,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { skin } from "../../tierTheme";
+import SkinSheen from "../SkinSheen";
 import { withAlpha } from "../../appSkin";
 import { ULTRA } from "../../pricing";
 import type { GarageTier } from "../../garageCars";
@@ -42,6 +43,7 @@ export default function TierChip({ tier, scansLeft }: { tier: GarageTier; scansL
       locations={sk.locations}
       style={[styles.chip, { borderColor: sk.rim }]}
     >
+      <SkinSheen sk={sk} />
       <Text style={[styles.word, { color: sk.ink }]}>{TIER_WORD[tier]}</Text>
     </LinearGradient>
   );

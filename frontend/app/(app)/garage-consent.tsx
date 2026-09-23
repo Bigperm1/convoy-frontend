@@ -31,8 +31,8 @@ import { skin } from "../../src/tierTheme";
 import { getSettings, updateSettings } from "../../src/settings";
 import { SCAN_SHOTS, SCAN_RULES, MAX_SCAN_ATTEMPTS, fetchScanSlots, type ScanSlots } from "../../src/carScan";
 
-// This is an ULTRA PREMIUM page — gold, not brand green (Jeff 8/23).
-const ULTRA = skin("ultra");
+// Scanning is Ultra's, so these pages wear Diamond (2026-09-22) — they were gold while "ultra" named gold.
+const ULTRA = skin("diamond");
 
 export default function GarageConsentScreen() {
   const [agreed, setAgreed] = useState(false);
@@ -83,7 +83,7 @@ export default function GarageConsentScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <TierTitle tier="ultra" style={styles.tierTitle} />
+        <TierTitle tier="diamond" style={styles.tierTitle} />
 
         {/* ── attempts ───────────────────────────────────────────────────── */}
         <View style={[styles.attemptCard, isSecond && styles.attemptCardWarn]}>
@@ -213,7 +213,7 @@ export default function GarageConsentScreen() {
             icon="camera"
             onPress={proceed}
             disabled={!agreed}
-            tier="ultra"
+            tier="diamond"
           />
         )}
       </ScrollView>

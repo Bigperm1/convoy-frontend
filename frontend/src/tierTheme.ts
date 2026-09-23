@@ -35,13 +35,18 @@ export const CANDY_RIM = "rgba(150,255,200,0.55)";
 /** The dark glyph/label colour that rides on top of the candy fill. */
 export const CANDY_INK = "#04150B";
 
-/** The two treatments a customer can see, plus the untiered brand green. */
-export type VisualTier = "brand" | "premium" | "ultra";
+/** The metals a customer can wear: the untiered brand green, Silver ("premium"), Gold (named "ultra"
+ *  from before the 2026-09-22 ladder — the Gold tier's metal) and Diamond (the Ultra add-on's). */
+export type VisualTier = "brand" | "premium" | "ultra" | "diamond";
 
 export type TierSkin = {
-  /** Three-stop vertical gradient, light → mid → deep. */
-  colors: readonly [string, string, string];
-  locations: readonly [number, number, number];
+  /** Vertical gradient, light → mid → deep. Three stops for the classic metals; diamond uses more,
+   *  with a hard "horizon" (two stops 0.03 apart) — that edge is what reads as a reflection. */
+  colors: readonly [string, string, ...string[]];
+  locations: readonly [number, number, ...number[]];
+  /** Optional texture laid over every fill (diamond: facets + glints) — see SkinSheen. */
+  sheen?: number;
+  sheenOpacity?: number;
   /** Pale hairline rim that sits on the gradient's edge. */
   rim: string;
   /** Dark ink for glyphs and labels riding ON the fill. */
@@ -82,6 +87,21 @@ export const TIER_SKIN: Record<VisualTier, TierSkin> = {
     accent: "#E0A93E",
     label: "Ultra Premium",
   },
+  // DIAMOND — the Ultra add-on's metal (Jeff, 2026-09-17: "yes ultra unlocks diamond skin"; 2026-09-22:
+  // "the diamond is only for ultra"). Icy white-blue, kept clear of silver on purpose: platinum sat
+  // ΔE76 5–9 from the silver mid, this sits ~18. Reflective on his ask ("a little more reflective like a
+  // diamond"): white table → ice → a HARD horizon at 0.47/0.50 into deep blue → lighter crown → a violet
+  // fire flash at the bottom edge; SkinSheen lays the facets and glints over every fill.
+  diamond: {
+    colors: ["#FFFFFF", "#E4F7FF", "#B5E6FF", "#4F9FDB", "#79C3EE", "#D3F1FF", "#EFE6FF"],
+    locations: [0, 0.2, 0.47, 0.5, 0.73, 0.9, 1],
+    rim: "rgba(236,250,255,0.85)",
+    ink: "#062235",
+    accent: "#A9E7FF",
+    label: "Ultra",
+    sheen: require("../assets/images/skin/diamond_sheen.png"),
+    sheenOpacity: 0.75,
+  },
 };
 
 export const skin = (tier: VisualTier): TierSkin => TIER_SKIN[tier];
@@ -98,6 +118,10 @@ export const skin = (tier: VisualTier): TierSkin => TIER_SKIN[tier];
 export const TIER_H = {
   premium: require("../assets/images/tier/h-silver.png"),
   ultra: require("../assets/images/tier/h-gold.png"),
+  diamond: require("../assets/images/tier/h-diamond.png"),
 } as const;
 
-export const tierH = (tier: Exclude<VisualTier, "brand">) => TIER_H[tier];
+/** A metal that can sit on a lock or a badge — every metal but the brand green. */
+export type LockMetal = Exclude<VisualTier, "brand">;
+
+export const tierH = (tier: LockMetal) => TIER_H[tier];

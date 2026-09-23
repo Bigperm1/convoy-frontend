@@ -1066,6 +1066,15 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BI `6be8e905-76cb-4840-89f9-fc81f57be5d5` (2026-09-23 — Jeff: "IM AT WORK SO I CANT RUN IT.. PLEASE DO IT"),
+  code `fe665daa`, runtime 1.29.0, KEY_PRESENT=1 iOS + Android; the live bundle carries fe665daa's own log string (OTA-BH's does
+  not).** Apple feel batch 1 (`e0f87237`: shared motion/haptics, the H menu grows from the H and navigates at once, Back goes where
+  you came from, press shrink, one Medium + one Light for hold-to-talk, search fades in place, Apple's secondary grey) + Garage
+  round 3 (`8bcecd77`: Map Layers out of the H menu, slot 4 = the 3D CLASS car with a class + bake picker, no spin, tier chip,
+  smaller stage light) + `83da6282` (the Ultra car slides in on the turntable — a keyed PNG still, no black card; Heavy Metal is
+  not a 3D class colour; the class car is settings-only, never on the profile) + `6cdcc831` / `296b9530` / `fe665daa` (Codex:
+  six findings over four rounds, each reproduced and fixed — real GRC owners keep syncing, an account switch clears the previous
+  account's car; final round: approve). NOT runtime-verified on Android (emulator is build 73): first Reanimated import there.
 - **SHIPPED AS OTA-BH `4a0de4dd-89af-442b-80ce-c5011ff0289f` (2026-09-23 — Jeff ran the publish), code `de777c25`, runtime 1.29.0,
   KEY_PRESENT=1 iOS + Android.** The menu reorganization (`6c3755a0`), the Garage in rung order (`ef8dca4d`), and the nav held at
   60 fps on every surface (`39cdbc34`, `de777c25`: src/framePacer.ts paces the shared SelfCarModel loop on >60 Hz panels; Android's

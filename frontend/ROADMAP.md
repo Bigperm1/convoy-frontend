@@ -1071,6 +1071,14 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   `AHEAD_LEAD_S = 20`, 200–450 m, `AHEAD_MIN_SPEED_KMH = 15`; Overpass union adds `way[hazard=school_zone]` +
   `node[railway=level_crossing]`. Receipts `ahead-ingest …` and `ahead-alert kind= d= off= lead= spd= say=`. First field day
   (09-22) showed the 12° cone was too wide → the route gate in `3d725053` above.
+- **PRICING DECIDED, same evening (Jeff: "go with $4.99 - $9.99 with anaul 3 rung (hold ultra for a later date a features") — after a
+  12-agent cited review (memory `pricing-honest-review-2026-09-22`) found the $0.99 ladder converts worse, nets below a user's cost and
+  needs ~26 % paying.** Free (no convoy cap, clubs/events/cruises creatable) · Silver $4.99/mo or $39.99/yr · Gold $9.99/mo or
+  $79.99/yr · Ultra (Garage Scan + diamond) HELD, not sold. Built: `src/pricing.ts` (monthly + annual product ids, GRANTS: 30-day Silver
+  trial, 90-day club grant — both build-80 server grants), `maxConvoySize()` uncapped, club_create/convoy_size free, paywall shows the
+  rung's contents + annual saving. Website three-tier section committed locally (~/hairpin-site `fc9a3a7`, NOT pushed). Still open:
+  faster-route check paid-only vs free (nav-locked, Jeff's call); remove "Have a code?" before store launch (Apple 3.1.1); the real
+  per-user cost after the first cruise decides whether growth pays.
 - **PRICING, same day ~17:30 PDT — Jeff: "volume instead of gouging": Free · Silver $0.99/mo · Gold $2.99/mo · Ultra $4.99/mo with
   ONE Garage Scan included · extra scans $2.99 each (active Ultra only). Supersedes the 09-17 $5.99/$9.99/$14.99 ladder; rung CONTENTS
   unchanged.** Built: `src/pricing.ts` (the one catalog + store product ids), Tier "gold" rung + `car_scan`/`app_skin_diamond` features,

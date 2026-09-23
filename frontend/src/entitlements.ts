@@ -6,14 +6,15 @@
 // the whole free/premium split at once. Do not flip it before the backend can
 // hand out tiers by email — existing testers would see locks.
 //
-// Tiers (Jeff 2026-09-22, prices in src/pricing.ts — "volume instead of gouging"):
+// Tiers (Jeff 2026-09-22, three rungs, prices in src/pricing.ts):
 //   beta_og      — original beta testers; personal codes, never expire. All access.
 //   club_founder — GRC club members; all access until the store launch flag.
-//   ultra        — $4.99/mo: YOUR car scanned to 3D (one Garage Scan included, extras $2.99), diamond skin.
-//   gold         — $2.99/mo: the 3D map and a 3D class car, gold skin.
-//   premium      — $0.99/mo, the SILVER rung (storage key kept from 8/20): class car in your paint on
-//                  the 2D map, every other feature lock, silver skin.
-//   free         — green arrow, 2D map, the store-launch free tier.
+//   ultra        — HELD for a later date (Jeff): YOUR car scanned to 3D (Garage Scan) + the diamond skin.
+//                  Not sold; kept so those features have a rung to sit on.
+//   gold         — $9.99/mo or $79.99/yr: the 3D map and a 3D class car, gold skin.
+//   premium      — $4.99/mo or $39.99/yr, the SILVER rung (storage key kept from 8/20): alerts, voices,
+//                  class car in your paint, map styles, silver skin.
+//   free         — everything you need to drive with the club — NO convoy cap (see maxConvoySize).
 //
 // The truth lives server-side against the account email; this module only
 // caches it. `syncEntitlement()` refreshes the cache from the backend (endpoint
@@ -45,7 +46,7 @@ export type PremiumFeature =
   | "spoken_extras"
   | "speed_alert"
   | "comms_handsfree"   // VOX — push-to-talk stays free
-  | "convoy_size"       // >3 cars in a live convoy
+  | "convoy_size"       // RETIRED 2026-09-22 — Free has no convoy cap (maxConvoySize); key kept for old callers
   // The app-wide metal (src/appSkin.ts). TWO features, not one, because the skin is a
   // LADDER and a single FEATURE_RANK entry cannot express two gates: silver unlocks at
   // premium, gold only at ultra. Modelling it this way means the Settings rows get the
@@ -129,10 +130,12 @@ const TIER_RANK: Record<Tier, number> = {
 
 // Everything defaults to premium (rank 1); only the exact-car experience is ultra.
 const FEATURE_RANK: Partial<Record<PremiumFeature, number>> = {
+  club_create: 0,      // FREE since 2026-09-22 — clubs, events and cruises are the network; anyone may start one
+  convoy_size: 0,      // FREE since 2026-09-22 — no convoy cap (maxConvoySize)
   car_3d: 2,           // Gold
   app_skin_gold: 2,    // Gold
-  car_scan: 3,         // Ultra
-  app_skin_diamond: 3, // Ultra
+  car_scan: 3,         // Ultra — held for a later date
+  app_skin_diamond: 3, // Ultra — held for a later date
 };
 
 /**
@@ -164,9 +167,12 @@ export function isUnlocked(feature: PremiumFeature): boolean {
 
 // Free accounts convoy with up to 3 cars total (them + 2). The check belongs at
 // the JOIN moment — that's the one paywall that fires under social pressure.
+// NO CAP (Jeff, 2026-09-22 — the three-rung ladder). A convoy IS the club's presence channel, so a cap could
+// only be enforced by hiding club members from a Free driver mid-cruise — the "can't use it until you pay"
+// wall. It would also almost never bind: of 289 club drives in the 28 days to 09-22, 4 had more than 3 cars
+// on the road at once (Supabase trips). Nothing called this anyway.
 export function maxConvoySize(): number {
-  if (!ENTITLEMENTS_ENFORCED) return Number.POSITIVE_INFINITY;
-  return tier === "free" ? 3 : Number.POSITIVE_INFINITY;
+  return Number.POSITIVE_INFINITY;
 }
 
 // ── Backend sync (endpoints ship with the referral work, build 77) ──────────

@@ -22,7 +22,7 @@ import { COLORS } from "./theme";
 import { PremiumBadge, subscribePaywall } from "./PremiumBadge";
 import { featureTier } from "./entitlements";
 import { redeemCode, featureRung, type PremiumFeature } from "./entitlements";
-import { PRICING, priceLabel, type PaidRung } from "./pricing";
+import { PRICING, priceLabel, annualLabel, annualSavingPct, type PaidRung } from "./pricing";
 
 // What the sheet leads with, per feature that opened it.
 const FEATURE_HOOKS: Partial<Record<PremiumFeature, string>> = {
@@ -39,17 +39,8 @@ const FEATURE_HOOKS: Partial<Record<PremiumFeature, string>> = {
   spoken_extras: "Spoken extras on your drive",
   speed_alert: "Speed alerts",
   comms_handsfree: "Hands-free comms",
-  convoy_size: "Convoy with more than 3 cars",
 };
 
-const PERKS = [
-  "3D garage cars + arrow colours + classes",
-  "Unlimited convoy size",
-  "Night, dusk and satellite maps",
-  "Speed cameras & road incidents",
-  "Hands-free comms & every Scout voice",
-  "Create clubs, events and cruises",
-];
 
 export default function PaywallSheet() {
   const [visible, setVisible] = useState(false);
@@ -58,7 +49,7 @@ export default function PaywallSheet() {
   // Premium lock, gold for an Ultra one. A gold "ULTRA PREMIUM" badge over a
   // Premium feature quotes the customer the wrong tier.
   const [tier, setTier] = useState<"premium" | "ultra">("ultra");
-  const [rung, setRung] = useState<PaidRung>("premium");
+  const [rung, setRung] = useState<PaidRung | "ultra">("premium");
   const [code, setCode] = useState("");
   const [redeeming, setRedeeming] = useState(false);
   const [showCode, setShowCode] = useState(false);
@@ -77,6 +68,8 @@ export default function PaywallSheet() {
   );
 
   const close = () => setVisible(false);
+  // The catalog entry for the rung that unlocks this feature; null for Ultra, which is held for later.
+  const sold = PRICING.find((p) => p.rung === rung) ?? null;
 
   const buy = (_rung: PaidRung) => {
     // The billing SDK (RevenueCat) is build-80 native work; the catalog is already the truth.
@@ -102,19 +95,24 @@ export default function PaywallSheet() {
 
           <PremiumBadge size="md" tier={tier} style={{ alignSelf: "center" }} />
           <Text style={styles.title}>{hook ?? "Unlock all of Hairpin"}</Text>
-          <Text style={styles.sub}>One membership. The whole garage.</Text>
+          <Text style={styles.sub}>{sold ? sold.tagline : "Arriving in a later update."}</Text>
 
-          <View style={styles.perks}>
-            {PERKS.map((p) => (
-              <View key={p} style={styles.perkRow}>
-                <Ionicons name="checkmark-circle" size={16} color={COLORS.brand} />
-                <Text style={styles.perkText}>{p}</Text>
-              </View>
-            ))}
-          </View>
+          {/* What the rung this feature lives on adds — from the catalog, so the sheet can never
+              promise something the tier does not carry. */}
+          {sold && (
+            <View style={styles.perks}>
+              {sold.includes.map((p) => (
+                <View key={p} style={styles.perkRow}>
+                  <Ionicons name="checkmark-circle" size={16} color={COLORS.brand} />
+                  <Text style={styles.perkText}>{p}</Text>
+                </View>
+              ))}
+            </View>
+          )}
 
-          {/* THE LADDER (Jeff, 2026-09-22 — src/pricing.ts): three rungs, the one this feature needs
-              filled. Purchases arrive with build 80's billing SDK; until then every button says so. */}
+          {/* THE LADDER (Jeff, 2026-09-22 — src/pricing.ts): Silver and Gold, monthly or yearly; the rung
+              this feature lives on is filled. The billed amount is the biggest text on each button (Apple
+              3.1.2(c)). Purchases arrive with build 80's billing SDK; until then every button says so. */}
           {PRICING.map((p) => {
             const needed = p.rung === rung;
             return (
@@ -122,11 +120,11 @@ export default function PaywallSheet() {
                 {needed ? (
                   <LinearGradient colors={[COLORS.brand, COLORS.brandDim]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.buyPrimary}>
                     <Text style={styles.buyPrimaryText}>{p.name} — {priceLabel(p.monthlyUsd)}</Text>
-                    <Text style={styles.buyPrimarySub}>{p.tagline}</Text>
+                    <Text style={styles.buyPrimarySub}>or {annualLabel(p.annualUsd)} — save {annualSavingPct(p)}%</Text>
                   </LinearGradient>
                 ) : (
                   <View style={styles.buySecondary}>
-                    <Text style={styles.buySecondaryText}>{p.name} — {priceLabel(p.monthlyUsd)}</Text>
+                    <Text style={styles.buySecondaryText}>{p.name} — {priceLabel(p.monthlyUsd)} · {annualLabel(p.annualUsd)}</Text>
                   </View>
                 )}
               </TouchableOpacity>

@@ -1066,6 +1066,11 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BH `4a0de4dd-89af-442b-80ce-c5011ff0289f` (2026-09-23 — Jeff ran the publish), code `de777c25`, runtime 1.29.0,
+  KEY_PRESENT=1 iOS + Android.** The menu reorganization (`6c3755a0`), the Garage in rung order (`ef8dca4d`), and the nav held at
+  60 fps on every surface (`39cdbc34`, `de777c25`: src/framePacer.ts paces the shared SelfCarModel loop on >60 Hz panels; Android's
+  Mapbox cap is re-sent after first render — rnmapbox dropped it on every Android mount). Read Android heat-probe `cam=`/`tick=`
+  (≤ ~3600/min expected) on the next Android drives.
 - **SHIPPED AS OTA-BG `c8cbbd88-78a5-403f-9661-8ffe04295b45` (2026-09-22 night — Jeff ran the publish himself; the auto-mode classifier
   refuses Claude `eas update`), code `93e985f8`, runtime 1.29.0, KEY_PRESENT=1 iOS + Android.** Carries every commit since OTA-BF
   (`82dc16b3..93e985f8`, 14 app commits, no native change): route-gated ahead alerts (`3d725053`), speed-limit cover + course gate

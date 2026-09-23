@@ -10,6 +10,7 @@ import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { getClassPaint, getVehicleClass, type Settings } from "../../settings";
 import { scanHeroUrl } from "../../carScan";
+import { saveScanStill } from "../../scanStill";
 import { getVehicleModelUrl } from "../../vehicleAssets";
 import { skin, type LockMetal, type VisualTier } from "../../tierTheme";
 import { withAlpha } from "../../appSkin";
@@ -61,15 +62,16 @@ const FRAME_MID_Y = TURNTABLE_Y + 14 - FRAME_LIFT - LIVE_H / 2;
 /** The 3D frame: the live view's box — taller than the car so model-viewer's framing leaves it standing on the
  *  turntable — and the box its still stands in whether or not it is live (the still is placed at the live
  *  model's framing, CarArt.tsx). `glbUrl` null = the still alone. */
-function Frame3D({ glbUrl, still, autoRotate, onSnapshot, instantExit }: {
+function Frame3D({ glbUrl, still, autoRotate, onSnapshot, onStill, instantExit }: {
   glbUrl: string | null; still: React.ReactNode; autoRotate: boolean; onSnapshot?: (d: string) => void;
-  instantExit?: boolean;
+  onStill?: (d: string) => void; instantExit?: boolean;
 }) {
   const w = useLiveFrameWidth();
   return (
     <CarBox width={w} height={LIVE_H} lift={FRAME_LIFT}>
       <LiveCar
-        glbUrl={glbUrl} still={still} autoRotate={autoRotate} onSnapshot={onSnapshot} instantExit={instantExit}
+        glbUrl={glbUrl} still={still} autoRotate={autoRotate} onSnapshot={onSnapshot} onStill={onStill}
+        instantExit={instantExit}
         style={{ width: w, height: LIVE_H }}
       />
     </CarBox>
@@ -84,7 +86,7 @@ function Class3dSlot({ live, instantExit, s, g }: { live: boolean; instantExit?:
       glbUrl={live ? getVehicleModelUrl(c.modelKey) : null}
       autoRotate={false}
       instantExit={instantExit}
-      still={<Class3DFramed cls={c.cls} modelKey={c.modelKey} hex={c.hex} />}
+      still={<Class3DFramed cls={c.cls} hex={c.hex} />}
     />
   );
 }
@@ -134,6 +136,8 @@ export function CarSlotArt({ car, centred, live = centred, instantExit, s, g, me
           instantExit={instantExit}
           still={<ScanStill key={id} scanId={id} />}
           onSnapshot={(d) => onHeroShot(id, d)}
+          // Kept on this phone so next time the still is the car itself on the turntable, not a black photo card.
+          onStill={(d) => { saveScanStill(id, d); }}
         />
       );
     }

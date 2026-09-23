@@ -19,8 +19,10 @@
 //                    ("Pearl Blue", which resolves to exactly that bake — class3dColor) and carMake/carModel = that
 //                    class's car, so the map (getVehicleMapModelUrl(carColor)), CarPlay/AA and peers (presence
 //                    activeColor = toGRCSlug → "grc_lfa_pearl_blue", which resolveGRCKey reads back) all draw the
-//                    same car. carYear is never touched. The member's OWN identity is kept aside meanwhile
-//                    (garageStore ownIdentity) and put back when the class car leaves the road.
+//                    same car. carYear is never touched. SETTINGS ONLY: the profile keeps the member's real car
+//                    (Club roster, member lists, a reinstall), so the class car never reaches it — live peers get it
+//                    from presence. The member's OWN identity is kept aside in the meantime (garageStore ownIdentity)
+//                    and put back into settings when the class car leaves the road.
 //   scan:<id>        selfMarkerType 'car' + carScanId/ModelUrl/MapUrl + carScanStatus 'ready'.
 // A 'ready' scan BEATS the stock car on every surface and is broadcast to peers whatever the marker
 // (map.tsx presence sends scanId whenever 'ready'), so driving ANY non-scan car takes the scan out of
@@ -231,10 +233,15 @@ export const isClass3dKey = (cls: unknown): cls is Class3dKey =>
 
 export type Class3dBake = ClassPaletteEntry & { modelKey: GRCColorKey };
 
-/** A 3D class's colours: its REAL bakes only (palette rows with a modelKey) — never a hex-only swatch, which
- *  has no GLB and would put the default bake on the map under another colour's name. */
+/** Hot Hatch rows whose GLB is a SCAN, not the authored class car: heavy_metal is GRC2.glb, Jeff's own Tripo scan
+ *  (vehicleAssets VEHICLE_MODEL_URL). The 3D class spot shows the class's own car — "not the 3d scanned car" (Jeff,
+ *  2026-09-23) — and on the sim it stood there as a white car named "Heavy Metal". The map row is untouched. */
+const SCAN_BAKES = new Set<string>(["heavy_metal"]);
+
+/** A 3D class's colours: its REAL authored bakes only (palette rows with a modelKey, less SCAN_BAKES) — never a
+ *  hex-only swatch, which has no GLB and would put the default bake on the map under another colour's name. */
 export function class3dPalette(cls: Class3dKey): Class3dBake[] {
-  return (CLASS_MODEL_3D[cls]?.palette ?? []).filter((e): e is Class3dBake => !!e.modelKey);
+  return (CLASS_MODEL_3D[cls]?.palette ?? []).filter((e): e is Class3dBake => !!e.modelKey && !SCAN_BAKES.has(e.modelKey));
 }
 
 export type Class3dChoice = {
@@ -291,8 +298,9 @@ function class3dPatch(c: Class3dChoice): { carMake: string; carModel: string; ca
   return { carMake: c.make, carModel: c.model, carColor: class3dColor(c) };
 }
 
-/** Settings hold a 3D class car's identity: one of the three classes' make/model, in one of that class's bakes. */
-function settingsCarryClass3d(s: Settings): boolean {
+/** Settings hold a 3D class car's identity: one of the three classes' make/model, in one of that class's bakes.
+ *  Then settings' identity is NOT the member's car and must not reach the profile (CustomizeSheet's save). */
+export function settingsCarryClass3d(s: Settings): boolean {
   const key = resolveGRCKey(s.carColor);
   return CLASS_3D_KEYS.some((cls) => s.carMake === CLASS_3D_CARS[cls].make && s.carModel === CLASS_3D_CARS[cls].model
     && class3dPalette(cls).some((e) => e.modelKey === key));
@@ -341,7 +349,8 @@ export async function pinClass3dIfOnMap(): Promise<void> {
 /** Customize saved a 3D class choice while the 3D class car is ON the road (class3dOnMap was true when the sheet
  *  opened — the caller's isToday): put the new choice on the map. Writes only when the map draws another bake, so
  *  a save that changed nothing leaves settings alone; keeps the member's own identity aside first. Returns true when
- *  it wrote. The caller's PUT /auth/profile (the whole identity, from settings) carries it to peers. */
+ *  it wrote. Settings only — peers get it from live presence; the profile keeps the member's real car
+ *  (settingsCarryClass3d, driveToday). */
 export async function applyClass3dToday(): Promise<boolean> {
   await ensureGarageLoaded();
   const s = getSettings();
@@ -492,13 +501,12 @@ export async function driveToday(car: GarageCar): Promise<DriveResult> {
       ownIdentity: pick3d ? cur.ownIdentity : undefined,
     }));
   }
-  if (ownBack && !remembered) {
-    // The member's own car goes back on the profile — EMPTY fields too, so the class car's make/model/paint
-    // never outlive it there (garageStore ownIdentityBack).
-    api.put("/auth/profile", ownBack.profile).catch(() => {});
-  } else if (incoming) {
-    mirrorIdentityToProfile(incoming);
-  }
+  // Only a scan's remembered identity goes on the profile. The 3D class car NEVER does — the profile is the member's
+  // real car (Club roster, member lists, the car on a reinstall), and peers draw the class car from live presence
+  // (convoyPresence activeColor ← settings.carColor) — so the own identity coming back needs no profile write either
+  // (Codex review of 8bcecd77: a profile PUT from this local copy could land on another account after a switch, and
+  // a class identity on the profile was the only copy of the real car to survive a reinstall).
+  if (remembered) mirrorIdentityToProfile(identityPatch(remembered));
   const markerNow: MarkerType = car.kind === "class" ? "class" : car.kind === "arrow" || car.kind === "arrow3d" ? "arrow" : "car";
   afterMarkerWrite(markerNow, car.kind === "scan");
   try { logEventReliable(`garage-drive car=${car.id} from=${outgoing} parked=${getGarage().scanParked ? 1 : 0}`); } catch {}

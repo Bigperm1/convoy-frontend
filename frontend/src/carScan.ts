@@ -644,7 +644,8 @@ export async function deliverSubmittedScan(
   await updateGarage((cur) => ({
     scanParked: false, completeScanIds: addId(cur.completeScanIds, id), ...(back ? { ownIdentity: undefined } : {}),
   }));
-  if (back) api.put("/auth/profile", back.profile).catch(() => {});
+  // Settings only: the class car never reached the profile, so the member's own car is still there (garageCars
+  // driveToday) — and a PUT from this phone-local copy could land on another account after a switch.
   // The rest of what picking a car does (garageCars afterMarkerWrite): the profile's avatar_type when the
   // marker changed (ignored by today's backend, kept as it was), and the skin that follows the pick — a scan
   // is Ultra's car, so Diamond EVEN WHEN the marker was already 'car': from the stock 3D car (gold) the
@@ -754,7 +755,8 @@ export async function reconcileScanState(): Promise<"restored" | "failed" | "noo
         ...(parkIt ? { scanParked: true } : {}),
         ...(back ? { ownIdentity: undefined } : {}),
       }));
-      if (back) api.put("/auth/profile", back.profile).catch(() => {});
+      // No profile write: the class car never reached it (see deliverSubmittedScan). This path runs at map mount,
+      // before the Garage claims the store for the signed-in account (Codex review of 8bcecd77).
       logEventReliable(`carscan-restored id=${sc.scanId} from=${cur.carScanStatus ?? "none"}${parkIt ? " parked=1" : ""}`);
       // No explicit sync here: clearing carScanBackendId above makes map.tsx's sync effect PUT the
       // id once (sim run 2026-09-03 23:11 showed two identical carscan-sync rows with both).

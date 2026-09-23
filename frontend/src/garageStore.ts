@@ -191,18 +191,14 @@ export async function claimGarage(userId: string): Promise<"same" | "first" | "r
   return "reset";
 }
 
-/** What puts the member's own car identity back (ownIdentity, above): the settings patch and the backend profile
- *  body. An empty field goes back EMPTY — "" on the profile, which PUT /auth/profile stores (convoy-backend server.py
- *  update_profile drops only None) — so the class car's make, model and paint never outlive it there. The year is not
- *  in it: the class car never changes carYear. Pure; shared by garageCars and carScan (no import cycle). */
+/** What puts the member's own car identity back into settings (ownIdentity, above). An empty field goes back empty,
+ *  so the class car's make, model and paint never outlive it. The year is not in it: the class car never changes
+ *  carYear. Settings ONLY — the class car is never written to the profile (garageCars driveToday), so there is nothing
+ *  to put back there. Pure; shared by garageCars and carScan (no import cycle). */
 export function ownIdentityBack(id: CarIdentity): {
   settings: { carMake: string | undefined; carModel: string | undefined; carColor: string | undefined };
-  profile: { car_make: string; car_model: string; car_color: string };
 } {
-  return {
-    settings: { carMake: id.make, carModel: id.model, carColor: id.color },
-    profile: { car_make: id.make ?? "", car_model: id.model ?? "", car_color: id.color ?? "" },
-  };
+  return { settings: { carMake: id.make, carModel: id.model, carColor: id.color } };
 }
 
 export function subscribeGarage(fn: (s: GarageState) => void): () => void {

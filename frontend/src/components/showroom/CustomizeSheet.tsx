@@ -33,8 +33,9 @@
 //     3d class car picker with colour options"). Save stores the choice in the garage store
 //     (garageCars.setClass3dPick) and, when the 3D class car is ON THE ROAD (isToday — the Garage passes the
 //     stage's own test, class3dOnMap), puts a CHANGED choice on the map (garageCars.applyClass3dToday: the class's
-//     make/model and the bake's paint, the member's own identity kept aside); the save's PUT /auth/profile then
-//     carries it to peers. A save that changed nothing writes no car. The typed fields stay for a scan.
+//     make/model and the bake's paint, the member's own identity kept aside) — settings only: peers draw it from live
+//     presence, and the save's PUT /auth/profile leaves the car fields out while settings hold the class car (the
+//     profile is the member's real car). A save that changed nothing writes no car. The typed fields stay for a scan.
 
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -78,6 +79,7 @@ import {
   pinClass3dIfOnMap,
   rememberIdentity,
   saveIdentity,
+  settingsCarryClass3d,
   setClass3dPick,
   setNickname,
   type Class3dKey,
@@ -297,22 +299,28 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
       await rememberIdentity(car.id, { year: year.trim(), make: make.trim(), model: model.trim(), color: color.trim() });
     }
     // Today's identity: the drafts when this sheet is showing today's car (a scan); otherwise what settings hold —
-    // the 3D class car's identity included, when that car is on the road.
+    // unless settings hold the 3D class car's, which is not the member's car and never goes on the profile (peers
+    // draw it from live presence; the profile keeps the real car — garageCars driveToday). Then only the call sign
+    // is sent.
     const s = getSettings();
     const typedToday = showsIdentity && isToday;
     const ident = typedToday
       ? { carYear: year, carMake: make, carModel: model, carColor: color }
-      : { carYear: s.carYear ?? "", carMake: s.carMake ?? "", carModel: s.carModel ?? "", carColor: s.carColor ?? "" };
+      : settingsCarryClass3d(s)
+        ? undefined
+        : { carYear: s.carYear ?? "", carMake: s.carMake ?? "", carModel: s.carModel ?? "", carColor: s.carColor ?? "" };
     await updateSettings({ ...(typedToday ? ident : {}), callSign: sign });
-    // Push the full identity to the backend so peers render us correctly AND the call sign (= account
+    // Push the identity to the backend so peers render us correctly AND the call sign (= account
     // handle) persists to the account: it survives a reinstall and is the name other drivers see on the
     // map and in comms.
     try {
       await api.put("/auth/profile", {
-        car_make: ident.carMake || undefined,
-        car_model: ident.carModel || undefined,
-        car_color: ident.carColor || undefined,
-        car_year: parseInt(ident.carYear, 10) || undefined,
+        ...(ident ? {
+          car_make: ident.carMake || undefined,
+          car_model: ident.carModel || undefined,
+          car_color: ident.carColor || undefined,
+          car_year: parseInt(ident.carYear, 10) || undefined,
+        } : {}),
         ...(sign ? { handle: sign } : {}),
       });
       // Refresh the in-memory auth user so the new call sign takes effect app-wide (map self-marker,
@@ -565,7 +573,7 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
 
                 {/* Preview — the stage's own still of this class, in this bake's paint. */}
                 <View style={styles.previewRow}>
-                  <Class3DStill cls={c3Cls} modelKey={c3Bake.modelKey} hex={c3Bake.hex} width={104} />
+                  <Class3DStill cls={c3Cls} hex={c3Bake.hex} width={104} />
                   <Text style={styles.previewText}>
                     {classLabel(c3Cls)} · {CLASS_3D_CARS[c3Cls].make} {CLASS_3D_CARS[c3Cls].model} · {c3Bake.name}
                   </Text>

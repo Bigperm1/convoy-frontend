@@ -378,12 +378,15 @@ function MetalPill({ text, metal, style }: { text: string; metal: VisualTier; st
 }
 
 // MOTION.press on the centred car: the transition from the one table, the origin on the turntable.
-// Outside StyleSheet.create, whose types do not know Reanimated's CSS transition keys.
+// Outside StyleSheet.create, whose types do not know Reanimated's CSS transition keys. The easing is cast: expo's
+// web typings (expo/types/react-native-web.d.ts) declare ViewStyle.transitionTimingFunction as a web string, which
+// Reanimated's cubicBezier() object is not — and a Reanimated.View's style must satisfy both (`yarn typecheck`
+// in the main checkout, which has expo-env.d.ts; a worktree without it passed, 2026-09-23).
 const pressLayer = {
   transformOrigin: ["50%", TURNTABLE_Y, 0] as (string | number)[],
   transitionProperty: "transform" as const,
   transitionDuration: MOTION.press.durationCss,
-  transitionTimingFunction: MOTION.ease.outCss,
+  transitionTimingFunction: MOTION.ease.outCss as never,
 };
 
 const styles = StyleSheet.create({

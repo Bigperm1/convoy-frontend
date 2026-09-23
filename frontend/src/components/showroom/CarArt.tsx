@@ -13,12 +13,13 @@
 //             "the … class car need to be 2D top down version and in 2nd slot (silver)")
 //   class3d   the member's 3D CLASS car (garageCars.class3dChoice — Jeff, 2026-09-23). Still: the 3/4 render
 //             of that class's white bake (Hot Hatch GRC Icecap White, Supercar GT3 RS Carrara White, Exotic
-//             LFA Whitest White — restored from ab782791) painted in the chosen bake's hex; the GRC2 bake
-//             (heavy_metal) uses its own render, grc-3d.png. Live: that bake's full GLB (getVehicleModelUrl),
-//             standing still — the spin is Ultra's.
-//   scan      still: the scan's hero shot (car-scans/<id>/hero.jpg, taken by this Garage the first time
-//             the car was live) as a photo card — the stock still when a scan has none yet; live: its hero
-//             GLB, turning.
+//             LFA Whitest White — restored from ab782791) painted in the chosen bake's hex. Live: that bake's
+//             full GLB (getVehicleModelUrl), standing still — the spin is Ultra's. (The scan-built heavy_metal
+//             row is not a 3D class colour — garageCars SCAN_BAKES.)
+//   scan      still: the car itself, keyed — a transparent PNG this Garage takes of the live model on this phone
+//             (scanStill.ts) — so it stands on the turntable exactly as the live model will; until one exists,
+//             the scan's hero shot (car-scans/<id>/hero.jpg, a JPEG) as a photo card, or the stock still when a
+//             scan has none yet; live: its hero GLB, turning.
 //
 // EVERY 3D STILL STANDS WHERE ITS LIVE CAR WILL BE (Jeff, 2026-09-23: "when swiping to ultra the 3d car has a
 // wierd animation that pops the car into the carasoul, remove that pop and make it smooth"). The live view's
@@ -48,6 +49,7 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { ClassSprite } from "../../classLayers";
 import { scanHeroImageSource } from "../../carScan";
+import { scanStillUri, subscribeScanStills } from "../../scanStill";
 import CarHero3D from "../../CarHero3D";
 import { MOTION } from "../../motion";
 import type { Class3dKey } from "../../garageCars";
@@ -107,8 +109,8 @@ const CLASS_3D_STILL: Record<Class3dKey, Still & { fit: Fit }> = {
     fit: { w: 232.3, left: -123.3, top: -40.1 },
   },
 };
-/** grc-3d.png over GRC2.glb's live framing (the heavy_metal bake — a scan-built mesh, a little bigger than the
- *  authored hatch). Also the stand-in for a scan that has no hero shot yet.
+/** grc-3d.png over GRC2.glb's live framing (Jeff's own scan, a little bigger than the authored hatch) — the stand-in
+ *  for a scan that has no still or hero shot yet.
  *  ⚠ The one still that is NOT an exact match: grc-3d.png predates the Garage orbit renders, and its car's aspect
  *  (479 × 250 ink, 1.916) is not the live GRC2's at this orbit (228.6 × 115.5 pt, 1.979). Fitted by WIDTH and
  *  centred, so the still's car stands ~3.8 pt taller than the live one — ~1.9 pt past the roof and under the tyres
@@ -116,8 +118,6 @@ const CLASS_3D_STILL: Record<Class3dKey, Still & { fit: Fit }> = {
  *  −1.5 … +0.2 pt). Exact needs a re-render at the live framing (orbit 325°/76°, 30° FOV, radius 100%) with
  *  tools/garage-stills, then this fit re-measured. */
 const GRC2_FIT: Fit = { w: 228.6, left: -118.6, top: -49.2 };
-/** The one hatch bake that is not the authored GR Corolla (vehicleAssets VEHICLE_MODEL_URL.heavy_metal = GRC2). */
-const GRC2_KEY = "heavy_metal";
 
 function AtFit({ fit, aspect, children }: { fit: Fit; aspect: number; children: React.ReactNode }) {
   return (
@@ -195,14 +195,12 @@ export function Car3DStill({ width, silhouette }: { width: number; silhouette?: 
 }
 
 /** A 3D class car at `width`, in the bake's paint — the Customize preview. */
-export function Class3DStill({ cls, modelKey, hex, width }: { cls: Class3dKey; modelKey: string; hex: string; width: number }) {
-  if (modelKey === GRC2_KEY) return <Car3DStill width={width} />;
+export function Class3DStill({ cls, hex, width }: { cls: Class3dKey; hex: string; width: number }) {
   return <PaintedStill still={CLASS_3D_STILL[cls]} width={width} primary={hex} />;
 }
 
 /** The 3D class car's still INSIDE the live frame, exactly where its live model will stand. */
-export function Class3DFramed({ cls, modelKey, hex }: { cls: Class3dKey; modelKey: string; hex: string }) {
-  if (modelKey === GRC2_KEY) return <StockFramed />;
+export function Class3DFramed({ cls, hex }: { cls: Class3dKey; hex: string }) {
   const st = CLASS_3D_STILL[cls];
   return (
     <AtFit fit={st.fit} aspect={st.aspect}>
@@ -228,11 +226,24 @@ function StockFramed() {
 const CARD_W = 300;
 const CARD_H = 180;
 
-/** A scan's hero shot in the live frame, or the stock still when the scan has none yet (only a car that was
- *  once live in this Garage has one — the snapshot is taken here). */
+/** The keyed still's URI for a scan (scanStill.ts), re-read when one is saved. */
+function useScanStillUri(scanId: string): string | null {
+  const [, bump] = useState(0);
+  useEffect(() => subscribeScanStills(() => bump((n) => n + 1)), []);
+  return scanStillUri(scanId);
+}
+
+/** A scan's still in the live frame: the keyed PNG of its live model when this phone has one — the frame itself,
+ *  1:1, no card — else its hero shot as a photo card, else the stock still (only a car that was once live in this
+ *  Garage has either — both are taken here). */
 export function ScanStill({ scanId }: { scanId: string }) {
   const fw = useLiveFrameWidth();
+  const keyed = useScanStillUri(scanId);
   const [failed, setFailed] = useState(false);
+  if (keyed) {
+    // No transition: it must never fade in from nothing — that would be the pop again.
+    return <Image source={{ uri: keyed }} style={StyleSheet.absoluteFill} contentFit="contain" transition={0} />;
+  }
   const src = failed ? null : scanHeroImageSource(scanId);
   if (!src) return <StockFramed />;
   return (
@@ -269,11 +280,13 @@ const DRAWN = 0.01;
  *  or something covers the stage); the WebView outlives it by the fade-out — or not at all with `instantExit`.
  *  A failed load simply leaves the still. Never interactive — it sits under the stage's swipe layer; the
  *  full-screen spin is CarViewer3D (the "360° spin" action, scans only). */
-export function LiveCar({ glbUrl, still, style, onSnapshot, autoRotate = true, instantExit = false }: {
+export function LiveCar({ glbUrl, still, style, onSnapshot, onStill, autoRotate = true, instantExit = false }: {
   glbUrl: string | null;
   still: React.ReactNode;
   style?: ViewStyle;
   onSnapshot?: (jpegDataUri: string) => void;
+  /** The model's keyed PNG at its framing orbit (CarHero3D STILL). */
+  onStill?: (pngDataUri: string) => void;
   /** false = the model stands still (the 3D class car); only a scan turns. */
   autoRotate?: boolean;
   /** The stage is covered (the 360° viewer, another screen): when `glbUrl` goes null, drop the model at once —
@@ -358,6 +371,7 @@ export function LiveCar({ glbUrl, still, style, onSnapshot, autoRotate = true, i
             autoRotate={autoRotate}
             onReady={() => setReadyUrl(shown)}
             onSnapshot={onSnapshot}
+            onStill={onStill}
             style={StyleSheet.absoluteFill}
           />
         </Animated.View>

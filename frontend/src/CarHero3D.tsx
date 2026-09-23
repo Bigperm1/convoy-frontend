@@ -87,7 +87,15 @@ export function carViewerHtml(glbUrl: string, opts?: { inline?: boolean; interac
           if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ t: 'hero', d: d }));
         } catch (e) {}
       }, 900);
-    });
+    });${opts?.transparent ? `
+    // STILL (2026-09-23, src/scanStill.ts): the same frame as a PNG — it keeps the transparent background the JPEG
+    // turns black — taken while the camera is still at the framing orbit (auto-rotate waits 600 ms), so the Garage
+    // can stand it on the turntable exactly where this model stands on load.
+    mv.addEventListener('load', function () {
+      setTimeout(function () {
+        try { post({ t: 'still', d: mv.toDataURL('image/png') }); } catch (e) {}
+      }, 250);
+    });` : ""}
   })();
 </script>
 </body></html>`;
@@ -102,6 +110,7 @@ export default function CarHero3D({
   onEmptyPress,
   interactive = true,
   onSnapshot,
+  onStill,
   transparent = false,
   onReady,
   autoRotate = true,
@@ -128,6 +137,8 @@ export default function CarHero3D({
   interactive?: boolean;
   /** Receives a data:image/jpeg URI of the loaded hero (see the HERO SHOT script). */
   onSnapshot?: (jpegDataUri: string) => void;
+  /** `transparent` only: a data:image/png URI of the model at its framing orbit, background transparent (STILL). */
+  onStill?: (pngDataUri: string) => void;
   /** false = the model stands still (no auto-rotate). Only a scanned car — Ultra's — turns on the Garage
    *  stage (Jeff, 2026-09-23: "the spin is for ultra only"). Default true for every existing caller. */
   autoRotate?: boolean;
@@ -180,6 +191,7 @@ export default function CarHero3D({
           try {
             const m = JSON.parse(e.nativeEvent.data);
             if (m && m.t === 'hero' && typeof m.d === 'string' && m.d.startsWith('data:image/jpeg')) onSnapshot?.(m.d);
+            else if (m && m.t === 'still' && typeof m.d === 'string' && m.d.startsWith('data:image/png')) onStill?.(m.d);
             else if (m && m.t === 'ready') onReady?.();
           } catch {}
         }}

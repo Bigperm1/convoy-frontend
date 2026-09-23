@@ -1,14 +1,21 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Platform, Dimensions, Animated, Easing, Switch,
+  View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, Platform, Dimensions, Switch,
 } from 'react-native';
+import Animated, {
+  interpolate, ReduceMotion, useAnimatedStyle, useSharedValue, withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
 import ConvoyLogo from './ConvoyLogo';
 import { useAuth } from '../auth';
 import { useAccent, useAccentAlpha } from '../appSkin';
 import { useSettings, getAvatarMode, setAvatarMode } from '../settings';
+import { MOTION } from '../motion';
+import { haptics } from '../haptics';
+import { useReduceMotion } from '../motionPrefs';
+import { COLORS } from '../theme';
 
 const OWNER_EMAIL = 'jwellsmorton@gmail.com';
 // 230 → 276 for the Ghost-mode switch row (Jeff, 2026-09-23: menu reorganization).
@@ -89,18 +96,28 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
   const btnRef = useRef<any>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
-  // Drop-down entrance: backdrop fades while the card slides + scales down from
-  // just under the logo (vs the old instant appear).
-  const drop = useRef(new Animated.Value(0)).current;
+  // Popover motion (Jeff, 2026-09-23: Apple-feel batch 1; DESIGN.md §11.6). `p` runs 0 → 1 on the UI
+  // thread: the scrim fades and the card grows out of the H (transformOrigin, below) from
+  // MOTION.popover.fromScale — no slide, no bounce, since nothing was thrown. Under Reduce Motion it is
+  // opacity only. Both timings pass ReduceMotion.Never: Reanimated's default (System) would jump them
+  // to the end, killing the fade too, and useReduceMotion() already drops the scale (§11.9).
+  const reduceMotion = useReduceMotion();
+  const fromScale = reduceMotion ? 1 : MOTION.popover.fromScale;
+  const p = useSharedValue(0);
   useEffect(() => {
-    if (open) {
-      drop.setValue(0);
-      Animated.spring(drop, { toValue: 1, useNativeDriver: true, tension: 120, friction: 14 }).start();
-    }
-  }, [open, drop]);
-  const closeMenu = (after?: () => void) => {
-    Animated.timing(drop, { toValue: 0, duration: 130, easing: Easing.in(Easing.quad), useNativeDriver: true })
-      .start(({ finished }) => { if (finished) { setOpen(false); after?.(); } });
+    if (open) p.set(withTiming(1, { ...MOTION.popover.enter, reduceMotion: ReduceMotion.Never }));
+  }, [open, p]);
+  const scrimAnim = useAnimatedStyle(() => ({ opacity: p.get() }));
+  const cardAnim = useAnimatedStyle(() => ({
+    opacity: p.get(),
+    transform: [{ scale: interpolate(p.get(), [0, 1], [fromScale, 1]) }],
+  }));
+  // Dismiss WITHOUT a choice (backdrop tap, Android Back) animates out, then unmounts the Modal. A
+  // choice never waits on this — see go().
+  const closeMenu = () => {
+    p.set(withTiming(0, { ...MOTION.popover.exit, reduceMotion: ReduceMotion.Never }, (finished) => {
+      if (finished) scheduleOnRN(setOpen, false);
+    }));
   };
 
   // Owner-only Admin entry (roster + password resets). Appended to the menu
@@ -110,8 +127,12 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
     ? [...PLACES, { label: 'Admin', icon: 'shield-checkmark', route: '/(app)/admin' }]
     : PLACES;
 
+  // No haptic on open: opening a menu is a plain navigate tap, and the card appearing under the finger
+  // is its feedback (DESIGN.md §11.8).
   const openMenu = () => {
-    Haptics.selectionAsync();
+    // Start the entrance from nothing. go() closes without animating, so `p` can still be at 1 here;
+    // the Modal is hidden at this point, so the reset is never seen.
+    p.set(0);
     const node = btnRef.current;
     // Measure the logo so the dropdown can drop right under it. measureInWindow
     // returns window-space coords, matching the Modal's coordinate space.
@@ -126,12 +147,14 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
     }
   };
 
+  // A choice navigates and closes in the SAME tick — no exit animation, no timer (Jeff, 2026-09-23:
+  // Apple-feel batch 1). The old 130 ms ease-in close + 10 ms timeout held every row ~140 ms before
+  // anything moved. The Modal is animationType="none", so it is gone on this commit. No haptic: a
+  // row is a navigate tap, not a value changing.
   const go = (item: Item) => {
-    Haptics.selectionAsync();
-    // Animate the menu out, then navigate so the close doesn't fight the route
-    // transition on slower devices.
     const opts = item.withAnchor ? { withAnchor: true } : undefined;
-    closeMenu(() => setTimeout(() => router.push(item.route as any, opts), 10));
+    router.push(item.route as any, opts);
+    setOpen(false);
   };
 
   const renderRow = (item: Item, last: boolean) => (
@@ -183,22 +206,18 @@ export default function LogoMenu({ size = 32, style, align = 'left' }: Props) {
       >
         {/* Backdrop — tap anywhere outside the card to dismiss. */}
         <Pressable style={styles.backdrop} onPress={() => closeMenu()}>
-          <Animated.View pointerEvents="none" style={[styles.backdropFill, { opacity: drop }]} />
-          {/* Card — drops down from under the logo (slide + scale + fade). The
-              inner Pressable stops taps inside from closing the menu. */}
+          <Animated.View pointerEvents="none" style={[styles.backdropFill, scrimAnim]} />
+          {/* Card — grows out of the H: its origin is the corner that sits under the
+              logo (every caller today passes align="right"). The inner Pressable stops
+              taps inside from closing the menu. */}
           <Animated.View
             style={[
               styles.card,
               { top },
               horiz,
               { borderColor: cardBorder },
-              {
-                opacity: drop,
-                transform: [
-                  { translateY: drop.interpolate({ inputRange: [0, 1], outputRange: [-14, 0] }) },
-                  { scale: drop.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
-                ],
-              },
+              { transformOrigin: align === 'right' ? 'top right' : 'top left' },
+              cardAnim,
             ]}
           >
             <Pressable onPress={() => {}}>
@@ -236,7 +255,7 @@ function GhostRow({ accent, iconWell }: { accent: string; iconWell: string }) {
   return (
     <Pressable
       style={({ pressed }) => [styles.row, styles.rowLast, pressed && styles.rowPressed]}
-      onPress={() => { Haptics.selectionAsync(); setGhost(!ghost); }}
+      onPress={() => { haptics.tick(); setGhost(!ghost); }}
       accessibilityRole="switch"
       accessibilityLabel="Ghost mode"
       accessibilityHint="Hide me from the crew"
@@ -313,11 +332,11 @@ const styles = StyleSheet.create({
   // rowLabel without its flex:1 — inside the rowText column a flex:1 title would
   // try to grow vertically; the column already takes the row's free width.
   rowTitle: { color: '#F4F4F4', fontSize: 16, fontWeight: '600' },
-  rowSub: { color: '#808080', fontSize: 12, marginTop: 2 },
+  rowSub: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
   // Same voice as settingsKit's SectionLabel (textDim, 12/600, 0.6 tracking), inset
   // to the card's 16 px row padding.
   sectionLabel: {
-    color: '#808080', fontSize: 12, fontWeight: '600', letterSpacing: 0.6,
+    color: COLORS.textDim, fontSize: 12, fontWeight: '600', letterSpacing: 0.6,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4,
   },
   sectionDivider: { height: StyleSheet.hairlineWidth, backgroundColor: '#2a2a2e' },

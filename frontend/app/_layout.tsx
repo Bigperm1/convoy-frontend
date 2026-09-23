@@ -3,6 +3,7 @@
 import '../src/initMapbox';
 import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '../src/auth';
@@ -32,20 +33,27 @@ export default function RootLayout() {
     SplashScreen.hideAsync().catch(() => {});
   }, []);
 
+  // GestureHandlerRootView wraps EVERY tree this returns, outside SafeAreaProvider — without it
+  // a gesture-handler Gesture does nothing, with no error (Jeff, 2026-09-23: Apple-feel batch 1).
+  // NavSearchScreen keeps its own: a Modal is a separate native root and needs one inside it.
   if (tooOld) {
     return (
-      <SafeAreaProvider>
-        <UpdateRequiredGate />
-      </SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <UpdateRequiredGate />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <Stack screenOptions={{ headerShown: false }} />
-      </AuthProvider>
-      {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </AuthProvider>
+        {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

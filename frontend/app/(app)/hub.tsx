@@ -17,6 +17,7 @@ import { COLORS, ACTION } from "../../src/theme";
 import Glass, { GlassFill } from "../../src/Glass";
 import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
+import { PressableScale } from "../../src/ui/PressableScale";
 import { getGarageImage, getTopDownImage } from "../../src/carImages";
 import { fetchClubLeaderboard, getPeerPbs, fmtKm } from "../../src/trips";
 import { useSettings, updateSettings } from "../../src/settings";
@@ -679,7 +680,9 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
   const bannerWash = useAccentAlpha(0.22);
   const bannerWash2 = useAccentAlpha(0.08);
   return (
-    <TouchableOpacity testID={`community-${c.id}`} onPress={onPress} activeOpacity={0.9} style={{ marginBottom: 14 }}>
+    // borderRadius matches the Glass inside, so the Reduce Motion press tint is card-shaped
+    // (Jeff, 2026-09-23: Apple-feel batch 1).
+    <PressableScale testID={`community-${c.id}`} onPress={onPress} style={{ marginBottom: 14, borderRadius: 20 }}>
       <Glass radius={20}>
         <View style={styles.clubCardInner}>
           {/* Cover banner (falls back to a branded gradient when none is set) */}
@@ -739,7 +742,7 @@ function CommunityCard({ c, onPress, active, mode = "mine", onJoin }: {
           </View>
         </View>
       </Glass>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 

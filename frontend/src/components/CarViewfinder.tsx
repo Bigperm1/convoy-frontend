@@ -123,7 +123,8 @@ export default function CarViewfinder({ shot, index, total, onCapture, onCancel 
     firedRef.current = true;
     setBusy(true);
     try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      // One haptic per shot: the Success when the photo comes back, not a Heavy on the tap as well
+      // (Jeff, 2026-09-23: Apple-feel batch 1).
       const pic = await camRef.current.takePictureAsync({
         // Matches the system-camera path this replaces: no crop, negligible
         // compression. Framing and detail are what the reconstruction reads.

@@ -14,6 +14,7 @@ import { playSpeedDing } from "../../../src/speedDing";
 import { SettingsPage, SectionLabel, SettingsCard, Divider, HelpText } from "../../../src/components/settingsKit";
 import VolumeSlider from "../../../src/components/VolumeSlider";
 import { useAccent } from "../../../src/appSkin";
+import { COLORS } from "../../../src/theme";
 
 function AudioRow({
   icon, color, title, subtitle, value, disabled, onChange, onComplete, onPreview,
@@ -105,7 +106,7 @@ const styles = StyleSheet.create({
   row: { paddingHorizontal: 16, paddingVertical: 12 },
   rowTop: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
   title: { color: "#F4F4F4", fontSize: 16, fontWeight: "600" },
-  sub: { color: "#808080", fontSize: 12, marginTop: 1 },
+  sub: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   pct: { color: "#F4F4F4", fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"], minWidth: 42, textAlign: "right" },
   dim: { color: "#8E8E93" },
   preview: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },

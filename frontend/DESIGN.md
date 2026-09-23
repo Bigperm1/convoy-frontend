@@ -475,3 +475,222 @@ ship the same paint name, and a bare hex compare would tick both.
 ⚠️ A single hex cannot hold a colour-shift paint (Midnight Purple, Bayside Blue).
 Those carry their **daylight body read**; the flip is unrepresentable and that is
 recorded next to each such entry.
+
+---
+
+## 11 · Motion, haptics & type
+
+> Jeff, 2026-09-23, approving batch 1 of the Apple-feel audit: *"go"* — with his calls, in his words:
+> *"for the Android, go back to where we came from"* (tab history) · *"Use Apple's great secondary text"* ·
+> *"hold to talk switch"* — read as the audit's call 3: the mic-live haptic switches from Heavy to Medium
+> (the Light on release was already there) · *"Your call on the search"* — Claude chose a quick fade ·
+> *"Shared motion values"* — this section.
+> **Launch splash: open.** He said *"Launch splash."* with no verb; the audit's call 4 proposed hold 0 + a
+> 200 ms fade (today 1300 ms + 450 ms). Nothing was changed (`src/components/AnimatedSplash.tsx` is
+> untouched) until he says which he meant.
+
+**The rule: one table.** Every duration, curve, spring, press value and haptic comes from this section,
+through its code mirror:
+
+| Module | Exports |
+|---|---|
+| `src/motion.ts` | `MOTION` (ease · duration · spring · press · popover), `NAV`, the worklets `project()` and `rubberband()` |
+| `src/haptics.ts` | `haptics.tick / snap / destructive / micLive / micRelease / success / failure` |
+| `src/motionPrefs.ts` | `useReduceMotion()`, `useReduceTransparency()` |
+
+New code never writes a number of its own and never calls expo-haptics directly. Change a value HERE and
+in the mirror together, with Jeff's say-so — never per screen. ⚠ Not yet true of the OLD code: after batch
+1, 81 raw expo-haptics calls remain in 18 files (grep `Haptics\.[a-zA-Z]*Async`, 2026-09-23). Batch 1 moved
+only the calls the audit named (hold-to-talk, the three map FABs, the Avatar hold, the double buzzes, the
+navigate-tap ticks, the two failures); the rest move file by file, and the ones inside 🔒 regions wait for a
+relock.
+
+- **The nav-locked mixed files** (`map.tsx`, `ConvoyMapbox.tsx`, `CarMapView.tsx`, `settings.ts`,
+  `src/carplay/*`) only IMPORT these: a new column-0 ALL_CAPS const there fails `nav_lock_test`. Code inside
+  a 🔒 NAV-LOCK region keeps its raw values until Jeff relocks that region.
+- **CarPlay and Android Auto templates are drawn by the system.** Nothing here applies to them.
+- **These are UI values, not drive values.** The drive map's camera and self-car are paced by
+  `src/framePacer.ts` (§11.11), never by `MOTION`.
+- **Setup:** `app/_layout.tsx` wraps every root tree in `GestureHandlerRootView` (without it a Gesture does
+  nothing, silently); a `Modal` is its own native root and needs its own inside. Reanimated 4.1.7 +
+  Worklets 0.5.1 — `babel-preset-expo` adds the worklets plugin, there is no `babel.config.js`. Call back
+  to React with `scheduleOnRN` (never the deprecated `runOnJS`), and a function called from a worklet
+  starts with `'worklet'`.
+
+### 11.1 Should it animate?
+
+| How often | Rule | Examples |
+|---|---|---|
+| 100+ a day | no animation | tab switches, the keyboard, scrolling |
+| tens a day | ≤ 150 ms, or nothing | press feedback |
+| occasional | the tokens below | menus, popovers, sheets |
+| rare | delight is allowed | a club join, "your car is built" |
+
+If a finger drives it, it is a **spring**. Everything else is **timing**.
+
+### 11.2 Springs — `MOTION.spring`
+
+| Token | Config | When |
+|---|---|---|
+| `default` | `{ duration: 400, dampingRatio: 1 }` | default settle, no overshoot |
+| `snap` | `{ duration: 400, dampingRatio: 0.8 }` + the gesture's `velocity` | snapping back after a drag |
+| `sheet` | `{ duration: 300, dampingRatio: 0.8 }` + `velocity` | a sheet or drawer let go after a drag |
+
+Apple's two numbers, never mass/stiffness/damping. Bounce (a ratio under 1) only when a finger threw it.
+⚠ Reanimated 4's spring `duration` is **perceptual**: its own type docs say the real settle is 1.5× the
+value, so `400` lands in about 600 ms.
+
+### 11.3 Curves — `MOTION.ease`
+
+| Token | cubic-bézier | Use |
+|---|---|---|
+| `out` / `outCss` | 0.23, 1, 0.32, 1 | entering and exiting — the default |
+| `inOut` / `inOutCss` | 0.77, 0, 0.175, 1 | something moving across the screen |
+| `sheet` / `sheetCss` | 0.32, 0.72, 0, 1 | a sheet moved with no finger on it |
+| linear | — | constant motion (progress) only |
+| **banned** | `Easing.in(…)` | it starts slow exactly when the user is watching |
+
+Each curve comes in two forms because one object cannot serve both APIs: `out` is `Easing.bezier()` for
+`withTiming` and layout builders; `outCss` is `cubicBezier()` for CSS transitions, whose
+`transitionTimingFunction` takes that or a keyword — not a `'cubic-bezier(…)'` string.
+
+### 11.4 Durations — `MOTION.duration`
+
+| Token | ms | Use |
+|---|---|---|
+| `press` | 120 | press feedback |
+| `small` | 180 | a chip, toggle or label swap |
+| `popoverEnter` / `popoverExit` | 200 / 160 | menus and popovers |
+| `fade` | 200 | the opacity cross-fade that stands in for movement under Reduce Motion |
+| `reflow` | 200 | a list closing the gap a removed row left |
+
+UI motion stays at 300 ms or less, and exits run about 20% faster than entries. Screen transitions and
+RN `Modal` `animationType` keep the platform's own timing; they are never given a duration.
+
+### 11.5 Press feedback — `MOTION.press`
+
+- Scale to **0.97 on press-IN**, back on release: a Reanimated CSS transition on `transform`, `120ms`,
+  `MOTION.ease.outCss`. Feedback on press-in, commit on press-out.
+- `hitSlop: 12` brings a small control up to the 44 pt (iOS) / 48 dp (Android) target — never grow the
+  visual. `pressRetentionOffset` stays at RN's default.
+- **Reduce Motion:** no scale — a child tint of `rgba(255,255,255,0.10)` (`MOTION.press.highlight`).
+  **One exception:** the centred car on the Garage stage (`Stage.tsx`) gets no tint — it would be a
+  full-width band across the stage — so under Reduce Motion its tap answers only with its result (the
+  paywall, the scan guide or the 3D viewer, all at once). A car whose tap does nothing gets no press
+  response at all (`centreTappable`), in either mode.
+- A press never sets alpha on a glass view's parent: scale a wrapper, or tint a child.
+- Android gets the same scale as iOS, not a ripple.
+- `hitSlop={0}` is set, each with a comment, where a 12 pt slop would take a close neighbour's edge — e.g.
+  the three map FABs (10 pt apart), the route chips (8 pt apart), the category pills; grep `hitSlop={0}`
+  for the full list. Those keep exactly the target they had before batch 1. The category pills are ~32 pt
+  tall — under 44 — as they were (a vertical-only slop is untested: they sit in a horizontal ScrollView,
+  right under the search bar).
+
+### 11.6 Popovers & menus — `MOTION.popover`
+
+- Enter from `scale 0.95` + opacity 0 over 200 ms `ease.out`; exit over 160 ms. Never `scale(0)`.
+- `transformOrigin` is the trigger's corner, so the menu grows out of what was tapped.
+- A choice is never held back by the menu's exit animation.
+- Reduce Motion: opacity only.
+
+### 11.7 Navigation — `NAV`
+
+- Tabs never slide (`animation: 'none'`).
+- **`NAV.tabs.backBehavior = 'history'`** — Back returns to where you came from, not always the Map
+  (Jeff's call). On Android this means hardware Back on a tab walks back through the tabs you visited
+  before it leaves the app; Jeff accepted that.
+- A flow that FINISHES leaves itself: the scan flow's "Done" drops garage-scan / consent / capture from
+  the tab history in one RESET and lands on the Garage, so neither Done nor the Garage's own Back walks
+  back into a finished capture (`garage-capture.tsx` `leaveScanFlow`). Back chevrons inside a flow keep
+  `router.back()`.
+- Screen pushes use the platform's transition, unmodified. Search opens with a quick fade instead of
+  rising from the bottom, and the keyboard starts with it (`autoFocus`). Its header shares the map bar's
+  top inset, but the field is not frame-matched to the map's bar (x, height, radius and font differ) —
+  open, see §11.12.
+
+### 11.8 Haptics — `haptics.*`
+
+| Word | Call | When |
+|---|---|---|
+| `tick` | `selectionAsync()` | a VALUE steps: a chip, a two-state toggle, a route choice, a pager detent |
+| `snap` | Light impact | something snaps home, a detent catches, a drag commits, a map button moves the camera |
+| `destructive` | Medium impact | a delete commits |
+| `micLive` | Medium impact (Android: one 35 ms vibrate) | hold-to-talk: the frame the mic goes live |
+| `micRelease` | Light impact | hold-to-talk: key-up |
+| `success` | Success notification | the user's own action succeeded |
+| `failure` | Error notification | the user's own action failed |
+
+**Hold-to-talk (Jeff, 2026-09-23, "hold to talk switch"): ONE Medium when the mic goes live, one Light on
+release.** Both mics:
+- **Scout** (hold the Comms tab; the search-bar mic): `useVoice` fires `micLive` in the frame the glow
+  lights — `CommsTabButton`'s own Heavy at the 250 ms long-press is gone, so one hold is one pulse, not two
+  Heavy. A release that lands before the recorder has started now cancels the start, so `micLive` never
+  follows `micRelease` and the mic is not left open.
+- **Crew push-to-talk** (`talk.tsx`): press-in and the hands-free (VOX) tap were a raw Heavy; they are
+  `micLive` now, key-up `micRelease`. ⚠ This applies Jeff's call to the crew mic as well as Scout's — the
+  audit's call named the mic-live haptic, not which mic. Confirm on a device.
+- **Android:** `micLive` is ONE `Vibration.vibrate(35)` and no impact. The Scout path used to fire an
+  impact AND that vibrate for one action.
+
+Rules: one per user action · in the same frame as its visual · never the only feedback · never on a plain
+open or navigate tap · never for something the user didn't cause · never per frame or on scroll. From a
+worklet: `scheduleOnRN(haptics.snap)`. Off on web.
+
+### 11.9 Reduce Motion & Reduce Transparency — `src/motionPrefs.ts`
+
+- **`useReduceMotion()` is live.** It is seeded from Reanimated's `useReducedMotion()` (the value at launch)
+  and kept live by `AccessibilityInfo` `reduceMotionChanged` — one native listener for the whole app.
+- **Reduced means fewer and gentler, not zero:** drop translate, scale, overshoot and parallax; keep the
+  opacity and colour changes that explain a state. Press → tint; popover → fade.
+- ⚠ **Reanimated's own `ReduceMotion.System`** — the default on every `withTiming`, `withSpring` and layout
+  builder — follows the setting as it was **at launch** (its own docs), and it makes the animation jump
+  straight to its end: no fade either. An opacity fade that must survive Reduce Motion passes
+  `reduceMotion: ReduceMotion.Never` and drops its own movement through `useReduceMotion()`.
+- CSS transitions: grep finds no reduce-motion path in Reanimated 4.1.7's CSS engine, so assume they ignore
+  the setting (HYPOTHESIS until seen on a device). Press feedback gates its scale on `useReduceMotion()`
+  itself, so it does not depend on that.
+- **`useReduceTransparency()`** — iOS only (false elsewhere), live via `reduceTransparencyChanged`; it reads
+  false until the first native read lands. **No surface uses it yet — batch 2** (glass → solid).
+
+### 11.10 Secondary text
+
+| Level | Colour | Contrast (calculated) | Use |
+|---|---|---|---|
+| secondary | `#98989F` | 5.94:1 on #1C1C1E · 4.86:1 on #2C2C2E | subtitles, help text, section labels — text people read |
+| tertiary | `#636366` | 2.84:1 on #1C1C1E | meant for placeholders and disabled glyphs, never information — **defined, no callers yet** |
+
+- `#98989F` is Apple's dark secondary label, `rgba(235,235,245,0.6)`, flattened onto `#1C1C1E` — the dark
+  grouped cell (the UIKit value was not re-read on iOS this session). It was also the app's own `textDim`
+  until 2026-06-07 (`c91496d8`), when secondary and tertiary both became `#808080` — 4.31:1 on
+  `#1C1C1E`, under the 4.5:1 floor for small text. `#636366` was the old `textMute`.
+- Code: `src/theme.ts` `COLORS`. No new grey literals — use the token.
+- **What is on secondary today, beyond text:** `textMute` and `textDim` also colour the placeholders
+  (hub, Club events, sign-up, music, the paywall), some Club-event icons and the locked Settings rows, so
+  those moved from `#808080` to `#98989F` with the text. The `'#808080'` placeholder literals moved to
+  `textDim` too (login, forgot-password, admin, search, Customize), so every placeholder reads in ONE grey.
+  Left as they were: `map.tsx`'s three `#808080` (two placeholders, one radio glyph) and two `#606060`
+  placeholders (garage-capture, Customize).
+- **Placeholders → tertiary** (Apple's own placeholder level, darker than today's) is a visible change
+  Jeff has not seen: batch 2, with a render.
+- The type scale (sizes, weights, tracking): **batch 2**.
+
+### 11.11 Frame rate
+
+- **The drive map stays at 60 fps on every surface** — iPhone, Android, CarPlay and Android Auto —
+  through `src/framePacer.ts` (Jeff, 2026-09-23). Nothing in this section changes that.
+- UI animations (Reanimated, on the UI thread) may run at the panel's own rate.
+
+### 11.12 Batch 2 — proposed, not built
+
+Materials (glass / chrome / card / scrim tokens and the Reduce Transparency fallback), the type scale, an
+in-screen drag sheet, toast and card tokens, Increase Contrast, and a `blocked` (Warning) haptic.
+
+Also in the audit's batch-1 fixes but **not built** (nothing uses them yet — recorded so they are not lost):
+- `src/motion.ts`: a `GESTURE` table (hysteresis, deceleration, dismiss fraction, rubber-band), the
+  module-scope `MOTION.enter.*` / `MOTION.exit.*` layout builders, and a `useMotion()` hook returning
+  opacity-only builders under Reduce Motion. `src/motionPrefs.ts`: `useIncreaseContrast()`.
+- The rest of the search fix: `ReanimatedSwipeable` in place of the deprecated `Swipeable`, a row exit +
+  `MOTION.duration.reflow` when a recent is deleted, and `haptics.destructive` on that delete. And
+  frame-matching the search field to the map's bar (§11.7).
+- The remaining 81 raw expo-haptics calls (§11, top).
+- Placeholders → tertiary (§11.10).

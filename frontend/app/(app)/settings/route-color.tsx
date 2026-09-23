@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSettings, getRouteColor } from "../../../src/settings";
 import { SettingsPage, SectionLabel, SettingsCard, HelpText } from "../../../src/components/settingsKit";
+import { COLORS } from "../../../src/theme";
 
 const ROUTE_PRESETS = [
   "#2DEC86", "#0A84FF", "#00D6E0", "#5E5CE6", "#BF5CFF",
@@ -47,7 +48,7 @@ export default function RouteColorPage() {
             })}
           </View>
 
-          <Text style={{ color: "#808080", fontSize: 12, fontWeight: "600", marginTop: 16, marginBottom: 8 }}>Custom — tap the spectrum</Text>
+          <Text style={{ color: COLORS.textDim, fontSize: 12, fontWeight: "600", marginTop: 16, marginBottom: 8 }}>Custom — tap the spectrum</Text>
           <TouchableOpacity
             activeOpacity={1}
             onLayout={(e) => setSpectrumW(e.nativeEvent.layout.width)}

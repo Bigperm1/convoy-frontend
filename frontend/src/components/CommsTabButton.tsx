@@ -11,7 +11,7 @@
 
 import React, { useRef } from "react";
 import { Pressable, StyleSheet } from "react-native";
-import * as Haptics from "expo-haptics";
+import { haptics } from "../haptics";
 import { useVoice } from "../useVoice";
 
 type Props = {
@@ -31,7 +31,9 @@ export default function CommsTabButton({ children, onPress, accessibilityState, 
   const handleLongPress = async () => {
     // Only key up from OTHER tabs — on Comms itself the big mic is right there.
     if (selected) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    // No haptic here. The ONE hold-to-talk haptic is useVoice's haptics.micLive(), fired in the
+    // same frame the mic goes live and the listening glow lights. A Heavy used to fire here at the
+    // 250 ms long-press as well: two thumps for one hold (Jeff, 2026-09-23: Apple-feel batch 1).
     txRef.current = true;
     await voice.start();
   };
@@ -39,7 +41,7 @@ export default function CommsTabButton({ children, onPress, accessibilityState, 
   const handlePressOut = async () => {
     if (txRef.current) {
       txRef.current = false;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      haptics.micRelease();
       const uri = await voice.stop();
       if (uri) await voice.transcribe(uri);
     }

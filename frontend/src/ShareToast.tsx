@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Animated, StyleSheet, Text, TouchableOpacity, View, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassFill } from "./Glass";
+import { PressableScale } from "./ui/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -127,7 +128,7 @@ export default function ShareToast() {
       {/* The WHOLE card accepts the share (tester ask: "tap anywhere on the
           banner") — the CTA chip stays as a visual affordance, and only the ✕
           dismisses (inner touchable wins over the card's press). */}
-      <TouchableOpacity activeOpacity={0.85} onPress={open} style={styles.card}>
+      <PressableScale onPress={open} style={styles.card}>
         {Platform.OS !== "web" ? (
           <GlassFill intensity={64} />
         ) : (
@@ -148,7 +149,7 @@ export default function ShareToast() {
         <TouchableOpacity onPress={dismiss} hitSlop={8} style={styles.close}>
           <Ionicons name="close" size={18} color={COLORS.textDim} />
         </TouchableOpacity>
-      </TouchableOpacity>
+      </PressableScale>
     </Animated.View>
   );
 }

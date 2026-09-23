@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Audio } from "expo-av";
-import * as Haptics from "expo-haptics";
+import { haptics } from "./haptics";
 import * as SecureStore from "expo-secure-store";
-import { Alert, Platform, Vibration } from "react-native";
+import { Alert } from "react-native";
 import * as Location from "expo-location";
 import { api, formatErr } from "./api";
 import { voiceBus } from "./voiceBus";
@@ -59,10 +59,25 @@ export function useVoice(tier: ProximityTier = "far") {
     // Acquire BEFORE ensurePerm: its granted branch applies setRecordingAudioMode(),
     // and a denial after that flip would have mutated the real owner's session with
     // nothing to restore it. (carComms.ts is the reference ordering.)
-    leaseRef.current = acquireMic("voice", 30000);
-    if (!leaseRef.current) return;
-    const dropLease = () => { leaseRef.current?.release(); leaseRef.current = null; };
+    const lease = acquireMic("voice", 30000);
+    leaseRef.current = lease;
+    if (!lease) return;
+    // A key-up that lands while this start() is still awaiting (the permission read, the recorder
+    // setup) runs stop() with no Recording yet: stop() frees the lease and dissolves the glow, but
+    // nothing stopped THIS start, which went on to open the mic, light the glow and fire micLive
+    // AFTER the release haptic, then held the mic, leaseless, until the 25 s cap. stop() nulls
+    // leaseRef, so a lease that is no longer ours means the user already let go: cancel instead
+    // (Jeff, 2026-09-23: Apple-feel batch 1 — one Medium when the mic goes live, one Light on release).
+    const released = () => leaseRef.current !== lease;
+    // Only ever release OUR lease — after a release, leaseRef may already hold a newer start's.
+    const dropLease = () => { if (!released()) { lease.release(); leaseRef.current = null; } };
     const perm = await ensurePerm();
+    if (released()) {
+      // stop() already flipped the session idle, but ensurePerm's setRecordingAudioMode() may have
+      // landed after that flip — flip it back so Bluetooth is not left on mono HFP.
+      if (perm === "granted") void setIdleAudioMode();
+      return;
+    }
     // Don't start a recording in the same gesture that showed the OS prompt —
     // doing so while the iOS audio session is re-activating crashes the app.
     // Permission is granted now, so the next press records normally. Only the
@@ -73,6 +88,12 @@ export function useVoice(tier: ProximityTier = "far") {
       // Adaptive quality based on convoy proximity tier (see proximityAudio.ts).
       await rec.prepareToRecordAsync(getPttRecordingOptions(tier));
       await rec.startAsync();
+      if (released()) {
+        // Let go while the recorder was starting: close it unheard — no glow, no micLive.
+        try { await rec.stopAndUnloadAsync(); } catch {}
+        void setIdleAudioMode();
+        return;
+      }
       recRef.current = rec;
       setRecording(true);
       // Belt-and-suspenders cap — a tap-and-forget (the CarPlay mic button in
@@ -86,11 +107,14 @@ export function useVoice(tier: ProximityTier = "far") {
       setListeningGlow("listening");
       // Tactile confirmation that the mic is live. Lives in the hook so every
       // Gemini voice button (tab-bar mic + search-bar mic) gets it for free.
-      // iOS gets the Taptic engine; Android's impactAsync is faint and often
-      // gated by system settings, so we ALSO fire a short Vibration there so
-      // the press is unmistakable.
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-      if (Platform.OS === "android") { try { Vibration.vibrate(35); } catch {} }
+      // It is the ONE haptic of a hold-to-talk, in the same frame as the glow
+      // above: Medium, not Heavy, and CommsTabButton no longer adds its own at
+      // the 250 ms long-press (Jeff, 2026-09-23: Apple-feel batch 1). Key-up is
+      // haptics.micRelease() at the caller.
+      // Android's impactAsync is faint, so this path used to ALSO fire a 35 ms
+      // Vibration there — two pulses for one action. haptics.micLive() now IS
+      // that single Vibration on Android (src/haptics.ts).
+      haptics.micLive();
     } catch (e) {
       console.warn("record start", e);
       // Release BEFORE the idle flip — a held lease would DEFER it, re-creating
@@ -184,7 +208,7 @@ export function useVoice(tier: ProximityTier = "far") {
           // Nothing actionable and nothing spoken — legacy banner behavior.
           voiceBus.emit({ text: data?.text || "", intent: null, ts: Date.now() });
         }
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        haptics.success();
         return { text: data?.text || "", intent: actions[0]?.intent ?? null, query: actions[0]?.query };
       } catch {
         // fall through to the legacy classifier below
@@ -194,10 +218,11 @@ export function useVoice(tier: ProximityTier = "far") {
       // Broadcast to any subscribed screens
       voiceBus.emit({ text: result.text || "", intent: result.intent ?? null, query: result.query, ts: Date.now() });
       // Success buzz when the command comes back understood.
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptics.success();
       return result;
     } catch (e) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      // The user's own command failed: the vocabulary's failure word (was a Warning).
+      haptics.failure();
       Alert.alert("Voice", formatErr(e));
       return null;
     } finally {

@@ -821,7 +821,7 @@ export default function MusicScreen() {
               </View>
               <TouchableOpacity
                 onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
+                  // Opens the share sheet — a navigate tap, so no haptic (Jeff, 2026-09-23: Apple-feel batch 1).
                   setSharePayload(song ? {
                     kind: "music",
                     title: song?.title ?? song?.name,
@@ -1029,7 +1029,7 @@ const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: COLORS.bg },
 
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 10, paddingBottom: 6 },
-  dateOverline: { color: "#808080", fontSize: 13, fontWeight: "700", letterSpacing: 0.4 },
+  dateOverline: { color: COLORS.textDim, fontSize: 13, fontWeight: "700", letterSpacing: 0.4 },
   title: { color: COLORS.text, fontSize: 34, fontWeight: "800", letterSpacing: -1, marginTop: 2 },
   logoBtn: { padding: 4 },
   logoBacking: {
@@ -1130,9 +1130,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,69,58,0.35)",
   },
   diagTitle: { color: "#FF6961", fontSize: 12, fontWeight: "800", letterSpacing: 0.4, marginBottom: 4 },
-  diagLine: { color: "#808080", fontSize: 11, lineHeight: 16 },
+  diagLine: { color: COLORS.textDim, fontSize: 11, lineHeight: 16 },
 
-  footer: { color: "#808080", fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: 24, marginTop: 26 },
+  footer: { color: COLORS.textDim, fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: 24, marginTop: 26 },
 
   // ===== Now-playing player — art-tinted Liquid Glass =====
   // Outer wrapper carries the drop shadow (needs overflow visible); inner wrapper

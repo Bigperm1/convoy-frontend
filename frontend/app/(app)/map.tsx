@@ -22,6 +22,8 @@ import { voiceBus, geocodeQuery } from "../../src/voiceBus";
 import { useCommunityRoutes, createCommunityRoute, CommunityRoute } from "../../src/communityRoutes";
 import TurnByTurnNav, { SpeedPill } from "../../src/components/TurnByTurnNav";
 import { MapNowPlaying } from "../../src/components/MapNowPlaying";
+import { PressableScale } from "../../src/ui/PressableScale";
+import { haptics } from "../../src/haptics";
 import { ReportToast, MusicToast, HailToast, InfoToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
@@ -5333,10 +5335,9 @@ export default function MapScreen() {
               return (
                 // Tappable (tester request): opens the who's-on roster sheet —
                 // every live member with YOHB + Drive-to actions.
-                <TouchableOpacity
+                <PressableScale
                   style={styles.liveOverlay}
                   onPress={() => setRosterOpen(true)}
-                  activeOpacity={0.8}
                   hitSlop={8}
                 >
                   <View style={[styles.liveDotSm, { backgroundColor: liveDot }]} />
@@ -5344,7 +5345,7 @@ export default function MapScreen() {
                       live"). The build/runtime/OTA tail stays on purpose: tester tools stay until the
                       club launch (Jeff, 2026-09-23). */}
                   <Text style={styles.liveOverlayText}>{liveCount} Crew · v{buildNo}{rtv ? ` · ${rtv}` : ''}{otaTag ? ` · ${otaTag}` : ''}</Text>
-                </TouchableOpacity>
+                </PressableScale>
               );
             })()}
             {/* Stranded-OTA escape hatch: appears the moment a newer update finishes
@@ -5552,7 +5553,7 @@ export default function MapScreen() {
                       the state, so colour is free to carry the MEANING instead. */}
                   <Ionicons name={savedMatch ? "bookmark" : "bookmark-outline"} size={21} color={ACTION.save} />
                 </TouchableOpacity>
-                <TouchableOpacity testID="share-route" onPress={() => { Haptics.selectionAsync().catch(() => {}); setRouteShareOpen(true); }} hitSlop={10}>
+                <TouchableOpacity testID="share-route" onPress={() => setRouteShareOpen(true)} hitSlop={10}>
                   <Ionicons name="share-outline" size={22} color={ACTION.share} />
                 </TouchableOpacity>
                 <TouchableOpacity testID="route-clear" onPress={clearRoute} hitSlop={10}>
@@ -5626,12 +5627,14 @@ export default function MapScreen() {
               {routeChips.map((c) => {
                 const active = c.idx === selectedRouteIndex && !c.disabled;
                 return (
-                  <TouchableOpacity
+                  <PressableScale
                     key={c.key}
                     testID={`route-chip-${c.key}`}
-                    activeOpacity={0.85}
+                    // Chips sit 8 pt apart: keep today's touch target, since a default slop would take
+                    // the neighbour's edge (Jeff, 2026-09-23: Apple-feel batch 1). Same for Start below.
+                    hitSlop={0}
                     onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
+                      haptics.tick();
                       if (c.disabled) {
                         // The AI route only appears once Convoy has learned your habitual
                         // path to this saved place — explain that instead of a dead tap.
@@ -5652,7 +5655,7 @@ export default function MapScreen() {
                       <Text maxFontSizeMultiplier={1} style={[styles.routeOptChipLabel, active && styles.routeOptChipLabelActive]} numberOfLines={1}>{c.label}</Text>
                       {c.sub ? <Text maxFontSizeMultiplier={1} style={styles.routeOptChipSub} numberOfLines={1}>{c.sub}</Text> : null}
                     </View>
-                  </TouchableOpacity>
+                  </PressableScale>
                 );
               })}
             </View>
@@ -5675,10 +5678,10 @@ export default function MapScreen() {
 
             {/* Pills — Start (yellow). Add stops + Saved designed but hidden. */}
             <View style={styles.bannerPills}>
-              <TouchableOpacity testID="start-nav" onPress={startNav} style={[styles.bannerPill, styles.bannerPillStart, { backgroundColor: accent }]} activeOpacity={0.9}>
+              <PressableScale testID="start-nav" onPress={startNav} style={[styles.bannerPill, styles.bannerPillStart, { backgroundColor: accent }]} hitSlop={0}>
                 <Ionicons name="navigate" size={18} color="#1C1C1E" />
                 <Text maxFontSizeMultiplier={1} style={styles.bannerPillStartText} numberOfLines={1}>Start</Text>
-              </TouchableOpacity>
+              </PressableScale>
               <TouchableOpacity
                 style={[styles.bannerPill, styles.bannerPillBlue]}
                 activeOpacity={0.9}
@@ -6003,14 +6006,16 @@ export default function MapScreen() {
             3D exists only during a drive — so the toggle has nothing to do when no
             route is running and would only offer a rule-breaking idle 3D. */}
         {navMode === "turn-by-turn" && (
-        <TouchableOpacity
+        <PressableScale
           testID="view-2d-3d-fab"
+          // 60 pt FABs stacked 10 pt apart: keep today's touch targets, since a default slop would let
+          // the lower FAB take the upper one's edge (Jeff, 2026-09-23: Apple-feel batch 1). All three.
+          hitSlop={0}
           style={[styles.fab, styles.fabPolice]}
           onPress={() => {
-            try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+            haptics.snap();
             toggleMapView2D();
           }}
-          activeOpacity={0.8}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
           {/* TEXT ONLY — no glyph (Jeff, 2026-08-15: "remove the square in the button on
@@ -6024,17 +6029,18 @@ export default function MapScreen() {
             style={{ width: 34, height: 34 }}
             resizeMode="contain"
           />
-        </TouchableOpacity>
+        </PressableScale>
         )}
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
             frames self + every live/partial peer in a north-up overview. Same round
             glass FAB as the compass below it. Police reporting still lives in voice
             ("report police"), the Report sheet, and the hazard long-press. */}
-        <TouchableOpacity
+        <PressableScale
           testID="crew-fit-fab"
+          hitSlop={0}
           style={[styles.fab, styles.fabPolice]}
           onPress={() => {
-            try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+            haptics.snap();
             // Drop follow like a finger pan (arms the 20s auto-recenter) so the
             // overview holds instead of the chase cam snapping straight back.
             // 🔒 NAV-LOCK begin map-crew-fit-drops-follow — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
@@ -6042,7 +6048,6 @@ export default function MapScreen() {
             setCrewSignal((n) => n + 1);
             // 🔒 NAV-LOCK end map-crew-fit-drops-follow
           }}
-          activeOpacity={0.8}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
           {/* Brand-green people glyph over a white "Crew" label (Jeff, 2026-07-25).
@@ -6050,14 +6055,18 @@ export default function MapScreen() {
           {/* Candy crew glyph — the SAME art as the CarPlay crew button (8/20). */}
           <Image source={CREW_ART[skinTier]} style={{ width: 26, height: 26 }} resizeMode="contain" />
           <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Crew</Text>
-        </TouchableOpacity>
+        </PressableScale>
         {/* Compass — bottom of stack. The needle rotates opposite the live map
             bearing so North always points north as the map turns; tapping it
             snaps back to the car (recenter) AND faces the map north (heading 0). */}
-        <TouchableOpacity
+        <PressableScale
           testID="compass-fab"
+          hitSlop={0}
           style={styles.fab}
           onPress={() => {
+            // The same snap as its two FAB neighbours — it was the only silent one of the three
+            // (Jeff, 2026-09-23: Apple-feel batch 1). Outside the lock region below, on purpose.
+            haptics.snap();
             // TOGGLE, like the CarPlay compass (CarMapView 'compass': "holding north-up until
             // tapped again"). This was ONE-WAY: every tap armed the hold, and only a manual pan
             // or a NEW route released it — so a recenter tap mid-drive left the map north-up for
@@ -6072,13 +6081,12 @@ export default function MapScreen() {
             // 🔒 NAV-LOCK end map-compass-northup-toggle
             try { logEvent(`phone-tap:compass hold=${hold ? 1 : 0}`); } catch {}
           }}
-          activeOpacity={0.85}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
           <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
             <CompassNeedle size={54} />
           </View>
-        </TouchableOpacity>
+        </PressableScale>
         {/* Recenter FAB removed — recentering now lives in the compass tap
             (which both recenters on the car and faces north). */}
         {/* Bottom search/arrow FAB removed entirely — the destination search

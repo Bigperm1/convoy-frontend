@@ -9,7 +9,7 @@
 
 import React, { useImperativeHandle, useRef, forwardRef } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Animated, PanResponder, TouchableOpacity, Platform,
+  View, Text, StyleSheet, ScrollView, Animated, PanResponder, Platform,
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,6 +18,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAccent } from "../appSkin";
 import { COLORS } from "../theme";
+import { PressableScale } from "../ui/PressableScale";
 
 export const DRAWER_HEIGHT = 300;   // height of the slide-up step list
 // Must match the real tab bar in app/(app)/_layout.tsx EXACTLY: height (86 iOS / 84 Android)
@@ -252,10 +253,9 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                    fourth tile is what does not — see the arrival-clock rule above, which is
                    where that is paid for. The numberOfLines guards are still the backstop:
                    a long label ellipsises a tail instead of sliding under these tiles. */
-                <TouchableOpacity
+                <PressableScale
                   onPress={onAddStop}
                   style={styles.barAddStop}
-                  activeOpacity={0.85}
                   testID="add-stop-nav"
                   hitSlop={6}
                   accessibilityLabel="Add a stop"
@@ -276,16 +276,15 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                       @expo/vector-icons 15.1.1 MaterialCommunityIcons glyphmap. 26 in a
                       50pt tile matches its three neighbours. */}
                   <MaterialCommunityIcons name="map-marker-plus" size={26} color="#04142A" />
-                </TouchableOpacity>
+                </PressableScale>
               )}
               {onShowList && (
                 /* Green twin of End, carrying the classic turn-arrow "directions"
                    glyph — the universal turn-by-turn symbol — so it reads at a glance
                    while driving. Candy green, same three-stop construction as End. */
-                <TouchableOpacity
+                <PressableScale
                   onPress={onShowList}
                   style={styles.barTurns}
-                  activeOpacity={0.85}
                   testID="turn-by-turn"
                   hitSlop={6}
                   accessibilityLabel="Turn-by-turn directions"
@@ -299,7 +298,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                   {/* 26 in a 50pt tile keeps the glyph's optical weight from the 32-in-60
                       circle it replaced (0.52 vs 0.53 of the box). */}
                   <MaterialCommunityIcons name="directions" size={26} color="#04150B" />
-                </TouchableOpacity>
+                </PressableScale>
               )}
               {onArrived && (
                 /* ARRIVED (Jeff, 2026-09-12) — candy ORANGE, between the green directions tile
@@ -308,10 +307,9 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                    It exists because arrival DETECTION can miss — on his 09-12 commute the engine
                    never saw him stop, so a 33 km drive ended in silence and he worked around it
                    by parking 60 m short and walking in. This declares it. */
-                <TouchableOpacity
+                <PressableScale
                   onPress={onArrived}
                   style={styles.barArrived}
-                  activeOpacity={0.85}
                   testID="arrived-nav"
                   hitSlop={6}
                   accessibilityLabel="I have arrived"
@@ -323,10 +321,12 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                   />
                   <GlassFill tintColor="#FF8A00" style={{ borderRadius: 14, overflow: "hidden" }} />
                   <MaterialCommunityIcons name="flag-checkered" size={26} color="#2A1200" />
-                </TouchableOpacity>
+                </PressableScale>
               )}
               {onEnd && (
-                <TouchableOpacity onPress={onEnd} style={styles.barExit} activeOpacity={0.85} testID="end-nav">
+                /* hitSlop 0: End had none, and 10 pt from Arrived a default slop would hand Arrived's
+                   right edge to End (the later sibling wins the overlap). Jeff, 2026-09-23: Apple-feel batch 1. */
+                <PressableScale onPress={onEnd} style={styles.barExit} hitSlop={0} testID="end-nav">
                   {/* Candy-apple: a glossy red gradient base (bright top -> deep bottom)
                       gives real candy dimension, and a red-tinted GlassFill on top
                       refracts THAT gradient (not the dark map) for a liquid-glass sheen.
@@ -340,7 +340,7 @@ const StepDrawer = forwardRef<StepDrawerHandle, Props>(function StepDrawer(
                   {/* "End", not "Exit" (Jeff, 2026-08-16) — one verb across phone,
                       CarPlay and AA for the same action. */}
                   <Text style={styles.barExitText}>End</Text>
-                </TouchableOpacity>
+                </PressableScale>
               )}
             </View>
           )}

@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import Glass, { GlassFill } from './Glass';
+import { PressableScale } from './ui/PressableScale';
 import { COLORS } from './theme';
 import { useAccentAlpha, useAccent, useAppSkinColors } from './appSkin';
 import { api, formatErr } from './api';
@@ -119,7 +120,9 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity onPress={() => setShowCreate(true)} activeOpacity={0.85} style={{ marginBottom: 14 }}>
+      {/* borderRadius matches the Glass inside, so the Reduce Motion press tint is card-shaped
+          (Jeff, 2026-09-23: Apple-feel batch 1). Same on EventCard. */}
+      <PressableScale onPress={() => setShowCreate(true)} style={{ marginBottom: 14, borderRadius: 16 }}>
         <Glass radius={16}>
           <View style={styles.createRow}>
             <LinearGradient colors={skinColors.colors as any} locations={skinColors.locations as any} style={styles.createIcon}>
@@ -128,7 +131,7 @@ export function EventsSection({ kind, openEventId }: { kind: Kind; openEventId?:
             <Text style={styles.createText}>{`Create ${copy.one}`}</Text>
           </View>
         </Glass>
-      </TouchableOpacity>
+      </PressableScale>
 
       {loading && list.length === 0 ? (
         <ActivityIndicator color={accent} style={{ marginVertical: 28 }} />
@@ -171,7 +174,7 @@ function EventCard({ event: e, onPress }: { event: HubEvent; onPress: () => void
   const accent = useAccent();
   const copy = KIND_COPY[e.kind] || KIND_COPY.event;
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={{ marginBottom: 12 }}>
+    <PressableScale onPress={onPress} style={{ marginBottom: 12, borderRadius: 20 }}>
       <Glass radius={20}>
         <View style={styles.card}>
           <View style={[styles.cardIcon, { backgroundColor: iconWell }]}>
@@ -191,7 +194,7 @@ function EventCard({ event: e, onPress }: { event: HubEvent; onPress: () => void
           </View>
         </View>
       </Glass>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 

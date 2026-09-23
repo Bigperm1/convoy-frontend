@@ -71,10 +71,15 @@ export default function NavSearchScreen({
     // made it re-run on every GPS tick, which cleared the search box mid-type
     // ("the search bar keeps deleting"). Reset belongs to open/close only.
     setPrediction(predictDestination(new Date(), origin?.lat, origin?.lng));
-    const t = setTimeout(() => inputRef.current?.focus(), 250);
-    return () => clearTimeout(t);
+    // No focus timer: the field is `autoFocus`, so the keyboard starts rising the moment the
+    // screen is on the window instead of 250 ms later (Jeff, 2026-09-23: Apple-feel batch 1).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
+
+  // Backstop for the one case autoFocus cannot see: iOS keeps the Modal's children mounted until
+  // its dismiss animation finishes, so a search re-opened inside that window reuses a TextInput
+  // that has already fired its autoFocus. focus() is a no-op when the field is already focused.
+  const focusOnShow = () => inputRef.current?.focus();
 
   const onChange = (q: string) => {
     setText(q);
@@ -129,7 +134,13 @@ export default function NavSearchScreen({
   }, [saved]);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    // A quick fade, not a slide up from the bottom: you tapped a bar at the TOP (Jeff, 2026-09-23:
+    // Apple-feel batch 1 — search was Claude's call). The header shares the map top bar's paddingTop
+    // (52 iOS / 28 Android), so the two TOP edges line up — but the field is NOT frame-matched to
+    // the map's bar: it starts right of the 40 pt back button (x 58 vs 12), is ~40 pt tall vs 50,
+    // radius 24 vs 14, font 16 vs 17 (read from the two style sheets, not rendered). Matching the
+    // frame means moving the back affordance; that is open, and needs a render Jeff has seen.
+    <Modal visible={visible} animationType="fade" onRequestClose={onClose} onShow={focusOnShow}>
       <GestureHandlerRootView style={styles.root}>
         {/* Search header */}
         <View style={styles.header}>
@@ -143,10 +154,11 @@ export default function NavSearchScreen({
               value={text}
               onChangeText={onChange}
               placeholder="Where to?"
-              placeholderTextColor="#808080"
+              placeholderTextColor={COLORS.textDim}
               style={styles.input}
               returnKeyType="search"
               autoCorrect={false}
+              autoFocus
             />
             {!!text && (
               <TouchableOpacity onPress={() => onChange("")} hitSlop={8}>

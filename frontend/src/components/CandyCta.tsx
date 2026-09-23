@@ -15,7 +15,6 @@ import {
   ActivityIndicator,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
   type StyleProp,
   type ViewStyle,
@@ -24,6 +23,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { skin, type VisualTier } from "../tierTheme";
 import SkinSheen from "./SkinSheen";
+import { PressableScale } from "../ui/PressableScale";
 
 export function CandyCta({
   label,
@@ -50,11 +50,14 @@ export function CandyCta({
   const off = !!disabled;
   const sk = skin(tier);
   return (
-    <TouchableOpacity
-      activeOpacity={0.9}
+    <PressableScale
+      // Already ≥ 44 pt tall and often stacked 4–12 pt from another button: keep today's touch target,
+      // since the default slop would reach into the neighbour (Jeff, 2026-09-23: Apple-feel batch 1).
+      hitSlop={0}
       onPress={onPress}
       disabled={off || busy}
-      style={style}
+      // The radius is only for the Reduce Motion press tint, so it takes the button's shape.
+      style={[style, { borderRadius: radius }]}
       accessibilityRole="button"
       accessibilityState={{ disabled: off }}
     >
@@ -82,7 +85,7 @@ export function CandyCta({
           </>
         )}
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 

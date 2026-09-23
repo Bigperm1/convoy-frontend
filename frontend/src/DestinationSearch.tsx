@@ -9,6 +9,7 @@ import { useAuth } from "./auth";
 import { GOOGLE_MAPS_KEY } from "./api";
 import { GlassFill, hudTint } from "./Glass";
 import { useAccent, useAccentAlpha } from "./appSkin";
+import { PressableScale } from "./ui/PressableScale";
 
 const KEY = GOOGLE_MAPS_KEY;
 
@@ -281,11 +282,11 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
               green pills show/hide toggle in the idle read-only state. */}
           {aiSuggest ? (
             <>
-              <TouchableOpacity testID="ai-lets-go" onPress={onAiGo} style={[styles.letsGoBtn, { backgroundColor: letsGoFloor }]} activeOpacity={0.85}>
+              <PressableScale testID="ai-lets-go" onPress={onAiGo} style={[styles.letsGoBtn, { backgroundColor: letsGoFloor }]}>
                 <GlassFill tintColor={accent} style={{ borderRadius: 10, overflow: "hidden" }} />
                 <Ionicons name="navigate" size={14} color="#06281A" />
                 <Text maxFontSizeMultiplier={1} style={styles.letsGoText}>Let's go</Text>
-              </TouchableOpacity>
+              </PressableScale>
               <TouchableOpacity testID="ai-dismiss" onPress={onAiDismiss} hitSlop={8} style={{ paddingLeft: 2 }}>
                 <Ionicons name="close" size={18} color="rgba(235,235,245,0.6)" />
               </TouchableOpacity>

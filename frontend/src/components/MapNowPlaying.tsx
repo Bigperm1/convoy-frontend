@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../theme";
 import { GlassFill, hudTint } from "../Glass";
 import { useNowPlaying } from "../nowPlaying";
+import { PressableScale } from "../ui/PressableScale";
 
 /**
  * Now-playing banner that lives on the map, beside the speedometer.
@@ -97,7 +98,7 @@ export function MapNowPlaying({
 
   return (
     <Animated.View style={[styles.wrap, { bottom, left }]} pointerEvents="box-none">
-      <Pressable style={styles.bar} onPress={onOpen} hitSlop={4}>
+      <PressableScale style={styles.bar} onPress={onOpen} hitSlop={4}>
         <GlassFill tintColor={hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
         {art ? (
           <Image source={{ uri: art }} style={styles.art} contentFit="cover" />
@@ -108,10 +109,10 @@ export function MapNowPlaying({
           <Text style={styles.title} numberOfLines={1}>{title}</Text>
           {!!artist && <Text style={styles.sub} numberOfLines={1}>{artist}</Text>}
         </View>
-        <TouchableOpacity onPress={() => toggle()} hitSlop={12} style={styles.playBtn} testID="map-now-toggle">
+        <PressableScale onPress={() => toggle()} style={styles.playBtn} testID="map-now-toggle">
           <Ionicons name={isPlaying ? "pause" : "play"} size={24} color={COLORS.text} />
-        </TouchableOpacity>
-      </Pressable>
+        </PressableScale>
+      </PressableScale>
     </Animated.View>
   );
 }

@@ -8,6 +8,7 @@ import { confirmEvent, declineEvent } from "../../src/eventsApi";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { COLORS } from "../../src/theme";
+import { NAV } from "../../src/motion";
 import { View, ActivityIndicator, Platform, StyleSheet, Text, AppState } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
@@ -395,7 +396,12 @@ export default function AppLayout() {
           until permissionGate asks for it, immediately BEFORE the OS location
           prompt. Required by Google Play for ACCESS_BACKGROUND_LOCATION. */}
       <LocationDisclosureHost />
+      {/* Back goes where you came from (Jeff, 2026-09-23: Apple-feel batch 1). The TabRouter
+          default is 'firstRoute', so Back on Garage, Club, Drives, Settings, Admin and every
+          scan step landed on the Map whatever screen opened it. 'history' walks the tab
+          history instead — Android hardware Back included, per Jeff's call. */}
       <Tabs
+        backBehavior={NAV.tabs.backBehavior}
         screenOptions={{
           headerShown: false,
           tabBarStyle: {

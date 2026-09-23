@@ -255,11 +255,13 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", padding: 12, gap: 12 },
   iconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   title: { color: COLORS.text, fontSize: 15, fontWeight: "500" },
-  subtitle: { color: COLORS.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
+  // Secondary lines are one weight up from regular so the grey holds over glass
+  // (Jeff, 2026-09-23: Apple-feel batch 1 — apple-design §12 vibrancy).
+  subtitle: { color: COLORS.textDim, fontSize: 12, fontWeight: "500", marginTop: 2, lineHeight: 16 },
   rowValue: { color: COLORS.textDim, fontSize: 14, fontWeight: "500", marginRight: 2 },
   swatch: { width: 20, height: 20, borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.3)", marginRight: 2 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: COLORS.hairline, marginLeft: 60 },
-  helpText: { color: COLORS.textMute || COLORS.textDim, fontSize: 11, lineHeight: 16, paddingHorizontal: 6, paddingTop: 8 },
+  helpText: { color: COLORS.textMute || COLORS.textDim, fontSize: 11, fontWeight: "500", lineHeight: 16, paddingHorizontal: 6, paddingTop: 8 },
   iconWrapLocked: { opacity: 0.5 },
   titleLocked: { color: COLORS.textDim },
   badge: {

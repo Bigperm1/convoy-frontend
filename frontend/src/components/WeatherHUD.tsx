@@ -1,11 +1,13 @@
 // WeatherHUD â compact on-map weather chip shown when the weather layer is on.
 // Displays current temperature, conditions icon, wind and precip at a glance.
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, Platform, TouchableOpacity, Animated } from "react-native";
+import { View, Text, StyleSheet, Platform, Animated } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
 import { weatherKind, windDirectionLabel, type WeatherKind } from "../weatherLayer";
 import { GlassFill, hudTint, glassLift } from "../Glass";
+import { PressableScale } from "../ui/PressableScale";
+import { COLORS } from "../theme";
 
 type Props = {
   weather: WeatherCondition;
@@ -176,16 +178,18 @@ export default function WeatherHUD({ weather, unit, compact, forecast, onOpenCha
             )}
           </Animated.View>
         )}
-        <TouchableOpacity
-          activeOpacity={0.8}
+        <PressableScale
           onPress={() => setOpen((o) => !o)}
           style={styles.compactChip}
           testID="weather-chip"
+          // 84×60 already, stacked just above the speedometer: keep today's touch target
+          // (Jeff, 2026-09-23: Apple-feel batch 1).
+          hitSlop={0}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 16, overflow: "hidden" }} />
           <WeatherGlyph kind={weatherKind(weather)} size={26} />
           <Text maxFontSizeMultiplier={1} style={styles.compactTemp} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{temp}</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     );
   }
@@ -225,7 +229,7 @@ const styles = StyleSheet.create({
     }),
   },
   temp: { color: "#F4F4F4", fontSize: 15, fontWeight: "700" },
-  wind: { color: "#808080", fontSize: 11, fontWeight: "500" },
+  wind: { color: COLORS.textDim, fontSize: 11, fontWeight: "500" },
   precip: { color: "#5AC8FA", fontSize: 11, fontWeight: "600" },
   divider: { width: StyleSheet.hairlineWidth, height: 16, backgroundColor: "rgba(255,255,255,0.15)", marginHorizontal: 2 },
   // ===== Tappable compact chip + 7-day forecast popup =====
@@ -254,7 +258,7 @@ const styles = StyleSheet.create({
     }),
   },
   forecastTitle: {
-    color: "#808080", fontSize: 11, fontWeight: "700",
+    color: COLORS.textDim, fontSize: 11, fontWeight: "700",
     letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6, marginLeft: 2,
   },
   forecastRow: { flexDirection: "row", alignItems: "center", paddingVertical: 5, gap: 8 },
@@ -262,8 +266,8 @@ const styles = StyleSheet.create({
   forecastGlyph: { width: 26, height: 24, alignItems: "center", justifyContent: "center" },
   forecastPrecip: { flex: 1, color: "#5AC8FA", fontSize: 11, fontWeight: "600" },
   forecastHi: { width: 32, color: "#F4F4F4", fontSize: 13, fontWeight: "700", textAlign: "right" },
-  forecastLo: { width: 30, color: "#808080", fontSize: 13, fontWeight: "600", textAlign: "right" },
-  forecastLoading: { color: "#808080", fontSize: 12, paddingVertical: 8, textAlign: "center" },
+  forecastLo: { width: 30, color: COLORS.textDim, fontSize: 13, fontWeight: "600", textAlign: "right" },
+  forecastLoading: { color: COLORS.textDim, fontSize: 12, paddingVertical: 8, textAlign: "center" },
   // Compact temp-only chip — matches the SpeedPill box (size + opacity) so the
   // weather + speed chips stack cleanly in the bottom-left HUD column.
   compactChip: {

@@ -9,6 +9,7 @@ import SkinSheen from "../../../src/components/SkinSheen";
 import { getSettings } from "../../../src/settings";
 import { skin, TIER_SKIN, type VisualTier } from "../../../src/tierTheme";
 import { subscribeEntitlement } from "../../../src/entitlements";
+import { COLORS } from "../../../src/theme";
 
 /**
  * App Skin — the metal the whole app wears.
@@ -117,5 +118,5 @@ const styles = StyleSheet.create({
   preview: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 4, paddingBottom: 18, paddingTop: 4 },
   swatch: { width: 56, height: 56, borderRadius: 16, borderWidth: 1 },
   previewTitle: { fontSize: 22, fontWeight: "800", letterSpacing: -0.3 },
-  previewSub: { color: "#808080", fontSize: 13, marginTop: 2 },
+  previewSub: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
 });

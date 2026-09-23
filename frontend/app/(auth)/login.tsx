@@ -23,7 +23,9 @@ import { api } from '../../src/api';
 import Constants from 'expo-constants';
 import GlassBackdrop from '../../src/components/GlassBackdrop';
 import { GlassFill } from '../../src/Glass';
+import { PressableScale } from '../../src/ui/PressableScale';
 import { useAccent } from '../../src/appSkin';
+import { COLORS } from '../../src/theme';
 
 const CREDS_KEY = 'convoy.saved.credentials';
 const SAVE_CREDS_KEY = 'convoy.save.credentials';
@@ -184,7 +186,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="you@example.com"
-                placeholderTextColor="#808080"
+                placeholderTextColor={COLORS.textDim}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -200,7 +202,7 @@ export default function LoginScreen() {
                 <TextInput
                   style={styles.inputFlex}
                   placeholder="Enter your password"
-                  placeholderTextColor="#808080"
+                  placeholderTextColor={COLORS.textDim}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -272,11 +274,13 @@ export default function LoginScreen() {
                 onPress={handleApple}
               />
             )}
-            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} disabled={loading} activeOpacity={0.85}>
+            {/* hitSlop 0: 46 pt tall already, 10 pt under the Apple button, whose edge a default slop
+                would take (Jeff, 2026-09-23: Apple-feel batch 1). */}
+            <PressableScale style={styles.googleBtn} onPress={handleGoogle} disabled={loading} hitSlop={0}>
               <GlassFill tintColor="rgba(14,14,18,0.34)" style={StyleSheet.absoluteFill} />
               <Ionicons name="logo-google" size={19} color="#F4F4F4" />
               <Text style={styles.googleBtnText}>Continue with Google</Text>
-            </TouchableOpacity>
+            </PressableScale>
 
             <View style={styles.linksSection}>
               <Text style={styles.linkText}>

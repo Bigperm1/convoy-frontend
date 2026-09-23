@@ -11,7 +11,7 @@
 
 import React, { useRef, useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
-import * as Haptics from "expo-haptics";
+import { haptics } from "../haptics";
 import CommsHoldGlow from "./CommsHoldGlow";
 import { emitAvatarHold } from "../avatarHoldBus";
 
@@ -45,7 +45,9 @@ export default function MapTabButton({ children, onPress, accessibilityState, st
     holdTimer.current = setTimeout(() => {
       heldRef.current = true;
       setHolding(true);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      // A hold opening a small panel: the vocabulary's snap (Light), not the heaviest thud iOS has
+      // (Jeff, 2026-09-23: Apple-feel batch 1).
+      haptics.snap();
       emitAvatarHold();
     }, 260);
   };

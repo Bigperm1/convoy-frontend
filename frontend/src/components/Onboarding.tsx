@@ -13,6 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { GlassFill } from '../Glass';
 import { useAccent } from '../appSkin';
+import { PressableScale } from '../ui/PressableScale';
+import { COLORS } from '../theme';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -106,7 +108,7 @@ export default function Onboarding() {
             />
           ))}
         </View>
-        <TouchableOpacity onPress={goNext} style={styles.btn} activeOpacity={0.85}>
+        <PressableScale onPress={goNext} style={styles.btn}>
           {/* Green gradient base + green-tinted Liquid Glass sheen, copy on top. */}
           <LinearGradient
             colors={['#7DF0B0', accent, '#00C46A']}
@@ -118,7 +120,7 @@ export default function Onboarding() {
           <View style={styles.btnGradient}>
             <Text style={styles.btnText}>{current.btnText}</Text>
           </View>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     </SafeAreaView>
   );
@@ -128,14 +130,14 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
   logo: { color: '#2DEC86', fontSize: 16, fontWeight: '700', letterSpacing: 2 },
-  skip: { color: '#808080', fontSize: 14, fontWeight: '500' },
+  skip: { color: COLORS.textDim, fontSize: 14, fontWeight: '500' },
   scroller: { flex: 1 },
   slide: { flex: 1, justifyContent: 'flex-end' },
   image: { ...StyleSheet.absoluteFillObject },
   gradient: { ...StyleSheet.absoluteFillObject },
   content: { marginHorizontal: 16, marginBottom: 150, paddingHorizontal: 20, paddingVertical: 22, borderRadius: 20, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.16)' },
   title: { color: '#F4F4F4', fontSize: 32, fontWeight: '700', marginBottom: 12, lineHeight: 40 },
-  description: { color: '#808080', fontSize: 16, lineHeight: 24 },
+  description: { color: COLORS.textDim, fontSize: 16, lineHeight: 24 },
   footer: { paddingHorizontal: 20, paddingBottom: 32, gap: 16 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },

@@ -26,7 +26,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+import { router, useNavigation } from "expo-router";
+import { CommonActions } from "@react-navigation/native";
 
 import { COLORS } from "../../src/theme";
 import { CandyCta } from "../../src/components/CandyCta";
@@ -45,6 +46,10 @@ import { MAIN_COLORS, CLUB_PALETTES } from "../../src/paintPalettes";
 // See src/guidedCamera.ts for why a static expo-camera import would be a rollback bomb.
 import CarViewfinder from "../../src/components/CarViewfinder";
 import { guidedCameraAvailable } from "../../src/guidedCamera";
+
+// The scan flow's own tab routes. The Garage is the only way in (garage.tsx goScan → garage-scan →
+// garage-consent → here), so finishing lands back on it with all three gone from Back's trail.
+const SCAN_FLOW = new Set(["garage-scan", "garage-consent", "garage-capture"]);
 
 // Scanning is Ultra's, so this page wears Diamond (2026-09-22) — it was gold while "ultra" named gold.
 const ULTRA = skin("diamond");
@@ -81,6 +86,28 @@ const isLightHex = (hex: string) => {
 };
 
 export default function GarageCaptureScreen() {
+  const navigation = useNavigation();
+  // "Done" leaves the finished flow (Jeff, 2026-09-23: Apple-feel batch 1). The tabs now walk
+  // history on Back, so a plain router.back() here landed on "Before you start" (garage-consent) —
+  // it used to land on the Map only because the old default sent every Back there. navigate() to
+  // the Garage is no fix either: history would still hold the three flow screens, so the Garage's
+  // own Back would walk into the finished capture. One RESET drops them from the history and shows
+  // whatever opened the flow. Measured against the installed TabRouter (@react-navigation/routers):
+  // map→garage→scan→consent→capture → Done lands on garage, Back → map → exit.
+  const leaveScanFlow = useCallback(() => {
+    const state = navigation.getState();
+    const history = state?.history as { type?: string; key?: string }[] | undefined;
+    if (!state || !history) { router.back(); return; }
+    const nameOf = (key?: string) => state.routes.find((r) => r.key === key)?.name ?? "";
+    let kept = history.filter((h) => !(h.type === "route" && SCAN_FLOW.has(nameOf(h.key))));
+    let index = kept.length ? state.routes.findIndex((r) => r.key === kept[kept.length - 1].key) : -1;
+    if (index < 0) {
+      index = state.routes.findIndex((r) => r.name === "garage");
+      if (index < 0) { router.back(); return; }
+      kept = [{ type: "route", key: state.routes[index].key }];
+    }
+    navigation.dispatch(CommonActions.reset({ ...state, index, history: kept }));
+  }, [navigation]);
   const { user, refresh } = useAuth();
   const [shots, setShots] = useState<Record<string, string>>({});
   const [active, setActive] = useState(0);
@@ -513,7 +540,7 @@ export default function GarageCaptureScreen() {
                   <Text style={styles.ghostText}>Try again</Text>
                 </TouchableOpacity>
               )}
-              <CandyCta label="Done" onPress={() => router.back()} height={52} tier="diamond" style={styles.doneBtn} />
+              <CandyCta label="Done" onPress={leaveScanFlow} height={52} tier="diamond" style={styles.doneBtn} />
             </>
           )}
         </View>
@@ -664,12 +691,12 @@ export default function GarageCaptureScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
   // ── paint phase ──
-  paintGroup: { color: "#808080", fontSize: 12, fontWeight: "600", alignSelf: "flex-start", marginTop: 18, marginBottom: 8 },
+  paintGroup: { color: COLORS.textDim, fontSize: 12, fontWeight: "600", alignSelf: "flex-start", marginTop: 18, marginBottom: 8 },
   paintRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, alignSelf: "flex-start" },
   paintSwatch: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
   paintSwatchOn: { borderColor: ULTRA.accent, borderWidth: 2 },
   paintHexRow: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "stretch" },
-  paintHexHash: { color: "#808080", fontSize: 16, fontWeight: "700" },
+  paintHexHash: { color: COLORS.textDim, fontSize: 16, fontWeight: "700" },
   paintHexInput: { flex: 1, color: "#EDEDED", fontSize: 15, borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#131313" },
   paintHexApply: { borderWidth: 1, borderColor: ULTRA.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   paintHexApplyText: { color: ULTRA.accent, fontSize: 14, fontWeight: "700" },

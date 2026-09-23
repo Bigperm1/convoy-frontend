@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import { haptics } from '../../src/haptics';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -26,6 +27,7 @@ import { livePttBus, setCommsScreenFocused, acquireFloor, releaseFloor, getFloor
 import { commsRead } from '../../src/commsRead';
 import { setPlaybackAudioMode, setIdleAudioMode } from '../../src/audioMode';
 import { useAccent, useAccentAlpha, useAppSkin } from '../../src/appSkin';
+import { COLORS } from '../../src/theme';
 
 const YELLOW = '#2DEC86';
 
@@ -371,7 +373,10 @@ export default function TalkScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
       return;
     }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    // Hold-to-talk's one haptic, in the frame the mic keys up and the button grows: the vocabulary's
+    // micLive (Medium; one vibrate on Android), not a raw Heavy (Jeff, 2026-09-23: Apple-feel batch 1,
+    // "hold to talk switch").
+    haptics.micLive();
     setDropdownOpen(false);
     setPressed(true);
     acquireFloor(channelId);
@@ -379,7 +384,7 @@ export default function TalkScreen() {
   };
   const onPressOut = () => {
     if (!channelId) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    haptics.micRelease();
     setPressed(false);
     // Release the floor so the next person can key up.
     releaseFloor(channelId);
@@ -398,7 +403,7 @@ export default function TalkScreen() {
     }
     if (ptt.voxActive) { ptt.stopVox(); setPressed(false); return; }
     if (floorHolder) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {}); return; }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    haptics.micLive();
     setDropdownOpen(false);
     setPressed(true);
     acquireFloor(channelId);
@@ -885,7 +890,7 @@ export default function TalkScreen() {
           <TouchableOpacity
             style={styles.txToggle}
             activeOpacity={0.85}
-            onPress={() => { Haptics.selectionAsync(); setTxOpen((o) => !o); }}
+            onPress={() => setTxOpen((o) => !o)}
           >
             <Ionicons name="radio" size={15} color={accent} />
             <Text style={styles.txToggleText}>
@@ -1016,7 +1021,7 @@ const styles = StyleSheet.create({
   communityName: { color: '#F4F4F4', fontSize: 17, fontWeight: '700' },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
   connected: { color: '#30D158', fontSize: 12 },
-  connectedMuted: { color: '#808080', fontSize: 12, marginTop: 1 },
+  connectedMuted: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   tierPill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 },
   tierText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
   chevBtn: { marginLeft: 4, padding: 2 },
@@ -1043,16 +1048,16 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#2a2a2e',
     shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 20,
   },
-  switcherTitle: { color: '#808080', fontSize: 11, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', marginBottom: 8, marginLeft: 2 },
+  switcherTitle: { color: COLORS.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', marginBottom: 8, marginLeft: 2 },
   switcherRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   switcherAvatar: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#1c1c1e', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   switcherAvatarImg: { width: 38, height: 38 },
   switcherName: { color: '#F4F4F4', fontSize: 15, fontWeight: '600' },
-  switcherMeta: { color: '#808080', fontSize: 12, marginTop: 1 },
+  switcherMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   switcherActivePill: { backgroundColor: 'rgba(48,209,88,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   switcherActiveText: { color: '#30D158', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
   switcherEmpty: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 2 },
-  switcherEmptyText: { color: '#808080', fontSize: 13, flex: 1 },
+  switcherEmptyText: { color: COLORS.textDim, fontSize: 13, flex: 1 },
 
   body: { flex: 1, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingBottom: Platform.OS === 'android' ? 150 : 100 },
 
@@ -1081,7 +1086,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   pttInnerActive: {},
-  pttLabel: { color: '#808080', fontSize: 16, fontWeight: '600', marginTop: 30, letterSpacing: 0.5 },
+  pttLabel: { color: COLORS.textDim, fontSize: 16, fontWeight: '600', marginTop: 30, letterSpacing: 0.5 },
   // Hands-free (VOX) toggle pill, shown under the mic label on private threads.
   voxToggle: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
@@ -1102,13 +1107,13 @@ const styles = StyleSheet.create({
   dropdownTitle: { color: '#F4F4F4', fontSize: 13, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.7 },
   dropdownHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sendingText: { color: YELLOW, fontSize: 12, fontWeight: '600', marginBottom: 10 },
-  emptyTx: { color: '#808080', fontSize: 13, lineHeight: 18, paddingVertical: 4 },
+  emptyTx: { color: COLORS.textDim, fontSize: 13, lineHeight: 18, paddingVertical: 4 },
   playingPill: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: 'rgba(45,236,134,0.12)' },
   convoRow: { paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#262629' },
   convoTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   playBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: YELLOW, alignItems: 'center', justifyContent: 'center' },
   convoSpeaker: { color: '#F4F4F4', fontSize: 15, fontWeight: '600' },
-  convoMeta: { color: '#808080', fontSize: 12, marginTop: 1 },
+  convoMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
 
   // ----- Recent Transmissions: toggle pill + tap-away sheet + swipe rows -----
   txToggle: {
@@ -1160,7 +1165,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.55, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 24,
   },
   pickerTitle: { color: '#F4F4F4', fontSize: 17, fontWeight: '700' },
-  pickerSub: { color: '#808080', fontSize: 13, lineHeight: 18, marginTop: 4, marginBottom: 10 },
+  pickerSub: { color: COLORS.textDim, fontSize: 13, lineHeight: 18, marginTop: 4, marginBottom: 10 },
   pickRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   pickAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#1c1c1e', alignItems: 'center', justifyContent: 'center' },
   pickAvatarOn: { backgroundColor: YELLOW },

@@ -16,7 +16,7 @@
 // an owned page); "Drive this today" does. A locked spot never opens the paywall on a swipe either —
 // only a deliberate tap or its button.
 
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   StyleSheet,
@@ -32,8 +32,12 @@ import Svg, { Defs, Ellipse, LinearGradient as SvgLinearGradient, Polygon, Radia
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+// Reanimated for the press scale only; the scroll-driven layers stay on core Animated's native driver.
+import Reanimated from "react-native-reanimated";
 import { skin, type VisualTier } from "../../tierTheme";
 import SkinSheen from "../SkinSheen";
+import { MOTION } from "../../motion";
+import { useReduceMotion } from "../../motionPrefs";
 
 export const STAGE_H = 400;
 /** Where the turntable sits (its centre line) — every car is placed to stand on it. */
@@ -80,6 +84,7 @@ export default function Stage({
   index,
   onIndexChange,
   onTapCentre,
+  centreTappable = true,
   metal,
   labels,
   renderSlot,
@@ -91,6 +96,9 @@ export default function Stage({
   index: number;
   onIndexChange: (i: number) => void;
   onTapCentre: () => void;
+  /** False when a tap on the centred slot does nothing (a car with no 3D spin), so it gets no press
+   *  feedback either — a press response promises an action. Default true. */
+  centreTappable?: boolean;
   /** The page metal: light, cone, turntable ring, the active dot. */
   metal: VisualTier;
   /** Top-left words for the centred slot; null hides them (a full-stage state carries its own). */
@@ -110,6 +118,14 @@ export default function Stage({
   const pager = useRef<ScrollView>(null);
   const scrollX = useRef(new Animated.Value(index * W)).current;
   const lastSettled = useRef(index);
+
+  // Press feedback on the centred car (Jeff, 2026-09-23: Apple-feel batch 1; DESIGN.md §11.5). The touch
+  // lands on the invisible pager page, so the page reports press-in/out and an INNER layer of the car
+  // scales — never the scroll-driven layer, whose transform belongs to the swipe. Under Reduce Motion
+  // there is no scale and no tint: the tint would be a full-width band across the stage, and the tap's
+  // own result (paywall, scan, 3D viewer) answers at once.
+  const reduce = useReduceMotion();
+  const [pressedSlot, setPressedSlot] = useState<number | null>(null);
 
   // Follow an index change made OUTSIDE a swipe (the list changed under the centred car, or the page
   // re-centred on a new car). A settle we just reported is already where we are — no scroll fight.
@@ -208,7 +224,18 @@ export default function Stage({
                   pointerEvents="none"
                   style={[StyleSheet.absoluteFill, { opacity: a.opacity, transform: [{ translateX: a.translateX }, { scale: a.scale }] }]}
                 >
-                  {renderSlot(slot, i, i === index)}
+                  {/* Every slot gets this layer, so a slot never remounts (the live 3D car is a WebView)
+                      when it becomes the centred one. It shrinks toward the turntable, so the car stays
+                      planted instead of lifting off it. */}
+                  <Reanimated.View
+                    style={[
+                      StyleSheet.absoluteFill,
+                      pressLayer,
+                      { transform: [{ scale: pressedSlot === i && !reduce ? MOTION.press.scale : 1 }] },
+                    ]}
+                  >
+                    {renderSlot(slot, i, i === index)}
+                  </Reanimated.View>
                 </Animated.View>
               );
             })}
@@ -222,7 +249,16 @@ export default function Stage({
                   pointerEvents="none"
                   style={[StyleSheet.absoluteFill, { opacity: a.badgeOpacity, transform: [{ translateX: a.translateX }, { scale: a.scale }] }]}
                 >
-                  {badge}
+                  {/* The lock mark dips with its car, so the two stay one object under the finger. */}
+                  <Reanimated.View
+                    style={[
+                      StyleSheet.absoluteFill,
+                      pressLayer,
+                      { transform: [{ scale: pressedSlot === i && !reduce ? MOTION.press.scale : 1 }] },
+                    ]}
+                  >
+                    {badge}
+                  </Reanimated.View>
                 </Animated.View>
               );
             })}
@@ -240,6 +276,9 @@ export default function Stage({
         contentOffset={{ x: index * W, y: 0 }}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: true })}
         scrollEventThrottle={16}
+        // A swipe starts with a touch on the centred page; let go of its press the moment the pager
+        // takes the gesture, so a swipe never begins with the car dipping.
+        onScrollBeginDrag={() => setPressedSlot(null)}
         onMomentumScrollEnd={onMomentumEnd}
         onLayout={() => {
           // contentOffset is an initial value only, and Android has not always honoured it — put the
@@ -251,6 +290,8 @@ export default function Stage({
         {slots.map((slot, i) => (
           <TouchableWithoutFeedback
             key={slot.key}
+            onPressIn={() => { if (i === lastSettled.current && centreTappable) setPressedSlot(i); }}
+            onPressOut={() => setPressedSlot(null)}
             onPress={() => { if (i === lastSettled.current) onTapCentre(); }}
             accessibilityRole="button"
           >
@@ -297,6 +338,15 @@ export default function Stage({
     </View>
   );
 }
+
+// MOTION.press on the centred car: the transition from the one table, the origin on the turntable.
+// Outside StyleSheet.create, whose types do not know Reanimated's CSS transition keys.
+const pressLayer = {
+  transformOrigin: ["50%", TURNTABLE_Y, 0] as (string | number)[],
+  transitionProperty: "transform" as const,
+  transitionDuration: MOTION.press.durationCss,
+  transitionTimingFunction: MOTION.ease.outCss,
+};
 
 const styles = StyleSheet.create({
   stage: { width: "100%", backgroundColor: "#0B0C0E", overflow: "hidden" },

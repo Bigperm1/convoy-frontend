@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAccent } from '../src/appSkin';
+import { COLORS } from '../src/theme';
 
 // Router gate (app/index.tsx) imports this key to decide first-launch routing.
 export const ONBOARDING_KEY = 'convoy:onboarded:v1';
@@ -131,14 +132,14 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, position: 'absolute', top: 50, left: 0, right: 0, zIndex: 10 },
   logo: { color: '#2DEC86', fontSize: 16, fontWeight: '700', letterSpacing: 2 },
-  skip: { color: '#808080', fontSize: 14, fontWeight: '500' },
+  skip: { color: COLORS.textDim, fontSize: 14, fontWeight: '500' },
   scroller: { flex: 1 },
   slide: { flex: 1, justifyContent: 'flex-end' },
   image: { ...StyleSheet.absoluteFillObject },
   gradient: { ...StyleSheet.absoluteFillObject },
   content: { paddingHorizontal: 24, paddingBottom: 180 },
   title: { color: '#F4F4F4', fontSize: 34, fontWeight: '800', marginBottom: 12, lineHeight: 40 },
-  description: { color: '#808080', fontSize: 16, lineHeight: 24 },
+  description: { color: COLORS.textDim, fontSize: 16, lineHeight: 24 },
   footer: { paddingHorizontal: 24, paddingBottom: 40, gap: 20, position: 'absolute', bottom: 0, left: 0, right: 0 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },

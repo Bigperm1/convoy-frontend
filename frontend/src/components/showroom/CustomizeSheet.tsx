@@ -105,7 +105,7 @@ function TextField({
           onBlur={onBlur}
           onEndEditing={onBlur}
           placeholder={placeholder}
-          placeholderTextColor="#808080"
+          placeholderTextColor={COLORS.textDim}
           keyboardType={keyboardType ?? "default"}
           maxLength={maxLength}
           autoCapitalize="words"
@@ -396,7 +396,7 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
                   value={callSign}
                   onChangeText={setCallSign}
                   placeholder="e.g. Maverick"
-                  placeholderTextColor="#808080"
+                  placeholderTextColor={COLORS.textDim}
                   maxLength={20}
                   autoCapitalize="words"
                   returnKeyType="done"
@@ -414,7 +414,7 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
                   value={nickname}
                   onChangeText={setNick}
                   placeholder={car ? `e.g. Daily` : ""}
-                  placeholderTextColor="#808080"
+                  placeholderTextColor={COLORS.textDim}
                   maxLength={24}
                   autoCapitalize="words"
                   returnKeyType="done"
@@ -563,29 +563,29 @@ const styles = StyleSheet.create({
   scroll: { paddingBottom: 40 },
 
   section: { marginHorizontal: 16, marginBottom: 10 },
-  sectionLabel: { color: "#808080", fontSize: 13, fontWeight: "500", marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.8 },
+  sectionLabel: { color: COLORS.textDim, fontSize: 13, fontWeight: "500", marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.8 },
   fieldRow: { flexDirection: "row", alignItems: "center", minHeight: 50, borderRadius: 16, paddingHorizontal: 16, borderWidth: 1, borderColor: "#1E1E1E" },
   fieldInput: { flex: 1, color: "#F4F4F4", fontSize: 17, fontWeight: "600", paddingVertical: 14 },
   swatchDot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
 
   panel: { marginHorizontal: 16, marginBottom: 12, marginTop: 4 },
-  hint: { color: "#808080", fontSize: 12, fontWeight: "600", marginBottom: 8, marginTop: 4 },
+  hint: { color: COLORS.textDim, fontSize: 12, fontWeight: "600", marginBottom: 8, marginTop: 4 },
   clsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   clsTile: { width: "23%", flexGrow: 1, height: 66, borderRadius: 13, borderWidth: 1, borderColor: "#1E1E1E", alignItems: "center", justifyContent: "center", gap: 4 },
   clsTileImg: { width: 40, height: 26 },
-  clsTileLabel: { color: "#808080", fontSize: 10.5, fontWeight: "600" },
+  clsTileLabel: { color: COLORS.textDim, fontSize: 10.5, fontWeight: "600" },
   previewRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 12, marginBottom: 4 },
   previewText: { color: "#F4F4F4", fontSize: 13, fontWeight: "700", flexShrink: 1 },
   slotRow: { flexDirection: "row", gap: 8, marginTop: 10, marginBottom: 2 },
   slotBtn: { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 13, borderWidth: 1, borderColor: "#1E1E1E" },
   slotDot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.4)" },
-  slotText: { color: "#808080", fontSize: 13, fontWeight: "700" },
+  slotText: { color: COLORS.textDim, fontSize: 13, fontWeight: "700" },
   slotTextOn: { color: "#F4F4F4" },
   swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 8 },
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
   swatchSel: { borderWidth: 3, borderColor: "#FFFFFF" },
   hexRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  hexHash: { color: "#808080", fontSize: 16, fontWeight: "800" },
+  hexHash: { color: COLORS.textDim, fontSize: 16, fontWeight: "800" },
   hexInput: { flex: 1, height: 42, borderRadius: 13, borderWidth: 1, borderColor: "#1E1E1E", color: "#F4F4F4", paddingHorizontal: 12, fontSize: 15, fontWeight: "700", letterSpacing: 1 },
   hexApply: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 13 },
   hexApplyText: { fontWeight: "800", fontSize: 13 },

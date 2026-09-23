@@ -1,7 +1,8 @@
 import React, { useCallback } from "react";
-import { Text, StyleSheet, TouchableOpacity, Linking, Alert } from "react-native";
+import { Text, StyleSheet, Linking, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { GlassFill } from "../../../src/Glass";
+import { PressableScale } from "../../../src/ui/PressableScale";
 import { useAuth } from "../../../src/auth";
 import { resetAppData } from "../../../src/resetAppData";
 import { isNavSessionLive } from "../../../src/navNotification";
@@ -217,10 +218,10 @@ export default function SettingsMenu() {
       </SettingsCard>
 
       {/* SIGN OUT */}
-      <TouchableOpacity onPress={confirmSignOut} activeOpacity={0.85} style={styles.signOut} testID="settings-signout">
+      <PressableScale onPress={confirmSignOut} style={styles.signOut} testID="settings-signout">
         <GlassFill tintColor="rgba(20,20,24,0.5)" style={{ borderRadius: 16, overflow: "hidden" }} />
         <Text style={styles.signOutText}>Sign Out</Text>
-      </TouchableOpacity>
+      </PressableScale>
     </SettingsPage>
   );
 }

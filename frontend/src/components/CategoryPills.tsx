@@ -17,6 +17,8 @@ import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
 import { GlassFill, hudTint, drawerTint } from "../Glass";
 import { useAccent, useAccentAlpha } from "../appSkin";
+import { PressableScale } from "../ui/PressableScale";
+import { COLORS } from "../theme";
 
 export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; address?: string; rating?: number; ratingCount?: number; distanceM?: number };
 
@@ -255,10 +257,12 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
     const active = activeKey === cat.key;
     const loading = loadingKey === cat.key;
     return (
-      <TouchableOpacity
+      <PressableScale
         key={cat.key}
         testID={`cat-pill-${cat.key}`}
-        activeOpacity={0.8}
+        // Pills sit 8 pt apart in a scroller: keep today's touch target, since a default slop would
+        // take the neighbour's edge (Jeff, 2026-09-23: Apple-feel batch 1). Same for More.
+        hitSlop={0}
         onPress={() => { setListOpen(false); run(cat); }}
         onLongPress={() => { setListOpen(true); if (activeKey !== cat.key) run(cat); }}
         delayLongPress={250}
@@ -271,7 +275,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
           <MaterialCommunityIcons name={cat.icon} size={15} color={active ? "#1C1C1E" : accent} />
         )}
         <Text maxFontSizeMultiplier={1} style={[styles.pillText, active && styles.pillTextActive]}>{cat.label}</Text>
-      </TouchableOpacity>
+      </PressableScale>
     );
   };
 
@@ -285,11 +289,11 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
       >
         {PRIMARY.map(renderPill)}
         {/* More pill — always last, opens the overflow sheet. */}
-        <TouchableOpacity testID="cat-pill-more" activeOpacity={0.8} onPress={() => setMoreOpen(true)} style={styles.pill}>
+        <PressableScale testID="cat-pill-more" hitSlop={0} onPress={() => setMoreOpen(true)} style={styles.pill}>
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />
           <MaterialCommunityIcons name="dots-horizontal" size={16} color={accent} />
           <Text maxFontSizeMultiplier={1} style={styles.pillText}>More</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </ScrollView>
 
       {/* Results dropdown — animated panel listing the active category's hits
@@ -420,7 +424,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(45,236,134,0.35)",
     marginBottom: 6,
   },
-  gridLabel: { color: "#808080", fontSize: 11, fontWeight: "600", textAlign: "center" },
+  gridLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", textAlign: "center" },
   doneBtn: { marginTop: 6, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.10)" },
   doneText: { color: "#F4F4F4", fontWeight: "600", fontSize: 14 },
 

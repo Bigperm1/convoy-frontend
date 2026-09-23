@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   attemptBody: { color: COLORS.textDim, fontSize: 13, lineHeight: 19 },
 
   sectionLabel: {
-    color: "#808080",
+    color: COLORS.textDim,
     fontSize: 12.5,
     fontWeight: "700",
     letterSpacing: 0.8,

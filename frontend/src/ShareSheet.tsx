@@ -13,6 +13,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassFill } from "./Glass";
 import * as Haptics from "expo-haptics";
+import { haptics } from "./haptics";
 import { COLORS } from "./theme";
 import { api, formatErr } from "./api";
 import { getSettings } from "./settings";
@@ -146,7 +147,9 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
       setSent(true);
       setTimeout(() => onClose(), 900);
     } catch (e) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      // The user's own send failed: the vocabulary's failure word, like a failed voice command
+      // (was a Warning; Jeff, 2026-09-23: Apple-feel batch 1).
+      haptics.failure();
       setErr(formatErr(e));
     } finally {
       setSending(false);

@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   rowTitle: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
   rowSub: { color: COLORS.textDim, fontSize: 13, marginTop: 1 },
   hint: { color: COLORS.textDim, fontSize: 14, lineHeight: 20, paddingHorizontal: 22, marginTop: 22 },
-  footer: { color: "#808080", fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: 24, marginTop: 26 },
+  footer: { color: COLORS.textDim, fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: 24, marginTop: 26 },
   nowBar: { position: "absolute", left: 12, right: 12, bottom: 96, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "rgba(34,35,38,0.98)", borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)", shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 12 },
   nowArt: { width: 44, height: 44, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)" },
   nowTitle: { color: COLORS.text, fontSize: 14, fontWeight: "700" },

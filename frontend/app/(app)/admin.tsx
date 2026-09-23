@@ -265,7 +265,7 @@ export default function AdminScreen() {
             <TextInput
               style={styles.search}
               placeholder="Search email or handle"
-              placeholderTextColor="#808080"
+              placeholderTextColor={COLORS.textDim}
               value={query}
               onChangeText={setQuery}
               autoCapitalize="none"
@@ -294,7 +294,7 @@ export default function AdminScreen() {
                   value={installUrl}
                   onChangeText={setInstallUrl}
                   placeholder="https://expo.dev/accounts/.../builds/..."
-                  placeholderTextColor="#808080"
+                  placeholderTextColor={COLORS.textDim}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
@@ -343,7 +343,7 @@ const styles = StyleSheet.create({
   },
   handle: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
   email: { color: COLORS.textDim, fontSize: 13, marginTop: 1 },
-  meta: { color: '#808080', fontSize: 12, marginTop: 3 },
+  meta: { color: COLORS.textDim, fontSize: 12, marginTop: 3 },
   deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   deviceText: { color: '#7FA8FF', fontSize: 12, fontWeight: '600', flexShrink: 1 },
   codePill: {

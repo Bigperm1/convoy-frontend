@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { api, formatErr } from '../../src/api';
 import { useAccent } from '../../src/appSkin';
+import { COLORS } from '../../src/theme';
 
 // Two-step password reset:
 //   1. "request" — enter email -> POST /auth/forgot-password emails a 6-digit code.
@@ -107,7 +108,7 @@ export default function ForgotPasswordScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder="you@example.com"
-                  placeholderTextColor="#808080"
+                  placeholderTextColor={COLORS.textDim}
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
@@ -123,7 +124,7 @@ export default function ForgotPasswordScreen() {
                   <TextInput
                     style={[styles.input, styles.codeInput]}
                     placeholder="123456"
-                    placeholderTextColor="#808080"
+                    placeholderTextColor={COLORS.textDim}
                     value={code}
                     onChangeText={(t) => setCode(t.replace(/[^0-9]/g, '').slice(0, 6))}
                     keyboardType="number-pad"
@@ -137,7 +138,7 @@ export default function ForgotPasswordScreen() {
                     <TextInput
                       style={styles.inputFlex}
                       placeholder="At least 6 characters"
-                      placeholderTextColor="#808080"
+                      placeholderTextColor={COLORS.textDim}
                       value={newPassword}
                       onChangeText={setNewPassword}
                       secureTextEntry={!showPw}
@@ -201,10 +202,10 @@ const styles = StyleSheet.create({
   backText: { color: '#2DEC86', fontSize: 15, fontWeight: '600' },
   head: { marginBottom: 24 },
   title: { color: '#F4F4F4', fontSize: 28, fontWeight: '800', marginBottom: 8 },
-  subtitle: { color: '#808080', fontSize: 15, lineHeight: 21 },
+  subtitle: { color: COLORS.textDim, fontSize: 15, lineHeight: 21 },
   formCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, gap: 18, borderWidth: 1, borderColor: '#333' },
   inputGroup: { gap: 8 },
-  label: { color: '#808080', fontSize: 13, fontWeight: '500' },
+  label: { color: COLORS.textDim, fontSize: 13, fontWeight: '500' },
   input: { backgroundColor: '#0A0A0A', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16, borderWidth: 1, borderColor: '#333' },
   inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A0A0A', borderRadius: 10, borderWidth: 1, borderColor: '#333', paddingRight: 8 },
   inputFlex: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, color: '#F4F4F4', fontSize: 16 },

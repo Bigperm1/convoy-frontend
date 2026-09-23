@@ -271,7 +271,8 @@ export default function GarageScreen() {
   const [driving, setDriving] = useState(false);
   const drive = useCallback(async () => {
     if (!centredCar || driving) return;
-    Haptics.selectionAsync();
+    // One haptic for one action: the Success below when the car is set, not a tick on the tap as well
+    // (Jeff, 2026-09-23: Apple-feel batch 1).
     setDriving(true);
     try {
       const r = await driveToday(centredCar);
@@ -287,7 +288,7 @@ export default function GarageScreen() {
   }, [centredCar, driving]);
 
   const goScan = useCallback(() => {
-    Haptics.selectionAsync();
+    // A navigate tap: no haptic (Jeff, 2026-09-23: Apple-feel batch 1).
     router.push('/(app)/garage-scan' as any);
   }, [router]);
 
@@ -457,6 +458,9 @@ export default function GarageScreen() {
           index={centredIndex}
           onIndexChange={onIndexChange}
           onTapCentre={onTapCentre}
+          // The press dip promises an action, so it runs only where onTapCentre acts: a locked spot
+          // with a paywall to open, the add spot, or a car with a 3D spin to show.
+          centreTappable={centred.type === 'locked' ? !!next : centred.type === 'add' || !!spinUrl}
           metal={metal}
           labels={labels}
           renderSlot={renderSlot}

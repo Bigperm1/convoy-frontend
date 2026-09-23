@@ -16,8 +16,21 @@ export const COLORS = {
   warning: "#FF9F0A",
   danger: "#FF453A",
   text: "#F4F4F4",
-  textDim: "#808080",
-  textMute: "#808080",
+  // Secondary text — Apple's dark secondary label over the grouped background
+  // (Jeff, 2026-09-23: Apple-feel batch 1, "use Apple's great secondary text").
+  // The flat #808080 that replaced it on 2026-06-07 (c91496d8) sat under 4.5:1 on
+  // the dark cards (4.31:1 on #1C1C1E, 3.53:1 on #2C2C2E); #98989F is 5.94:1 / 4.86:1.
+  textDim: "#98989F",
+  // textMute's callers are overwhelmingly readable text, so it takes the secondary
+  // grey too. It ALSO colours placeholders (hub / hubEvents / signup / music / paywall),
+  // some hubEvents icons and the locked Settings rows (via textDim) — all of which are
+  // on #98989F now. Every other '#808080' placeholder literal moved to textDim with them
+  // (map.tsx's two excepted), so placeholders read in ONE grey, not two.
+  textMute: "#98989F",
+  // Tertiary — for placeholders and disabled glyphs, never information (2.84:1).
+  // Defined, NOT yet used: moving the placeholders down to it (Apple's own placeholder
+  // level) is a visible change Jeff has not seen — DESIGN.md §11.10 / §11.12.
+  textTertiary: "#636366",
 };
 
 // ── ACTION COLOURS — one meaning per colour, everywhere in the app ──────────────

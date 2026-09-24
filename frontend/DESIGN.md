@@ -727,3 +727,17 @@ Also in the audit's batch-1 fixes but **not built** (nothing uses them yet — r
   frame-matching the search field to the map's bar (§11.7).
 - The remaining 81 raw expo-haptics calls (§11, top).
 - Placeholders → tertiary (§11.10).
+
+## Shape — the Hairpin square (Jeff, 2026-09-24)
+
+> "change the UI or UX that has a rounded pill design to hairpins squared off look, like the items in the new garage/comms/club.
+> also change the version pill on the map screen too."
+
+**No stadiums. Every chip, badge, toggle, tag, toast and button is a rounded square: `borderRadius ≈ 28 % of the element's
+height`** — the H-menu button's proportion (14 on 50, 16 on 56, 10 on 36, 6 on 22). Never `999`, never `height / 2`. A
+rectangle whose radius is half its height IS a pill, whatever the value. Round things stay round: the compass, Crew and
+2D/3D FABs, avatars, the mic. `CategoryPills.CHIP_R`, `MemberCarIcon` (28 %), `MemberCarousel` (r16) and the CarPlay
+speed/weather tiles were already on the rule; the 2026-09-24 sweep (`8a81e68c`, 37 radii in 19 files) brought the rest —
+the map's crew/version pill and Start/End button, Comms chips and toggles, Club chips/tags/toggles, Garage's Today's Drive,
+the Where-to field, toasts, the tier badge, and the CarPlay crew and Scout pills. A new element with a full-round radius is a
+regression; `tools/sim-qc/` has no gate for it yet, so review by eye.

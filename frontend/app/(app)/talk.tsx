@@ -1075,7 +1075,7 @@ const styles = StyleSheet.create({
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
   connected: { color: '#30D158', fontSize: 12 },
   connectedMuted: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
-  tierPill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 },
+  tierPill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5 },
   tierText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
   chevBtn: { marginLeft: 4, padding: 2 },
   garageBtn: { padding: 4, marginLeft: 8 },
@@ -1143,7 +1143,7 @@ const styles = StyleSheet.create({
   // Hands-free (VOX) toggle pill, shown under the mic label on private threads.
   voxToggle: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9,
     backgroundColor: '#161618', borderWidth: 1, borderColor: 'rgba(45,236,134,0.4)',
     marginTop: 14,
   },
@@ -1172,7 +1172,7 @@ const styles = StyleSheet.create({
   // ----- Recent Transmissions: toggle pill + tap-away sheet + swipe rows -----
   txToggle: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 22,
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
     backgroundColor: '#161618', borderWidth: 1, borderColor: '#2a2a2e',
     marginTop: 26,
   },
@@ -1195,7 +1195,7 @@ const styles = StyleSheet.create({
   strip: { paddingHorizontal: 16, gap: 8, alignItems: 'center' },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18,
+    paddingHorizontal: 13, paddingVertical: 8, borderRadius: 9,
     backgroundColor: '#161618', borderWidth: 1, borderColor: '#2a2a2e', maxWidth: 200,
   },
   chipActive: { backgroundColor: YELLOW, borderColor: YELLOW },
@@ -1203,7 +1203,7 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#000' },
   chipNew: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18,
+    paddingHorizontal: 13, paddingVertical: 8, borderRadius: 9,
     backgroundColor: 'rgba(45,236,134,0.12)', borderWidth: 1, borderColor: 'rgba(45,236,134,0.4)',
   },
   chipNewText: { color: YELLOW, fontSize: 13, fontWeight: '700' },
@@ -1232,7 +1232,7 @@ const styles = StyleSheet.create({
   talkingWrap: { height: 34, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   talkingPill: {
     flexDirection: 'row', alignItems: 'center', gap: 7,
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9,
     backgroundColor: 'rgba(28,28,30,0.92)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,106,0,0.55)',
   },
   talkingText: { color: '#F4F4F4', fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },

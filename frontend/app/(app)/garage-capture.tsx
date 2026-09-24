@@ -708,7 +708,7 @@ const styles = StyleSheet.create({
   paintPicked: { color: "#EDEDED", fontSize: 14, fontWeight: "600", marginTop: 16, marginBottom: 4 },
   clubChipScroll: { alignSelf: "stretch", marginBottom: 10 },
   clubChipRow: { gap: 8, paddingRight: 8 },
-  clubChip: { borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: "#131313" },
+  clubChip: { borderWidth: 1, borderColor: "#2A2A2A", borderRadius: 9, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: "#131313" },
   clubChipOn: { borderColor: ULTRA.accent, backgroundColor: "rgba(224,169,62,0.12)" },
   clubChipText: { color: "#9A9A9E", fontSize: 13, fontWeight: "600" },
   clubChipTextOn: { color: ULTRA.accent },

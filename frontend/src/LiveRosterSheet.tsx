@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
   // roster exists (Jeff, 2026-07-25: the crew car info/distance read grey), and
   // #808080 at 12pt is the least legible thing on the sheet.
   sub: { color: COLORS.text, fontSize: 12, marginTop: 1 },
-  actBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 999, backgroundColor: COLORS.brand },
+  actBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 8, backgroundColor: COLORS.brand },
   actBtnSent: { backgroundColor: COLORS.success },
   driveBtn: { backgroundColor: "rgba(45,236,134,0.12)", borderWidth: 1, borderColor: "rgba(45,236,134,0.55)" },
   actText: { fontSize: 12, fontWeight: "700", letterSpacing: 0.2 },

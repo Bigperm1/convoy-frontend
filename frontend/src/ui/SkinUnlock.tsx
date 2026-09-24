@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
   badge: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingLeft: 10, paddingRight: 20, paddingVertical: 10,
-    borderRadius: 22, borderWidth: 1, overflow: "hidden",
+    borderRadius: 10, borderWidth: 1, overflow: "hidden",
   },
   badgeTitle: { fontSize: 14, fontWeight: "800", letterSpacing: 1.6 },
   badgeSub: { fontSize: 12, fontWeight: "600", marginTop: 2, opacity: 0.78 },

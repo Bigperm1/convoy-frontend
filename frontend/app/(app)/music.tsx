@@ -1203,7 +1203,7 @@ const styles = StyleSheet.create({
   heroSub: { color: "rgba(255,255,255,0.92)", fontSize: 14, lineHeight: 20, marginTop: 6 },
   heroBtn: {
     flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
-    backgroundColor: "#fff", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 999, marginTop: 18, minHeight: 40,
+    backgroundColor: "#fff", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 11, marginTop: 18, minHeight: 40,
   },
   heroBtnText: { color: "#FA2D48", fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },
   heroNote: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "600", marginTop: 14 },

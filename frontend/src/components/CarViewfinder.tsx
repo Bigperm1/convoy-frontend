@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
   },
   levelPill: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.22)",
     backgroundColor: "rgba(0,0,0,0.45)",
   },

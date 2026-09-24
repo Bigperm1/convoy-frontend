@@ -578,7 +578,7 @@ const styles = StyleSheet.create({
   primary: { marginHorizontal: 16, marginTop: 14 },
   today: {
     height: 52,
-    borderRadius: 26,
+    borderRadius: 15,
     borderWidth: 1.5,
     flexDirection: 'row',
     alignItems: 'center',

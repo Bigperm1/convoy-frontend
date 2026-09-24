@@ -2153,7 +2153,7 @@ const styles = StyleSheet.create({
   // inset can no longer produce contact, rather than merely being unlikely to.
   // marginHorizontal 0 on AA so the pill's left edge lands exactly on the row's
   // left (= CAR_DOCK_LEFT); the 12pt margin is what centres it on CarPlay.
-  crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, marginHorizontal: IS_AA ? 0 : 12, borderRadius: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  crewPill: { flexDirection: 'row', alignItems: 'center', height: CREW_PILL_H, paddingHorizontal: 10, marginHorizontal: IS_AA ? 0 : 12, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   // 11 -> 9 on CarPlay (AA keeps 11 — its canvas is only 213dp wide and everything there
   // is already scaled down by hudScale, so shrinking twice would make it unreadable).
   // 2026-08-15: the string is now just "N Crew" — Jeff dropped the build/runtime/tag
@@ -2165,7 +2165,7 @@ const styles = StyleSheet.create({
   // Crew online (presence): the system "online" green — the phone pill's live dot. Red (above) still wins for the text.
   crewPillOnline: { borderColor: 'rgba(48,209,88,0.9)' },
   crewPillTextOnline: { color: '#FFFFFF' },
-  scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
+  scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },
   weatherText: { color: '#F4F4F4', fontSize: 13, fontWeight: '800', marginTop: 1 },

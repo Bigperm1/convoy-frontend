@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 5,
     backgroundColor: "rgba(12,12,16,0.88)",
-    borderRadius: 22,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderWidth: StyleSheet.hairlineWidth,

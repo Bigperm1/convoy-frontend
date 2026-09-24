@@ -467,7 +467,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   gridLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", textAlign: "center" },
-  doneBtn: { marginTop: 6, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.10)" },
+  doneBtn: { marginTop: 6, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)" },
   doneText: { color: "#F4F4F4", fontWeight: "600", fontSize: 14 },
 
   // ===== Results dropdown =====

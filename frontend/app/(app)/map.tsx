@@ -6330,7 +6330,7 @@ function PillFill() {
       locations={[0, 0.5, 1]}
       // 23 = bannerPill's borderRadius. Kept in step by hand because the pill's height
       // (46) sets it; if that height ever changes, this follows.
-      style={[StyleSheet.absoluteFill, { borderRadius: 23 }]}
+      style={[StyleSheet.absoluteFill, { borderRadius: 13 }]}
       pointerEvents="none"
     />
   );
@@ -6408,10 +6408,10 @@ const styles = StyleSheet.create({
   pinBannerTitle: { color: "#F4F4F4", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
   pinBannerSub: { color: "#C7C7CC", fontSize: 12.5, marginTop: 2, fontWeight: "500" },
   pinBannerRow: { flexDirection: "row", gap: 10 },
-  pinBannerBtn: { flex: 1, height: 44, borderRadius: 22, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "rgba(6,8,12,0.82)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  pinBannerBtn: { flex: 1, height: 44, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "rgba(6,8,12,0.82)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
   pinBannerBtnText: { color: "#F4F4F4", fontSize: 14, fontWeight: "700" },
   bannerPills: { flexDirection: "row", gap: 10 },
-  bannerPill: { flex: 1, height: 46, borderRadius: 23, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  bannerPill: { flex: 1, height: 46, borderRadius: 13, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
   bannerPillStart: { backgroundColor: "#2DEC86" },
   bannerPillStartText: { color: "#1C1C1E", fontSize: 16, fontWeight: "700" },
   // ── SECONDARY PILLS: CANDY, NOT iOS SYSTEM BLUE (Jeff, 2026-08-31) ────────
@@ -6578,7 +6578,7 @@ const styles = StyleSheet.create({
     alignSelf: "center", marginTop: 8,
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 9, paddingVertical: 3,
-    borderRadius: 10,
+    borderRadius: 6,
     backgroundColor: "rgba(120,120,128,0.32)",
     borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.18)",
     zIndex: 5,
@@ -6616,6 +6616,6 @@ const styles = StyleSheet.create({
   nameModalSaveText: { color: "#1C1C1E", fontWeight: "800", fontSize: 15 },
   // Alerts sheet styles
   alertItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
-  distPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: "rgba(118,118,128,0.35)" },
+  distPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 6, backgroundColor: "rgba(118,118,128,0.35)" },
   distPillText: { color: "#F4F4F4", fontSize: 11, fontWeight: "600" },
 });

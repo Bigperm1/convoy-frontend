@@ -147,7 +147,7 @@ export default function NavSearchScreen({
     // Apple-feel batch 1 — search was Claude's call). The header shares the map top bar's paddingTop
     // (52 iOS / 28 Android), so the two TOP edges line up — but the field is NOT frame-matched to
     // the map's bar: it starts right of the 40 pt back button (x 58 vs 12), is ~40 pt tall vs 50,
-    // radius 24 vs 14, font 16 vs 17 (read from the two style sheets, not rendered). Matching the
+    // radius 11 (the Hairpin square, 2026-09-24) vs 14, font 16 vs 17 (read from the two style sheets, not rendered). Matching the
     // frame means moving the back affordance; that is open, and needs a render Jeff has seen.
     <Modal visible={visible} animationType="fade" onRequestClose={onClose} onShow={focusOnShow}>
       <GestureHandlerRootView style={styles.root}>
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     backgroundColor: "rgba(34,35,38,0.96)",
-    borderRadius: 24,
+    borderRadius: 11,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: StyleSheet.hairlineWidth,
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
   chipRowContent: { paddingHorizontal: 16, gap: 8 },
   chip: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 18,
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 9,
     backgroundColor: "rgba(255,255,255,0.08)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)",
     maxWidth: 180,
   },

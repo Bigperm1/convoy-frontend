@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 999,
+    borderRadius: 9,
     backgroundColor: "rgba(28,28,30,0.92)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,106,0,0.55)",

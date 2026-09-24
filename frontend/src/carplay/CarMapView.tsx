@@ -857,8 +857,20 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // until then, and for good if the snapshot never runs on this head unit, the car is the static carFlatImg (the
   // unpainted class art, always registered in allMapImages). Component state, so a map remount (GL retry) or a paint
   // change starts unpainted again until the NEW image is ready.
-  const [carPaintShown, setCarPaintShown] = useState<string | null>(null);
-  const selfSpriteImg = selfClassPaintImg && carPaintShown === selfClassPaintImg ? selfClassPaintImg : carFlatImg;
+  // READINESS BELONGS TO ONE SNAPSHOT MOUNT (Codex review of 05e2bd44). Readiness keyed by the image NAME alone survived
+  // the snapshot it proved: paint A ready → another paint / unpainted / another marker → back to A (or A→B→A quickly)
+  // re-selected A at once, while the freshly keyed snapshot re-registered A from a mount-time capture that can be blank —
+  // the invisible car the fallback exists to prevent. So every change of the painted image is a new EPOCH (derived in
+  // render, no extra pass), the snapshot is keyed by name + epoch, and only onPainted from THAT mount can show it.
+  const paintEpochRef = useRef<{ img: string | undefined; epoch: number }>({ img: selfClassPaintImg, epoch: 0 });
+  if (paintEpochRef.current.img !== selfClassPaintImg) {
+    paintEpochRef.current = { img: selfClassPaintImg, epoch: paintEpochRef.current.epoch + 1 };
+  }
+  const paintEpoch = paintEpochRef.current.epoch;
+  const [carPaintShown, setCarPaintShown] = useState<{ img: string; epoch: number } | null>(null);
+  const selfSpriteImg = selfClassPaintImg && carPaintShown?.img === selfClassPaintImg && carPaintShown.epoch === paintEpoch
+    ? selfClassPaintImg
+    : carFlatImg;
 
   // ── PEERS AS REAL CARS, NOT GREEN DOTS (Jeff, 2026-08-12) ───────────────────
   // "on CarPlay when I hit the crew, it doesn't show the high resolution car. It shows
@@ -2456,16 +2468,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           car photo. Two review lenses flagged it independently. */}
       <Mapbox.Images images={allMapImages} />
       {/* The class car in the driver's paint — a live snapshot, registered BESIDE the static class art above, never
-          instead of it (the car draws the static art until onPainted). Keyed by the image name: a paint change is a
-          fresh snapshot. */}
+          instead of it (the car draws the static art until onPainted). Keyed by image name + epoch: any change of the
+          painted image — including coming BACK to one — is a fresh snapshot that must prove itself again. */}
       {selfClassPaintImg ? (
         <CarClassPaintImage
-          key={selfClassPaintImg}
+          key={`${selfClassPaintImg}#${paintEpoch}`}
           name={selfClassPaintImg}
           vehicleClass={selfClassKey}
           primary={s.selfClassPri}
           secondary={s.selfClassSec}
-          onPainted={setCarPaintShown}
+          onPainted={(img) => setCarPaintShown({ img, epoch: paintEpoch })}
         />
       ) : null}
 

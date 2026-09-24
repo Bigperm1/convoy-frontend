@@ -81,8 +81,8 @@ ok("S4 carStore mirrors the class paint as two strings",
 ok("S5 painted image name carries class + both paints",
   /`self_car_cls_paint_\$\{selfClassKey\}_\$\{paintHex\(s\.selfClassPri\)\}_\$\{paintHex\(s\.selfClassSec\)\}`/.test(cmv)
   && /selfClassPaintImg = selfClassCarArt && CLASS_TOPDOWN\[selfClassKey\] && \(s\.selfClassPri \|\| s\.selfClassSec\)/.test(cmv));
-ok("S5b mounted beside the static art, keyed by name",
-  /<Mapbox\.Images images=\{allMapImages\} \/>\s*\{\/\*[\s\S]*?\*\/\}\s*\{selfClassPaintImg \? \(\s*<CarClassPaintImage\s+key=\{selfClassPaintImg\}/.test(cmv));
+ok("S5b mounted beside the static art, keyed by name + epoch (a change of painted image is a fresh snapshot)",
+  /<Mapbox\.Images images=\{allMapImages\} \/>\s*\{\/\*[\s\S]*?\*\/\}\s*\{selfClassPaintImg \? \(\s*<CarClassPaintImage\s+key=\{`\$\{selfClassPaintImg\}#\$\{paintEpoch\}`\}/.test(cmv));
 const comp = /function CarClassPaintImage[\s\S]*?\n\}\n/.exec(cmv)?.[0] ?? "";
 ok("S5c the phone's snapshot mechanism: ClassSprite in a Mapbox.Image, refresh on onReady, iOS remount ≤2 by key",
   /<Mapbox\.Images key=\{`\$\{name\}_g\$\{gen\}`\}>/.test(comp)
@@ -151,23 +151,45 @@ const selfCarRegion = /NAV-LOCK begin car-jsx-selfcar-model[\s\S]*?NAV-LOCK end 
 ok("S7 SelfCarModel's sprite is selfSpriteImg; no spriteFallback prop anywhere in CarMapView's code",
   /sprite=\{carFlat \? selfSpriteImg : undefined\}/.test(selfCarRegion) && !/spriteFallback=/.test(cmv));
 const gateLine = /const selfSpriteImg = ([^;]+);/.exec(cmv)?.[1] ?? "";
-ok("S7a the gate: component state set by CarClassPaintImage's onPainted",
-  /const \[carPaintShown, setCarPaintShown\] = useState<string \| null>\(null\);/.test(cmv)
-  && /<CarClassPaintImage[\s\S]*?onPainted=\{setCarPaintShown\}[\s\S]*?\/>/.test(cmv) && gateLine !== "");
+const epochBlock = /const paintEpochRef = [\s\S]*?const paintEpoch = paintEpochRef\.current\.epoch;/.exec(cmv)?.[0] ?? "";
+ok("S7a the gate: component state { img, epoch } set by THAT mount's onPainted",
+  /const \[carPaintShown, setCarPaintShown\] = useState<\{ img: string; epoch: number \} \| null>\(null\);/.test(cmv)
+  && /<CarClassPaintImage[\s\S]*?onPainted=\{\(img\) => setCarPaintShown\(\{ img, epoch: paintEpoch \}\)\}[\s\S]*?\/>/.test(cmv)
+  && gateLine !== "" && epochBlock !== "");
 {
   // EVALUATE the gate expression over its inputs.
-  const gate = new Function("selfClassPaintImg", "carPaintShown", "carFlatImg", `return (${gateLine});`) as
-    (p: string | undefined, shown: string | null, flat: string) => string;
-  const P = "self_car_cls_paint_exotic_FF3B30_x", Q = "self_car_cls_paint_exotic_0A84FF_x", F = "self_car_cls_exotic";
-  const rows: [string | undefined, string | null, string][] = [
-    [undefined, null, F],   // no paint → the static art, exactly as before
-    [P, null, F],           // painted, snapshot not ready → the static art (never the not-yet-painted image)
-    [P, P, P],              // ready → the paint
-    [Q, P, F],              // paint changed: the NEW image is not ready yet → the static art again
-    [undefined, P, F],      // paint cleared → the static art
+  // A render loop over the REAL epoch derivation + gate: each step is one render of CarMapView with a painted image
+  // (or none); "ready" = the mounted snapshot (keyed name#epoch) called onPainted.
+  const run = new Function("steps", `
+    const useRef = (v) => ({ current: v });
+    const paintEpochRef = useRef(undefined);
+    let first = true, carPaintShown = null; const carFlatImg = "F"; const out = [];
+    for (const st of steps) {
+      const selfClassPaintImg = st.img;
+      if (first) { paintEpochRef.current = { img: selfClassPaintImg, epoch: 0 }; first = false; }
+      ${epochBlock.replace(/^const paintEpochRef = useRef<[\s\S]*?\}\);/, "")}
+      if (st.ready) carPaintShown = { img: selfClassPaintImg, epoch: paintEpoch };   // THIS mount's onPainted
+      const selfSpriteImg = ${gateLine};
+      out.push(selfSpriteImg);
+    }
+    return out;`) as (steps: { img?: string; ready?: boolean }[]) => string[];
+  const A = "A", B = "B";
+  const cases: [string, { img?: string; ready?: boolean }[], string[]][] = [
+    ["no paint", [{}], ["F"]],
+    ["painted, not ready → static", [{ img: A }], ["F"]],
+    ["painted, ready → paint", [{ img: A }, { img: A, ready: true }], ["F", A]],
+    ["A ready → B not ready → static", [{ img: A, ready: true }, { img: B }], [A, "F"]],
+    ["A ready → unpainted → A again: static until the NEW mount is ready (Codex 05e2bd44)", [{ img: A, ready: true }, {}, { img: A }, { img: A, ready: true }], [A, "F", "F", A]],
+    ["rapid A → B → A before B ready: static", [{ img: A, ready: true }, { img: B }, { img: A }], [A, "F", "F"]],
+    ["re-render with the same paint keeps it", [{ img: A, ready: true }, { img: A }, { img: A }], [A, A, A]],
   ];
-  const bad = rows.filter(([p, sh, want]) => gate(p, sh, F) !== want).map(([p, sh, want]) => `${p}/${sh}→${gate(p, sh, F)}≠${want}`);
-  ok("S7c the gate, evaluated: static art unless THIS paint image has reported ready", gateLine !== "" && bad.length === 0, bad.join(" "));
+  const bad: string[] = [];
+  for (const [label, steps, want] of cases) {
+    let got: string[] = [];
+    try { got = run(steps); } catch (e) { got = [String(e)]; }
+    if (got.join(",") !== want.join(",")) bad.push(`${label}: ${got.join(",")} ≠ ${want.join(",")}`);
+  }
+  ok("S7c the gate, evaluated over render sequences: static art unless THIS mount's snapshot reported ready", gateLine !== "" && bad.length === 0, bad.join(" | "));
 }
 ok("S7b spriteSize × uiScale (1 on CarPlay: hudScaleFor returns 1 off Android)",
   /spriteSize=\{carFlat \? vehiclePngScale\(s\.selfCarColor\) \* uiScale : 1\}/.test(cmv)

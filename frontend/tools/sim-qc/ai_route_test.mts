@@ -1,0 +1,100 @@
+// ai_route_test — the learned-route ("AI route") memory, src/aiRoutes.ts. Jeff, 2026-09-24: "FOR SOME REASON THE
+// ROUTE LEARNING IS NOT WORKING... EVERYDAY I MERGE OFF THE HIGHWAY ON THE WAY TO WORK, BUT IT ALWAYS IS TAKING ME
+// THE FASTEST WAY NOT MY WAY. LETS FIX IT". Three things this gate pins:
+//   1. The memory applies when the car is ON the remembered road, not only within 350 m of the exact fix where
+//      the driver happened to tap Start (every commute plot in his crumbs is fsrc=course — he plots while moving).
+//   2. The replay's via points sit on the stretch where HIS path leaves the fastest route (the exit + the parallel
+//      road), so Mapbox is forced off the highway there — evenly-spaced points 4 km apart could miss a 3 km detour,
+//      hand back the highway, and the "AI" route was then dropped as identical to Best.
+//   3. A memory that never diverges from Best replays nothing (there is no "my way" to offer).
+import {
+  matchAiRouteAlongPath, viaPointsAhead, AI_MATCH_RADIUS_M, AI_DIVERGE_M, type AiRoute,
+} from "../../src/aiRoutes.ts";
+
+let fails = 0;
+const ok = (name: string, cond: boolean, detail = "") => {
+  if (!cond) { fails++; console.log(`  FAIL ${name} ${detail}`); } else console.log(`  ok   ${name} ${detail}`);
+};
+
+// ── A synthetic 30 km eastbound commute at 49.1° N. Longitude degrees → metres: 1° ≈ 72.8 km here. ──
+const LAT = 49.1;
+const M_PER_DEG_LNG = 111320 * Math.cos((LAT * Math.PI) / 180);   // ≈ 72,830 m
+const M_PER_DEG_LAT = 111320;
+const lng0 = -122.9;
+const east = (m: number) => lng0 + m / M_PER_DEG_LNG;
+const north = (m: number) => LAT + m / M_PER_DEG_LAT;
+
+// The fastest route: straight along the "highway" for 30 km.
+const best: [number, number][] = [];
+for (let m = 0; m <= 30000; m += 50) best.push([east(m), north(0)]);
+
+// His way: highway to km 24, exit, a parallel road 400 m north from km 24.5 to km 28, back to the line at km 28.5,
+// then the last 1.5 km on the highway to work. (Same start and end as Best.)
+const mine: [number, number][] = [];
+for (let m = 0; m <= 30000; m += 60) {
+  let off = 0;
+  if (m > 24000 && m < 24500) off = ((m - 24000) / 500) * 400;
+  else if (m >= 24500 && m <= 28000) off = 400;
+  else if (m > 28000 && m < 28500) off = ((28500 - m) / 500) * 400;
+  mine.push([east(m), north(off)]);
+}
+const route: AiRoute = {
+  placeId: "work", startLat: mine[0][1], startLng: mine[0][0], endLat: mine[mine.length - 1][1], endLng: mine[mine.length - 1][0],
+  coords: mine, drives: 3, lastDrivenAt: Date.now(), duration_s: 1500, distance_m: 30400,
+};
+const dist = (a: [number, number], b: [number, number]) =>
+  Math.hypot((a[0] - b[0]) * M_PER_DEG_LNG, (a[1] - b[1]) * M_PER_DEG_LAT);
+
+// A — matching along the path
+{
+  const atStart = matchAiRouteAlongPath(route, route.startLat, route.startLng);
+  ok("A1 origin at the remembered start → hit at idx 0", !!atStart && atStart.idx === 0, `idx=${atStart?.idx}`);
+  const moving = matchAiRouteAlongPath(route, north(30), east(2100));          // 2.1 km down the road, 30 m off it
+  ok("A2 plotted while moving, 2.1 km down the road → hit", !!moving && moving.distM < 60, `d=${moving?.distM.toFixed(0)}`);
+  ok("A3 …and the index is where the car is, not 0", !!moving && moving.idx > 30 && moving.idx < 40, `idx=${moving?.idx}`);
+  const far = matchAiRouteAlongPath(route, north(AI_MATCH_RADIUS_M + 200), east(2100));
+  ok("A4 a parallel street beyond the match radius → miss", far === undefined);
+  const pastIt = matchAiRouteAlongPath(route, north(0), east(29400));          // 600 m from work, past the detour
+  ok("A5 origin past the last usable stretch → miss (nothing left to replay)", pastIt === undefined);
+  const start350 = matchAiRouteAlongPath(route, north(0), east(340));
+  ok("A6 the old 350 m-from-start case still matches", !!start350, "");
+}
+
+// B — via points aimed at the divergence
+{
+  const m = matchAiRouteAlongPath(route, north(20), east(1000))!;
+  const via = viaPointsAhead(route, m.idx, best);
+  ok("B1 between 2 and 8 via points", via.length >= 2 && via.length <= 8, `n=${via.length}`);
+  const offBest = via.map((v) => Math.min(...best.map((b) => dist(v, b))));
+  ok("B2 every via point is on the divergent stretch (> AI_DIVERGE_M from Best)", offBest.every((d) => d > AI_DIVERGE_M), offBest.map((d) => d.toFixed(0)).join("/"));
+  ok("B3 every via point is on his remembered road", via.every((v) => Math.min(...mine.map((p) => dist(v, p))) < 5));
+  const xs = via.map((v) => v[0]);
+  ok("B4 via points are ordered along the direction of travel", xs.every((x, i) => i === 0 || x > xs[i - 1]));
+  ok("B5 the first via is near the start of the detour, not mid-highway", east(24000) < xs[0] && xs[0] < east(25200), `firstKm=${((xs[0] - lng0) * M_PER_DEG_LNG / 1000).toFixed(1)}`);
+  ok("B6 the last via is before the rejoin", xs[xs.length - 1] < east(28500), `lastKm=${((xs[xs.length - 1] - lng0) * M_PER_DEG_LNG / 1000).toFixed(1)}`);
+  // Origin already on the parallel road: only what is still ahead is replayed.
+  const m2 = matchAiRouteAlongPath(route, north(400), east(26000))!;
+  const via2 = viaPointsAhead(route, m2.idx, best);
+  ok("B7 from mid-detour, via points are all ahead of the car", via2.length >= 1 && via2.every((v) => v[0] > east(26000)), `n=${via2.length}`);
+}
+
+// C — no divergence, no replay
+{
+  const same: AiRoute = { ...route, coords: best.filter((_, i) => i % 2 === 0) };
+  const m = matchAiRouteAlongPath(same, north(0), east(500))!;
+  ok("C1 a memory that IS the fastest route replays nothing", viaPointsAhead(same, m.idx, best).length === 0);
+  ok("C2 without a Best geometry the legacy even sampling still returns ≤ 8 interior points", (() => {
+    const v = viaPointsAhead(route, m.idx);
+    return v.length >= 2 && v.length <= 8 && v.every((p) => p[0] > east(500) && p[0] < east(30000));
+  })());
+}
+
+// D — degenerate input never throws
+{
+  const tiny: AiRoute = { ...route, coords: [mine[0], mine[mine.length - 1]] };
+  ok("D1 two-point memory → no match past idx 0 / no vias", viaPointsAhead(tiny, 0, best).length === 0);
+  ok("D2 origin far from everything → miss", matchAiRouteAlongPath(route, 50.5, -120.0) === undefined);
+}
+
+console.log(fails ? `FAIL ai_route (${fails})` : "PASS ai_route");
+process.exit(fails ? 1 : 0);

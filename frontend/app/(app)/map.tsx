@@ -41,7 +41,7 @@ import PeerModal from "../../src/PeerModal";
 import LiveRosterSheet from "../../src/LiveRosterSheet";
 import ShareSheet from "../../src/ShareSheet";
 import {
-  fetchRoutes, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb,
+  fetchRoutes, fetchAiRoute, NavRoute, useTurnByTurn, maneuverVerb, decodePolyline,
   fmtDistanceM, fmtManeuverDist, fmtEtaSec, stopSpeech, announce, haversineMeters,
   useRouteTrafficRefresh, fetchRouteViaStops, arriveNow, countRouteUturns, fmtUturnAt,
 } from "../../src/nav";
@@ -76,7 +76,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
 import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace, predictDestination, recordDeparture, type SavedPlace } from "../../src/savedPlaces";
-import { recordDrive, matchAiRoute, viaPointsFor, ensureAiRoutesLoaded } from "../../src/aiRoutes";
+import { recordDrive, getAiRouteForPlace, matchAiRouteAlongPath, viaPointsAhead, ensureAiRoutesLoaded } from "../../src/aiRoutes";
 import { askScout } from "../../src/askScout";
 import { recordOver, habitualOverKmh } from "../../src/speedProfile";
 import NavSearchScreen from "../../src/NavSearchScreen";
@@ -1634,16 +1634,29 @@ export default function MapScreen() {
       // + best-effort: Best/Scenic already showed above; this just adds a 3rd option. Only
       // appended while still previewing (never clobbers an active-nav / rerouted set).
       // 🔒 NAV-LOCK begin map-plot-ai-route-append — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
+      // 2026-09-24 (Jeff: "EVERYDAY I MERGE OFF THE HIGHWAY ON THE WAY TO WORK, BUT IT ALWAYS IS TAKING ME THE
+      // FASTEST WAY NOT MY WAY"): the memory now applies when the car is ON the remembered road (he plots every
+      // commute while already moving — matching the first fix of the remembered drive within 350 m never could),
+      // the via points sit where his path LEAVES the fastest route (results[0]) instead of every ~4 km, and the
+      // `ai-match` crumb says what happened either way — this path had no telemetry at all. The learned route is
+      // then SELECTED by the effect below the RouteInfo mirror; it used to sit unselected as a third chip.
       try {
+        const t0 = Date.now();
         await ensureSavedPlacesLoaded();
         await ensureAiRoutesLoaded();
         if (cancelled) return;
         const place = matchSavedPlace(destination.lat, destination.lng);
-        const ai = place ? matchAiRoute(place.id, origin.lat, origin.lng) : undefined;
-        if (ai) {
+        const mem = place ? getAiRouteForPlace(place.id) : undefined;
+        const hit = mem ? matchAiRouteAlongPath(mem, origin.lat, origin.lng) : undefined;
+        const bestGeom = results[0]?.polyline
+          ? decodePolyline(results[0].polyline).map((pt) => [pt.lng, pt.lat] as [number, number])
+          : undefined;
+        const via = hit ? viaPointsAhead(hit.route, hit.idx, bestGeom) : [];
+        let why = !place ? "no-place" : !mem ? "no-memory" : !hit ? "off-path" : via.length === 0 ? "same-as-best" : "replay";
+        if (hit && via.length) {
           const aiRoute = await fetchAiRoute(
             { lat: origin.lat, lng: origin.lng },
-            viaPointsFor(ai),
+            via,
             { lat: destination.lat, lng: destination.lng },
             { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
           );
@@ -1656,8 +1669,16 @@ export default function MapScreen() {
               if (base.some((r: any) => r?.polyline === aiRoute.polyline)) return base;
               return [...base, aiRoute as any];
             });
+          } else {
+            why = cancelled ? "cancelled" : navActiveRef.current ? "nav-active" : !aiRoute?.polyline ? "fetch-failed" : "replay-equals-best";
           }
         }
+        try {
+          logEvent(
+            `ai-match place=${place ? JSON.stringify(place.label || place.id) : "-"} why=${why} d=${hit ? Math.round(hit.distM) : -1} ` +
+            `idx=${hit ? hit.idx : -1}/${mem?.coords.length ?? 0} via=${via.length} drives=${mem?.drives ?? 0} best=${bestGeom?.length ?? 0} ms=${Date.now() - t0}`,
+          );
+        } catch {}
       } catch {}
       // 🔒 NAV-LOCK end map-plot-ai-route-append
     })();
@@ -1686,6 +1707,25 @@ export default function MapScreen() {
       steps: r.steps.map((s) => ({ html: s.html, distance_text: s.distance_text, maneuver: s.maneuver })),
     });
   }, [routes, selectedRouteIndex]);
+
+  // The learned route IS the driver's way: the moment it lands in the preview it becomes the selected route,
+  // once per destination, unless the driver has already moved off Best for this plot. Before 2026-09-24 it was
+  // only ever appended as a third chip and Best (the fastest) drove every commute even on the days the memory
+  // matched — Jeff: "IT ALWAYS IS TAKING ME THE FASTEST WAY NOT MY WAY. LETS FIX IT". The Cruise slot has its own
+  // auto-select (map-plot-cruise-autoselect) and is left alone here.
+  const aiAutoSelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!destination || navActiveRef.current) return;
+    const aiIdx = routes.findIndex((r: any) => r?.kind === "ai" && !r?.cruise);
+    if (aiIdx < 0) return;
+    const key = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
+    if (aiAutoSelRef.current === key) return;
+    aiAutoSelRef.current = key;
+    if (selectedRouteIndex !== 0) return;   // the driver already chose for this plot
+    setSelectedRouteIndex(aiIdx);
+    try { logEvent(`ai-select idx=${aiIdx} n=${routes.length}`); } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routes, destination]);
 
   // ----- Personable Nova route greeting (pre-load) -----
   // The moment a route is plotted (preview), pre-fetch + pre-synthesize Nova's
@@ -2845,13 +2885,17 @@ export default function MapScreen() {
     const d = dest ?? destination;
     const trace = driveTraceRef.current;
     driveTraceRef.current = [];
-    if (!d || trace.length < 4) return;
-    const place = matchSavedPlace(d.lat, d.lng);
-    if (!place) return;
+    // Gates unchanged since P3; the `ai-learn` receipt is new (2026-09-24 — Jeff's "route learning is not working"
+    // could not be answered from the server: nothing on this path ever wrote a row).
+    const place = d ? matchSavedPlace(d.lat, d.lng) : undefined;
     const last = trace[trace.length - 1];
-    // Only learn a REAL completion — the path must end near the destination.
-    if (haversineMeters({ lat: last.lat, lng: last.lng }, { lat: d.lat, lng: d.lng }) > 250) return;
-    void recordDrive({ placeId: place.id, trace });
+    const endD = d && last ? haversineMeters({ lat: last.lat, lng: last.lng }, { lat: d.lat, lng: d.lng }) : -1;
+    const why = !d ? "no-dest" : trace.length < 4 ? "short-trace" : !place ? "not-saved" : endD > 250 ? "ended-far" : "learn";
+    try { logEventReliable(`ai-learn place=${place ? JSON.stringify(place.label || place.id) : "-"} why=${why} pts=${trace.length} endD=${Math.round(endD)}`); } catch {}
+    if (why !== "learn" || !place) return;
+    void recordDrive({ placeId: place.id, trace }).then((r) => {
+      try { logEventReliable(`ai-learned place=${JSON.stringify(place.label || place.id)} pts=${r?.coords.length ?? 0} km=${r ? (r.distance_m / 1000).toFixed(1) : 0} drives=${r?.drives ?? 0}`); } catch {}
+    });
   };
   // 🔒 NAV-LOCK end map-learn-drive-gate
 

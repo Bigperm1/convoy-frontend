@@ -88,6 +88,26 @@ export function entitledSkin(): VisualTier {
   const top = ENTITLEMENTS_ENFORCED ? tierCeiling() : "diamond";
   return top === "diamond" && !diamondUnlocked() ? "ultra" : top;
 }
+/** ANOTHER member's metal from the tier the backend serialises on roster rows ("free" | "premium" | "gold" |
+ *  "ultra" | "club_founder" | "beta_og"): Silver for Premium, Gold for Gold, Diamond for Ultra once they have a
+ *  scan (the same "the diamond is only for ultra" rule as tierCeiling — but we only know a peer scanned by their
+ *  car_scan_id), green for Free or unknown. Jeff, 2026-09-24: "the border of the car square and the car name is
+ *  the color of their tier". */
+export function memberSkin(tier: string | null | undefined, scanned = false): VisualTier {
+  switch (tier) {
+    case "ultra":
+    case "club_founder":
+    case "beta_og":
+      return scanned ? "diamond" : "ultra";
+    case "gold":
+      return "ultra";
+    case "premium":
+      return "premium";
+    default:
+      return "brand";
+  }
+}
+
 function tierCeiling(): VisualTier {
   switch (getTier()) {
     case "ultra":      // Gold + Ultra — Diamond, once scanned (Jeff, 2026-09-22: "the diamond is only for ultra")

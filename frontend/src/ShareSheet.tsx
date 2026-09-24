@@ -10,7 +10,9 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { GlassFill } from "./Glass";
+import { GlassFill, drawerTint } from "./Glass";
+import { skin } from "./tierTheme";
+import { memberSkin } from "./appSkin";
 import * as Haptics from "expo-haptics";
 import { haptics } from "./haptics";
 import { COLORS } from "./theme";
@@ -42,6 +44,8 @@ type Member = {
   is_admin?: boolean;
   // The profile's finished scan + chosen car, when the backend carries them — the row's icon (MemberCarIcon).
   car_scan_id?: string | null;
+  /** The member's tier ("free" | "premium" | "gold" | "ultra" | …) — the row's metal (appSkin.memberSkin). */
+  tier?: string | null;
   appearance?: MemberAppearance | null;
 };
 
@@ -178,11 +182,12 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
       <View style={styles.root}>
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
         <View style={styles.sheet}>
+          {/* The same frosted panel as the category results dropdown (CategoryPills styles.dropdown): the
+              drawer-tinted glass under a 72 % dark floor and a hairline — Jeff, 2026-09-24: "make the background
+              look the same as the pop up for the food/gas". */}
           {Platform.OS !== "web" ? (
-            <GlassFill intensity={60} />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(18,18,22,0.97)" }]} />
-          )}
+            <GlassFill tintColor={drawerTint()} style={StyleSheet.absoluteFill} />
+          ) : null}
           <View style={styles.grabber} />
 
           <View style={styles.header}>
@@ -216,6 +221,9 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
               {members.map((m) => {
                 const on = selected.has(m.id);
                 const car = [m.car_make, m.car_model].filter(Boolean).join(" ");
+                // The member's metal on the car square's border and their name (Jeff, 2026-09-24) — only once the
+                // backend sends a tier; an older server leaves the hairline and white as they were.
+                const metal = m.tier ? skin(memberSkin(m.tier, !!m.car_scan_id)).accent : undefined;
                 return (
                   <TouchableOpacity
                     key={m.id}
@@ -224,14 +232,14 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
                     activeOpacity={0.7}
                   >
                     {/* Their car — live presence when they are on the map, else the profile's appearance,
-                        else the real car (MemberCarIcon, 2026-09-23) — in the 46 pt ring as before. */}
+                        else the real car (MemberCarIcon, 2026-09-23) — in the 46 pt frame as before. */}
                     <MemberCarIcon
                       size={46}
-                      style={styles.avatarWrap}
+                      style={[styles.avatarWrap, metal ? { borderColor: metal, borderWidth: 1.5 } : null]}
                       identity={memberIdentityFrom(m, crew)}
                     />
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.handle} numberOfLines={1}>
+                      <Text style={[styles.handle, metal ? { color: metal } : null]} numberOfLines={1}>
                         {m.handle || "Driver"}
                         {m.is_admin ? "  ·  admin" : ""}
                       </Text>
@@ -289,8 +297,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 10,
     paddingBottom: Platform.OS === "ios" ? 34 : 20,
+    // The results dropdown's floor + hairline (CategoryPills styles.dropdown), so the two panels read as one material.
+    backgroundColor: "rgba(20,21,24,0.72)",
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255,255,255,0.14)",
   },
   grabber: {
     alignSelf: "center",

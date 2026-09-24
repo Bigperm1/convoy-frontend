@@ -125,12 +125,18 @@ export default function AdminScreen() {
   const [busyEmail, setBusyEmail] = useState<string | null>(null);
   const [installUrl, setInstallUrl] = useState('');
   const [installSaving, setInstallSaving] = useState(false);
+  // Bulk removal (Jeff, 2026-09-24: "keep the 9 and nugz delete the rest"): every INACTIVE row starts
+  // ticked, the owner unticks anyone to keep, and one confirm sends the rest to /admin/users/prune.
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [pruning, setPruning] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
       const { data } = await api.get('/admin/users');
-      setUsers(Array.isArray(data) ? data : []);
+      const list: AdminUser[] = Array.isArray(data) ? data : [];
+      setUsers(list);
+      setSel(new Set(list.filter((u) => isInactive(u) && (u.email || '').trim().toLowerCase() !== OWNER_EMAIL).map((u) => u.id)));
       try {
         const r = await api.get('/admin/install-url');
         if (r?.data?.url) setInstallUrl(r.data.url);
@@ -199,6 +205,40 @@ export default function AdminScreen() {
     );
   }, []);
 
+  const toggleSel = useCallback((id: string) => {
+    setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }, []);
+
+  const pruneSelected = useCallback(() => {
+    const picked = users.filter((u) => sel.has(u.id));
+    if (!picked.length) return;
+    const names = picked.map((u) => u.handle || u.email).join(', ');
+    Alert.alert(
+      `Remove ${picked.length} account${picked.length === 1 ? '' : 's'}?`,
+      `${names}\n\nEach one is deleted and taken out of every club, event and thread. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Remove ${picked.length}`, style: 'destructive',
+          onPress: async () => {
+            setPruning(true);
+            try {
+              const { data } = await api.post('/admin/users/prune', { ids: picked.map((u) => u.id) });
+              const gone = new Set<string>((data?.removed || []).map((r: any) => r.id));
+              setUsers((list) => list.filter((u) => !gone.has(u.id)));
+              setSel((s) => { const n = new Set(s); gone.forEach((id) => n.delete(id)); return n; });
+              Alert.alert('Removed', `${gone.size} account${gone.size === 1 ? '' : 's'} removed.`);
+            } catch (e: any) {
+              Alert.alert("Couldn't remove", formatErr(e));
+            } finally {
+              setPruning(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [users, sel]);
+
   const saveInstallUrl = useCallback(async () => {
     const url = installUrl.trim();
     if (!url.startsWith('http')) {
@@ -219,8 +259,14 @@ export default function AdminScreen() {
   const renderItem = useCallback(({ item }: { item: AdminUser }) => {
     const code = codes[item.email];
     const busy = busyEmail === item.email;
+    const inactive = isInactive(item) && (item.email || '').trim().toLowerCase() !== OWNER_EMAIL;
     return (
       <View style={styles.row}>
+        {inactive && (
+          <TouchableOpacity onPress={() => toggleSel(item.id)} hitSlop={10} style={styles.checkBtn} accessibilityLabel={sel.has(item.id) ? 'Selected for removal' : 'Not selected'}>
+            <Ionicons name={sel.has(item.id) ? 'checkbox' : 'square-outline'} size={22} color={sel.has(item.id) ? '#FF453A' : COLORS.textDim} />
+          </TouchableOpacity>
+        )}
         <View style={{ flex: 1, paddingRight: 10 }}>
           <Text style={styles.handle} numberOfLines={1}>{item.handle || '(no handle)'}</Text>
           <Text style={styles.email} numberOfLines={1}>{item.email}</Text>
@@ -280,7 +326,7 @@ export default function AdminScreen() {
         </View>
       </View>
     );
-  }, [codes, busyEmail, genCode, removeUser, accent]);
+  }, [codes, busyEmail, genCode, removeUser, accent, sel, toggleSel]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -298,6 +344,16 @@ export default function AdminScreen() {
           <Ionicons name="refresh" size={22} color={COLORS.textDim} />
         </TouchableOpacity>
       </View>
+      {sel.size > 0 && !loading && (
+        <View style={styles.pruneBar}>
+          <Text style={styles.pruneHint} numberOfLines={2}>
+            {sel.size} inactive account{sel.size === 1 ? '' : 's'} ticked — untick anyone to keep, then remove the rest.
+          </Text>
+          <TouchableOpacity style={[styles.pruneBtn, pruning && { opacity: 0.6 }]} onPress={pruneSelected} disabled={pruning} activeOpacity={0.85}>
+            {pruning ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.pruneBtnText}>Remove selected · {sel.size}</Text>}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {!isOwner ? (
         <View style={styles.center}>
@@ -416,6 +472,15 @@ const styles = StyleSheet.create({
   },
   removeBtnText: { color: '#FF453A', fontWeight: '700', fontSize: 13 },
   inactiveTag: { color: '#FF9F0A', fontSize: 11, fontWeight: '800', letterSpacing: 0.6, marginTop: 4 },
+  checkBtn: { paddingRight: 10, alignSelf: 'center' },
+  pruneBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: 16, marginBottom: 10, padding: 12,
+    backgroundColor: 'rgba(255,69,58,0.10)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,69,58,0.35)',
+  },
+  pruneHint: { flex: 1, color: COLORS.textDim, fontSize: 12, lineHeight: 16 },
+  pruneBtn: { backgroundColor: '#FF453A', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, minWidth: 96, alignItems: 'center' },
+  pruneBtnText: { color: '#fff', fontWeight: '800', fontSize: 13 },
   installCard: {
     backgroundColor: '#161618', borderRadius: 14, borderWidth: 1, borderColor: '#2a2a2e',
     padding: 14, marginBottom: 12,

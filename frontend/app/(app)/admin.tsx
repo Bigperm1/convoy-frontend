@@ -57,12 +57,13 @@ type AdminClub = {
   members: ClubMember[];
 };
 
-type CostPlan = { key: string; label: string; monthly: number; note?: string };
+type CostPlan = { key: string; label: string; monthly: number; note?: string; group?: 'app' | 'tooling'; warn?: boolean };
 type CostMetered = { key: string; label: string; count: number; units: number; est_usd: number; unit_note?: string };
 type CostSeries = Record<string, { day: string; count: number }[]>;
 type AdminCosts = {
   month: string; currency: string; plans: CostPlan[]; metered: CostMetered[]; series: CostSeries;
   active: { day: string; count: number }[]; total_plans: number; total_metered: number; total: number; note?: string;
+  total_app?: number; total_tooling?: number;
 };
 
 type Tab = 'users' | 'clubs' | 'costs';
@@ -455,21 +456,36 @@ export default function AdminScreen() {
           <View style={styles.costHero}>
             <Text style={styles.costMonth}>{costs.month} · running total</Text>
             <Text style={[styles.costTotal, { color: accent }]}>{usd(costs.total)}</Text>
-            <Text style={styles.meta}>{usd(costs.total_plans)} plans + {usd(costs.total_metered)} metered so far this month</Text>
+            <Text style={styles.meta}>
+              {usd(costs.total_app ?? costs.total_plans)} app services
+              {costs.total_tooling ? ` · ${usd(costs.total_tooling)} tooling` : ''}
+              {` · ${usd(costs.total_metered)} metered so far this month`}
+            </Text>
           </View>
 
-          <Text style={styles.sectionLabel}>PLANS</Text>
-          <View style={styles.tableCard}>
-            {costs.plans.map((p) => (
-              <View key={p.key} style={styles.tableRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.tableLabel}>{p.label}</Text>
-                  {!!p.note && <Text style={styles.meta}>{p.note}</Text>}
+          {/* Every service Hairpin touches, app services first, then what building it costs (Jeff, 2026-09-24:
+              "make sure all services are in the costs section github/claude/tripo/cloudflare/open AI/spotify/firebase/
+              resend/openweather etc"). $0 rows are free tiers or pay-as-you-go whose usage is in the metered lines. */}
+          {(['app', 'tooling'] as const).map((g) => {
+            const rows = costs.plans.filter((p) => (p.group || 'app') === g);
+            if (!rows.length) return null;
+            return (
+              <View key={g}>
+                <Text style={styles.sectionLabel}>{g === 'app' ? `APP SERVICES · ${rows.length}` : 'TOOLING'}</Text>
+                <View style={styles.tableCard}>
+                  {rows.map((p) => (
+                    <View key={p.key} style={styles.tableRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.tableLabel}>{p.label}</Text>
+                        {!!p.note && <Text style={[styles.meta, p.warn && { color: '#FF9F0A' }]}>{p.note}</Text>}
+                      </View>
+                      <Text style={styles.tableAmt}>{usd(p.monthly)}<Text style={styles.meta}>/mo</Text></Text>
+                    </View>
+                  ))}
                 </View>
-                <Text style={styles.tableAmt}>{usd(p.monthly)}<Text style={styles.meta}>/mo</Text></Text>
               </View>
-            ))}
-          </View>
+            );
+          })}
 
           <Text style={styles.sectionLabel}>METERED THIS MONTH · LAST 30 DAYS</Text>
           <View style={styles.tableCard}>

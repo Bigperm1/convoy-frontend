@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
   KeyboardAvoidingView, Platform, Alert, Modal, RefreshControl, Share, Image, Switch,
@@ -18,9 +18,12 @@ import Glass, { GlassFill } from "../../src/Glass";
 import GlassBackdrop from "../../src/components/GlassBackdrop";
 import LogoMenu from "../../src/components/LogoMenu";
 import { PressableScale } from "../../src/ui/PressableScale";
-import { getGarageImage, getTopDownImage } from "../../src/carImages";
+import { getGarageImage } from "../../src/carImages";
 import { fetchClubLeaderboard, getPeerPbs, fmtKm } from "../../src/trips";
 import { useSettings, updateSettings } from "../../src/settings";
+import { useGarage } from "../../src/garageStore";
+import { useCrewPeers } from "../../src/convoyPresence";
+import { MemberCarIcon, memberIdentityForSelf, memberIdentityFrom } from "../../src/components/MemberCarIcon";
 import JoinCelebration, { celebrateJoin, subscribeJoin } from "../../src/JoinCelebration";
 import { useAccent, useAccentAlpha, useAppSkinColors } from "../../src/appSkin";
 
@@ -55,6 +58,9 @@ export default function HubScreen() {
   const skinColors = useAppSkinColors();
   const router = useRouter();
   const [settings] = useSettings();
+  // The driver band's icon: the car you drive today, from settings + the Garage store (the exact arrow /
+  // class / 3D class / scan), never the profile's colour (MemberCarIcon, 2026-09-23).
+  const garage = useGarage();
   // The driver's Garage hero photo (their car) — used as their avatar in the
   // My communities section. Falls back to the showroom image when no car is set.
   const heroImg = getGarageImage(user?.car_make || "", user?.car_model || "", user?.car_color || "");
@@ -272,7 +278,7 @@ export default function HubScreen() {
             fallback says "profile", not "Garage": this band opens the profile
             sheet, never the Garage (Jeff, 2026-09-23: menu reorganization). */}
         <TouchableOpacity testID="hub-profile" onPress={() => setShowProfile(true)} activeOpacity={0.85} style={styles.driverBand}>
-          <Image source={getTopDownImage(user?.car_color || "")} style={styles.driverCar} resizeMode="contain" />
+          <MemberCarIcon size={52} shape="round" style={styles.driverCar} identity={memberIdentityForSelf(settings, garage)} />
           <View style={{ flex: 1 }}>
             <Text style={styles.driverName}>{user?.handle || "Driver"}</Text>
             <Text style={[styles.driverCarTxt, { color: accent }]} numberOfLines={1}>
@@ -541,9 +547,19 @@ function FeedList({ events, loading, accent, onOpen, emptyLabel }: {
 function ClubStandings({ communityId }: { communityId: string }) {
   const accent = useAccent();
   const { user } = useAuth();
+  const [settings] = useSettings();
+  const garage = useGarage();
+  const crew = useCrewPeers();
   const [rows, setRows] = useState<{ userId: string; handle: string; km: number; drives: number; pb: number }[]>([]);
   const [mode, setMode] = useState<"drives" | "pb">("drives");
   const [roster, setRoster] = useState<any[]>([]);
+  // Each standing's car: the club roster row by user id (the board rows carry no car at all — every row
+  // used to draw the SAME default GRC), live presence when they are on the map, your own from the Garage.
+  const rosterById = useMemo(() => new Map(roster.map((m: any) => [String(m?.id ?? ""), m])), [roster]);
+  const carOf = (userId: string) =>
+    userId === String(user?.id ?? "")
+      ? memberIdentityForSelf(settings, garage)
+      : memberIdentityFrom(rosterById.get(userId) ?? { id: userId }, crew);
   useEffect(() => {
     let dead = false;
     (async () => {
@@ -608,7 +624,7 @@ function ClubStandings({ communityId }: { communityId: string }) {
             <View style={[styles.standRank, { backgroundColor: i === 0 ? accent : "rgba(255,255,255,0.08)" }]}>
               <Text style={[styles.standRankTxt, { color: i === 0 ? "#111" : "#C7C7CC" }]}>{i + 1}</Text>
             </View>
-            <Image source={getTopDownImage("")} style={styles.standCar} resizeMode="contain" />
+            <MemberCarIcon size={36} shape="round" style={styles.standCar} identity={carOf(r.userId)} />
             <Text style={styles.standName} numberOfLines={1}>
               {r.handle}{r.userId === String(user?.id ?? "") ? " (you)" : ""}
             </Text>
@@ -1067,7 +1083,19 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
   const boardMeEdge = useAccentAlpha(0.55);
   const [settings] = useSettings();
   const { user } = useAuth();
+  const garage = useGarage();
+  const crew = useCrewPeers();
   const [c, setC] = useState<any>(null);
+  // Every member icon in this sheet (leaderboard, roster, pending, search): you = the car you drive today
+  // (settings + Garage); a member on the map = the car they broadcast; else their profile (MemberCarIcon).
+  const memberIcon = (m: any) =>
+    m && user?.id != null && String(m.id) === String(user.id)
+      ? memberIdentityForSelf(settings, garage)
+      : memberIdentityFrom(m, crew);
+  const rosterById = useMemo(
+    () => new Map<string, any>((c?.members_users || []).map((m: any) => [String(m?.id ?? ""), m])),
+    [c?.members_users],
+  );
   // Description-edit state (admin only). The save button only enables when the
   // textarea has actually changed from the canonical server value.
   const [editingDesc, setEditingDesc] = useState(false);
@@ -1504,6 +1532,8 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   return (
                     <View key={row.userId} style={[styles.boardRow, me && styles.boardRowMe, me && { borderColor: boardMeEdge }]}>
                       <Text style={[styles.boardRank, i < 3 && styles.boardRankTop, i < 3 && { color: accent }]}>{i + 1}</Text>
+                      {/* The member's car (2026-09-23) — matched to the club roster by user id. */}
+                      <MemberCarIcon size={28} shape="round" style={styles.boardCar} identity={memberIcon(rosterById.get(row.userId) ?? { id: row.userId })} />
                       <Text style={[styles.boardHandle, me && { fontWeight: "800" }]} numberOfLines={1}>
                         {row.handle}{me ? " · you" : ""}
                       </Text>
@@ -1552,7 +1582,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
               const canRemove = c?.is_admin && !isSelf && !m.is_owner && (c?.is_owner || !m.is_admin);
               return (
                 <View key={m.id} style={styles.memberRow}>
-                  <Image source={getTopDownImage(m.car_color || "")} style={styles.memberCarAvatar} resizeMode="contain" />
+                  <MemberCarIcon size={42} shape="square" radius={12} style={styles.memberCarAvatar} identity={memberIcon(m)} />
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <Text style={styles.pendingName}>{m.handle || "anon"}{isSelf ? " (you)" : ""}</Text>
@@ -1610,7 +1640,9 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                 {(!c?.pending_users || c.pending_users.length === 0) && <Text style={{ color: COLORS.textMute }}>No pending requests</Text>}
                 {c?.pending_users?.map((u: any) => (
                   <View key={u.id} style={styles.memberRow}>
-                    <Image source={getTopDownImage(u.car_color || "")} style={styles.memberCarAvatar} resizeMode="contain" />
+                    {/* pending_users rows carry car_color + appearance since 2026-09-23 (server.py); a row without
+                        either draws the default picture. */}
+                    <MemberCarIcon size={42} shape="square" radius={12} style={styles.memberCarAvatar} identity={memberIcon(u)} />
                     <Text style={styles.pendingName}>{u.handle || u.email}</Text>
                     <TouchableOpacity testID={`approve-${u.id}`} onPress={() => approve(u.id)} style={[styles.smallBtn, { backgroundColor: COLORS.success }]}>
                       <Text style={styles.smallBtnText}>Approve</Text>
@@ -1664,7 +1696,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
               const already = memberIds.includes(r.id);
               return (
                 <View key={r.id} style={styles.memberRow}>
-                  <Image source={getTopDownImage(r.car_color || "")} style={styles.memberCarAvatar} resizeMode="contain" />
+                  <MemberCarIcon size={42} shape="square" radius={12} style={styles.memberCarAvatar} identity={memberIcon(r)} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.pendingName}>{r.handle || "anon"}</Text>
                     {(r.car_make || r.car_model || r.car_color) ? (
@@ -1777,7 +1809,8 @@ const styles = StyleSheet.create({
   sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end", paddingBottom: 40, paddingHorizontal: 18 },
   createSheet: { backgroundColor: "#141416", borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)", overflow: "hidden" },
   driverBand: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, marginBottom: 14 },
-  driverCar: { width: 52, height: 40 },
+  // A 52 pt round member icon (MemberCarIcon) — the bare 52×40 picture before 2026-09-23.
+  driverCar: { backgroundColor: "rgba(255,255,255,0.06)" },
   driverName: { color: "#fff", fontSize: 19, fontWeight: "800" },
   driverCarTxt: { fontSize: 12.5, fontWeight: "600", marginTop: 1 },
   sectionLabel: { color: "#7A7A7E", fontSize: 11, fontWeight: "700", letterSpacing: 1.1, marginBottom: 10, marginTop: 4 },
@@ -1816,7 +1849,8 @@ const styles = StyleSheet.create({
   standRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
   standRank: { width: 24, height: 24, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   standRankTxt: { fontSize: 12, fontWeight: "800" },
-  standCar: { width: 40, height: 30 },
+  // A 36 pt round member icon (MemberCarIcon) — the bare 40×30 default picture before 2026-09-23.
+  standCar: { backgroundColor: "rgba(255,255,255,0.06)" },
   standName: { flex: 1, color: "#fff", fontSize: 15, fontWeight: "700" },
   standVal: { fontSize: 17, fontWeight: "800" },
   standUnit: { fontSize: 10, color: "#8A8A8E", fontWeight: "600" },
@@ -2017,6 +2051,7 @@ const styles = StyleSheet.create({
   },
   boardRowMe: { borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(45,236,134,0.55)" },
   boardRank: { width: 18, color: COLORS.text, opacity: 0.6, fontSize: 12, fontWeight: "800" },
+  boardCar: { backgroundColor: "rgba(255,255,255,0.06)" },
   boardRankTop: { color: "#2DEC86", opacity: 1 },
   boardHandle: { flex: 1, minWidth: 0, color: COLORS.text, fontSize: 13.5, fontWeight: "600" },
   boardDrives: { color: COLORS.text, opacity: 0.7, fontSize: 11.5, fontWeight: "600" },

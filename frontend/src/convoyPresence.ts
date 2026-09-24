@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { supabase, SUPABASE_ENABLED } from "./supabase";
 import { toGRCSlug } from "./vehicleAssets";
-import { crewPresenceTopic, joinPresence, onlineCrewCount, subscribeOnlineCrew, type PresenceHandle } from "./presenceHub";
+import { crewPeersNow, crewPresenceTopic, joinPresence, onlineCrewCount, subscribeOnlineCrew, type PresenceHandle, type RawPeer } from "./presenceHub";
 
 export type ConvoyPresencePeer = {
   user_id: string;
@@ -48,6 +48,9 @@ export type ConvoyPresencePeer = {
   // Arrow appearance paint (marker === 'arrow'): peers render a 2-tone arrow.
   arrPri?: string;
   arrSec?: string;
+  // WHICH arrow (marker === 'arrow'): the 2D or the 3D one (garageStore.arrowPick). The map draws both
+  // the same way for a peer; the member ICONS do not (MemberCarIcon, 2026-09-23).
+  arrPick?: "arrow" | "arrow3d";
   // Finished 3D scan (car-scans folder id). Peers draw this driver's map twin instead of a
   // sprite, and the Crew/friend tiles show the hero shot (2026-09-03, Jeff: Olaf's peer was
   // "his old 2D sprite"). Only broadcast while carScanStatus === 'ready'.
@@ -74,6 +77,8 @@ export type ConvoyMe = {
   // Arrow appearance paint (marker === 'arrow'): peers render a 2-tone arrow.
   arrPri?: string;
   arrSec?: string;
+  // Which arrow the member picked (see PresencePayload).
+  arrPick?: "arrow" | "arrow3d";
   // Finished 3D scan (car-scans folder id). Peers draw this driver's map twin instead of a
   // sprite, and the Crew/friend tiles show the hero shot (2026-09-03, Jeff: Olaf's peer was
   // "his old 2D sprite"). Only broadcast while carScanStatus === 'ready'.
@@ -105,6 +110,10 @@ export function useConvoyPresence(
   // disconnect) bypass the position throttle so the parked pin reaches peers even when
   // the pinned coords don't change.
   const lastStatusRef = useRef<string | undefined>(undefined);
+  // The appearance the crew last saw from us (marker / class / paints / which arrow / scan). A change here
+  // bypasses the 1.5 s throttle like a status flip does — otherwise a stationary driver's "Drive this today"
+  // inside the window never reached the crew until the next position tick (Codex review, 2026-09-24).
+  const lastIdentRef = useRef<string>("");
 
   // Build OUR presence payload from the freshest me/coords (the hub calls this
   // on every track(), and once automatically when the channel goes SUBSCRIBED).
@@ -127,6 +136,7 @@ export function useConvoyPresence(
       clsSec: m.clsSec,
       arrPri: m.arrPri,
       arrSec: m.arrSec,
+      arrPick: m.arrPick,
       scanId: m.scanId,
       lat: c.lat,
       lng: c.lng,
@@ -174,6 +184,7 @@ export function useConvoyPresence(
             clsSec: typeof p.clsSec === "string" ? p.clsSec : undefined,
             arrPri: typeof p.arrPri === "string" ? p.arrPri : undefined,
             arrSec: typeof p.arrSec === "string" ? p.arrSec : undefined,
+            arrPick: p.arrPick === "arrow3d" ? "arrow3d" : p.arrPick === "arrow" ? "arrow" : undefined,
             scanId: typeof p.scanId === "string" && p.scanId ? p.scanId : undefined,
           });
         }
@@ -202,13 +213,25 @@ export function useConvoyPresence(
     if (!handleRef.current || !coords || !me) return;
     const now = Date.now();
     const statusChanged = (me.status ?? "live") !== lastStatusRef.current;
-    if (!statusChanged && now - lastTrackRef.current < 1500) return;
+    const ident = [me.marker, me.cls, me.clsPri, me.clsSec, me.arrPri, me.arrSec, me.arrPick, me.scanId, me.activeColor, me.carColor].join("|");
+    const identChanged = ident !== lastIdentRef.current;
+    if (!statusChanged && !identChanged && now - lastTrackRef.current < 1500) return;
     lastTrackRef.current = now;
     lastStatusRef.current = me.status ?? "live";
+    lastIdentRef.current = ident;
     handleRef.current.track();
-  }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec, me?.scanId]);
+  }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec, me?.arrPick, me?.scanId]);
 
   return { peers, status };
+}
+
+/** The RAW presence payloads of the crew connected right now (self excluded), for a screen that has no map —
+ *  the Club rosters, Comms, the Share sheet — to draw each member's icon as the car they are driving
+ *  (MemberCarIcon.memberIdentityFrom). Empty in ghost mode, with no community, or while the topic is not synced;
+ *  the same reference until the next presence sync, so it is safe as a hook dependency. */
+export function useCrewPeers(): RawPeer[] {
+  const read = () => crewPeersNow(crewPresenceTopic());
+  return useSyncExternalStore(subscribeOnlineCrew, read, read);
 }
 
 /** Other crew members online right now in this phone's community (presenceHub.onlineCrewCount) — what turns the Crew pill

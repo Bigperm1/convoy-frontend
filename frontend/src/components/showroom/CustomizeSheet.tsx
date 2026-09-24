@@ -81,6 +81,7 @@ import {
   saveIdentity,
   garageIsFor,
   settingsHoldClassCar,
+  syncAppearanceToProfile,
   setClass3dPick,
   setNickname,
   type Class3dKey,
@@ -313,6 +314,8 @@ export default function CustomizeSheet({ visible, car, carName, isToday, metal, 
         ? undefined
         : { carYear: s.carYear ?? "", carMake: s.carMake ?? "", carModel: s.carModel ?? "", carColor: s.carColor ?? "" };
     await updateSettings({ ...(typedToday ? ident : {}), callSign: sign });
+    // A paint save changes the car the rosters draw for this member (class / arrow paint) — mirror it.
+    syncAppearanceToProfile();
     // Push the identity to the backend so peers render us correctly AND the call sign (= account
     // handle) persists to the account: it survives a reinstall and is the name other drivers see on the
     // map and in comms.

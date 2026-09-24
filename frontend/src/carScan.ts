@@ -657,7 +657,8 @@ export async function deliverSubmittedScan(
   // marker changed (ignored by today's backend, kept as it was), and the skin that follows the pick — a scan
   // is Ultra's car, so Diamond EVEN WHEN the marker was already 'car': from the stock 3D car (gold) the
   // marker does not change but the metal does (Codex review 2026-09-22).
-  if (markerChanges) api.put("/auth/profile", { avatar_type: "car" }).catch(() => {});
+  // …and the profile's `appearance` (2026-09-23): a scan on the road is what every roster draws for this member.
+  api.put("/auth/profile", { ...(markerChanges ? { avatar_type: "car" } : {}), appearance: { kind: "scan" } }).catch(() => {});
   void setSkinChoice(SKIN_FOR_SCAN);
   // The settings write above is also what flips the MAP marker live — map.tsx and carStore subscribe to
   // settings, so the car lands on every surface in the same instant.

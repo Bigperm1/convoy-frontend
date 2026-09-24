@@ -33,7 +33,7 @@
 
 import { api } from "./api";
 import {
-  getSettings, updateSettings, getSelfMarkerType, getVehicleClass, hydrateCarFromProfile, type Settings, type VehicleClass,
+  getSettings, updateSettings, getSelfMarkerType, getVehicleClass, getClassPaint, hydrateCarFromProfile, type Settings, type VehicleClass,
 } from "./settings";
 import { CLASS_MODEL_3D, type ClassPaletteEntry } from "./classModels";
 import { getVehicleModelKey, resolveGRCKey, type GRCColorKey } from "./vehicleAssets";
@@ -402,11 +402,76 @@ function identityPatch(id: CarIdentity): Pick<Settings, "carYear" | "carMake" | 
 }
 
 // ── The switch ──────────────────────────────────────────────────────────────────────────────────────
-/** The rest of the old applyMarkerType, after the settings write: the profile's avatar_type (the
- *  backend ignores the field today — CarUpdate has no avatar_type — kept exactly as it was) and the
+// ── The profile's `appearance` (2026-09-23) ──────────────────────────────────────────────────────
+// Jeff: "make sure that the user icons are the actual class/color/2d/3d for all the round user icons system
+// wide". Live members are drawn from presence; OFFLINE members from this field, which the backend echoes on
+// every roster / attendee / search row (convoy-backend `_clean_appearance`). It is the car the member CHOSE
+// to be seen as — car_color stays the real car. Shape: {kind, cls?, pri?, sec?, bake?}; a scan is just
+// {kind:"scan"} (car_scan_id already names it). Mirrors MemberCarIcon's memberIdentityForSelf exactly.
+export type ProfileAppearance = { kind: "arrow" | "arrow3d" | "class" | "class3d" | "scan" | "car"; cls?: string; pri?: string; sec?: string; bake?: string };
+
+export function appearanceNow(s: Settings = getSettings(), g: GarageState = getGarage()): ProfileAppearance {
+  const id = activeCarId(s, g);
+  if (id === "arrow" || id === "arrow3d") return { kind: id, pri: s.arrowPaint?.primary, sec: s.arrowPaint?.secondary };
+  if (id === "class") { const p = getClassPaint(s); return { kind: "class", cls: getVehicleClass(s), pri: p.primary, sec: p.secondary }; }
+  if (id.startsWith("scan:")) return { kind: "scan" };
+  const c = class3dChoice(s, g);
+  return { kind: "class3d", cls: c.cls, bake: c.modelKey, pri: c.hex };
+}
+
+function cleanAppearance(a: ProfileAppearance): ProfileAppearance {
+  const clean: ProfileAppearance = { kind: a.kind };
+  if (a.cls) clean.cls = a.cls;
+  if (a.bake) clean.bake = a.bake;
+  if (a.pri && /^#[0-9A-Fa-f]{6}$/.test(a.pri)) clean.pri = a.pri;
+  if (a.sec && /^#[0-9A-Fa-f]{6}$/.test(a.sec)) clean.sec = a.sec;
+  return clean;
+}
+
+// A write that fails (offline, a Render cold start, a timeout) is NOT lost (Codex review, 2026-09-24: the
+// old fire-and-forget left offline rosters on the previous car for good, and re-picking the same car returns
+// "same" before ever reaching here). Same recipe as the park's profileClearPending: the flag lives in the
+// garage store (survives a relaunch), retried on a timer while the app runs and on Garage focus next to
+// retryProfileClear. The retry always sends what the settings hold NOW (never a stale body), the writes are
+// chained so two picks can never land out of order, and the flag clears only on a 2xx.
+const APPEARANCE_RETRY_MS = [30_000, 120_000, 600_000];
+let appearanceChain: Promise<void> = Promise.resolve();
+let appearanceRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let appearanceRetryStep = 0;
+
+function scheduleAppearanceRetry() {
+  if (appearanceRetryTimer) return;
+  const wait = APPEARANCE_RETRY_MS[Math.min(appearanceRetryStep, APPEARANCE_RETRY_MS.length - 1)];
+  appearanceRetryStep++;
+  appearanceRetryTimer = setTimeout(() => { appearanceRetryTimer = null; syncAppearanceToProfile(); }, wait);
+}
+
+/** PUT the chosen car to the profile. Extra fields (avatar_type) ride along on the first attempt only. */
+export function syncAppearanceToProfile(extra: Record<string, unknown> = {}) {
+  appearanceChain = appearanceChain.then(async () => {
+    const body = { ...extra, appearance: cleanAppearance(appearanceNow()) };
+    try {
+      await api.put("/auth/profile", body);
+      appearanceRetryStep = 0;
+      if (appearanceRetryTimer) { clearTimeout(appearanceRetryTimer); appearanceRetryTimer = null; }
+      if (getGarage().appearancePending) await updateGarage({ appearancePending: false });
+    } catch {
+      if (!getGarage().appearancePending) await updateGarage({ appearancePending: true });
+      scheduleAppearanceRetry();
+    }
+  });
+}
+
+/** Garage focus / relaunch: a pick that never reached the profile is sent again (from the current settings). */
+export function retryPendingAppearance() {
+  if (getGarage().appearancePending) { appearanceRetryStep = 0; syncAppearanceToProfile(); }
+}
+
+/** The rest of the old applyMarkerType, after the settings write: the profile's avatar_type (ignored by the
+ *  backend — CarUpdate has no avatar_type — kept as it was) PLUS the `appearance` the rosters draw, and the
  *  skin that follows the pick. setSkinChoice clamps to what the account is entitled to. */
 function afterMarkerWrite(type: MarkerType, scan: boolean) {
-  api.put("/auth/profile", { avatar_type: type }).catch(() => {});
+  syncAppearanceToProfile({ avatar_type: type });
   const metal = scan ? SKIN_FOR_SCAN : SKIN_FOR_MARKER[type];
   if (!metal) return;
   // A car picked while the first-scan unlock waits to be shown (the Garage wears its own metal, so the wave waits for

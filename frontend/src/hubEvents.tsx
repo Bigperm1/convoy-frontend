@@ -38,6 +38,11 @@ import {
 } from './eventsApi';
 import { updateWidgetFeed } from './widgetFeed';
 import { haptics } from './haptics';
+import { useAuth } from './auth';
+import { useSettings } from './settings';
+import { useGarage } from './garageStore';
+import { useCrewPeers } from './convoyPresence';
+import { MemberCarIcon, memberIdentityForSelf, memberIdentityFrom } from './components/MemberCarIcon';
 
 type Kind = 'event' | 'cruise';
 
@@ -739,6 +744,12 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
   const ctaBorder = useAccentAlpha(0.5);
   const accent = useAccent();
   const skinColors = useAppSkinColors();
+  // "Who's in" icons: a member on the map right now draws the car they are driving; you draw your own
+  // (settings + Garage); everyone else their profile's appearance or real car (MemberCarIcon).
+  const crew = useCrewPeers();
+  const [settings] = useSettings();
+  const garage = useGarage();
+  const { user: me } = useAuth();
   // MESSAGE THE CREW composer — inline in this sheet, never a second Modal (see the
   // stacked-modal note on EventsSection's onEdit). Its OWN sending flag, so a send in
   // flight never locks the RSVP buttons that share `busy`. Every hook stays above the
@@ -1019,7 +1030,13 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
                 <Text style={[styles.label, { marginTop: 18 }]}>{`Who's in`}</Text>
                 {e.attendees_users.map((u) => (
                   <View key={u.id} style={styles.rosterRow}>
-                    <Ionicons name="person-circle-outline" size={20} color={COLORS.textMute} />
+                    {/* Their car, not a person glyph (2026-09-23) — 28 pt: the smallest a car still reads at. */}
+                    <MemberCarIcon
+                      size={28}
+                      shape="round"
+                      style={styles.rosterCarIcon}
+                      identity={me?.id && String(u.id) === String(me.id) ? memberIdentityForSelf(settings, garage) : memberIdentityFrom(u, crew)}
+                    />
                     <Text style={styles.rosterHandle} numberOfLines={1}>{u.handle || 'driver'}</Text>
                     {!!(u.car_make || u.car_model) && <Text style={styles.rosterCar} numberOfLines={1}>{[u.car_make, u.car_model].filter(Boolean).join(' ')}</Text>}
                     {u.confirmed && <Text style={styles.confirmedPill}>GOING</Text>}
@@ -1145,6 +1162,7 @@ const styles = StyleSheet.create({
   countLabel: { color: COLORS.textMute, fontSize: 11.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 2 },
 
   rosterRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.07)' },
+  rosterCarIcon: { backgroundColor: 'rgba(255,255,255,0.06)' },
   rosterHandle: { color: COLORS.text, fontWeight: '700', fontSize: 14, flexShrink: 1 },
   rosterCar: { color: COLORS.textMute, fontSize: 12.5, flex: 1 },
   confirmedPill: { color: COLORS.text, backgroundColor: 'rgba(255,255,255,0.16)', fontSize: 9.5, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 7, overflow: 'hidden' },

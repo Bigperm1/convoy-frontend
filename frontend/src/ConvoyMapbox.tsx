@@ -92,7 +92,25 @@ type LatLng = { lat: number; lng: number };
 // Peer / Hazard / UserLocation — the canonical shared map types. Relocated here from
 // the retired react-native-maps engine (ConvoyMap.tsx) so this Mapbox engine is the
 // single source of truth. Imported type-only by PeerModal + map.tsx.
-export interface Peer {
+// The appearance a peer broadcasts over presence (convoyPresence.ts payload) — what their marker is drawn
+// from here (CarMarker: arrow → glyph, class → ClassSprite, else the colour picture) and what every member
+// icon off the map draws from too (components/MemberCarIcon). Typed here since 2026-09-23; map.tsx used to
+// copy these through `as any`.
+export interface PeerAppearance {
+  // 'car' | 'arrow' | 'class' | 'photo' (settings.selfMarkerType); absent from old builds / the cold car feed.
+  marker?: string;
+  cls?: string;
+  clsPri?: string;
+  clsSec?: string;
+  arrPri?: string;
+  arrSec?: string;
+  // Which arrow (2D or 3D) — the icons differ, the marker does not.
+  arrPick?: "arrow" | "arrow3d";
+  // Finished 3D scan id — this peer draws as their map twin (PeerScanModels), not a sprite.
+  scanId?: string;
+}
+
+export interface Peer extends PeerAppearance {
   user_id: string;
   handle?: string;
   lat: number;
@@ -107,8 +125,6 @@ export interface Peer {
   online_at?: string;
   // "parked" peers (full-mode, head unit disconnected) render dimmed.
   status?: "live" | "parked";
-  // Finished 3D scan id — this peer draws as their map twin (PeerScanModels), not a sprite.
-  scanId?: string;
 }
 
 export interface Hazard {

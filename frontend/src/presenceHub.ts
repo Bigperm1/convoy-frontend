@@ -56,10 +56,12 @@ const TRACK_MIN_MS = 1500;
 // that must reach peers immediately, and takes the bypass: status live↔parked (the
 // very case convoyPresence.ts:192's own bypass exists for), marker/cls/arrow paint,
 // handle, carColor — and the provider's whole field SHAPE, since Object.keys keeps
-// explicitly-undefined keys, so the map's payload (always carries
-// marker/cls/clsPri/clsSec/arrPri/arrSec) can never key-collide with the car
-// service's (never carries them). Keys are sorted so field ORDER alone cannot look
-// like a change.
+// explicitly-undefined keys. (Until 2026-09-23 the car service's slim payload never
+// carried marker/cls/clsPri/clsSec/arrPri/arrSec, so the two providers' keys could
+// never collide; it carries them now — carDataService.buildCarPayload — so a phone
+// whose map is closed still broadcasts its car. A collision is then two payloads with
+// the SAME appearance and position, and throttling that changes nothing.) Keys are
+// sorted so field ORDER alone cannot look like a change.
 const idKeyOf = (p: Record<string, any>): string => {
   try {
     return JSON.stringify(
@@ -102,6 +104,16 @@ export function onlineCrewCount(topic: string | null): number {
 export function subscribeOnlineCrew(fn: () => void): () => void {
   crewSubs.add(fn);
   return () => { crewSubs.delete(fn); };
+}
+
+const NO_PEERS: RawPeer[] = [];
+/** The raw payloads connected to `topic` right now (self excluded) — the member icons off the map read each
+ *  member's car from these (convoyPresence.useCrewPeers). The entry's own array, replaced only by a sync, so a
+ *  useSyncExternalStore snapshot stays stable; NO_PEERS (one shared empty array) when not synced. */
+export function crewPeersNow(topic: string | null): RawPeer[] {
+  if (!topic) return NO_PEERS;
+  const e = entries.get(topic);
+  return e && e.live ? e.peers : NO_PEERS;
 }
 
 function doTrack(e: Entry, force = false): void {

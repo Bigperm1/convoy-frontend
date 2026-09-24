@@ -10,13 +10,11 @@
 // Presentation-only: the caller merges the community roster with live presence
 // and owns selection state, so this stays reusable across the nav search and
 // all three share flows.
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
-import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../theme";
-import { getVehiclePngOrDefault } from "../vehicleAssets";
-import { scanHeroImageSource } from "../carScan";
+import { MemberCarIcon, memberIdentityFrom, type MemberIdentity } from "./MemberCarIcon";
 
 export type CarouselMember = {
   id: string;
@@ -28,6 +26,9 @@ export type CarouselMember = {
   lng?: number;
   // Finished 3D scan id (from presence) — the tile shows the hero SHOT instead of the sprite.
   scanId?: string;
+  // The car this tile draws (MemberCarIcon): the builder resolves it from live presence / the profile's
+  // appearance / the real car (map.tsx navMembers). Absent → resolved here from scanId + car_color.
+  identity?: MemberIdentity;
 };
 
 type Props = {
@@ -39,8 +40,6 @@ type Props = {
 };
 
 export default function MemberCarousel({ members, mode, selected, onSelect, emptyText }: Props) {
-  // Hero shots that failed to load (no shot uploaded yet, offline) fall back to the sprite.
-  const [heroFailed, setHeroFailed] = useState<Set<string>>(() => new Set());
   // Live first, then offline; alphabetical within each group for stability.
   const sorted = useMemo(() => {
     const byHandle = (a: CarouselMember, b: CarouselMember) => (a.handle || "").localeCompare(b.handle || "");
@@ -67,26 +66,17 @@ export default function MemberCarousel({ members, mode, selected, onSelect, empt
             onPress={() => { if (enabled) onSelect(m); }}
           >
             <View style={[styles.avatarWrap, sel && styles.avatarWrapSel]}>
-              {/* Offline cars stay readable (85%) so a white paint still reads white —
-                  the missing green live-dot + greyed handle carry the "offline" signal
-                  instead. (A 38% whole-chip fade used to wash white cars out to grey.) */}
-              {(() => {
-                // The 3D hero shot when this driver has a finished scan (2026-09-03, Jeff: the
-                // avatar "should be the 3D hero shot instead of the 2D sprite"); the sprite
-                // otherwise, and as the fallback while the shot has not been uploaded yet.
-                const hero = m.scanId && !heroFailed.has(m.scanId) ? scanHeroImageSource(m.scanId) : null;
-                return hero ? (
-                  <Image
-                    source={hero}
-                    style={[styles.avatarHero, !enabled && styles.avatarOffline]}
-                    contentFit="cover"
-                    cachePolicy="disk"
-                    onError={() => setHeroFailed((f) => { const n = new Set(f); n.add(m.scanId!); return n; })}
-                  />
-                ) : (
-                  <Image source={getVehiclePngOrDefault(m.car_color)} style={[styles.avatar, !enabled && styles.avatarOffline]} contentFit="contain" />
-                );
-              })()}
+              {/* The car they drive — arrow / class / 3D class / scan hero / colour picture (MemberCarIcon;
+                  the hero shot rule from 2026-09-03 lives there now). Offline cars stay readable (85%) so a
+                  white paint still reads white — the missing green live-dot + greyed handle carry the
+                  "offline" signal instead. (A 38% whole-chip fade used to wash white cars out to grey.)
+                  52 pt inside the 56 pt ring: the hero shot's size before this. */}
+              <MemberCarIcon
+                size={52}
+                shape="round"
+                dim={!enabled}
+                identity={m.identity ?? memberIdentityFrom(m)}
+              />
               {m.isLive && <View style={styles.liveDot} />}
               {sel && (
                 <View style={styles.check}>
@@ -107,7 +97,6 @@ export default function MemberCarousel({ members, mode, selected, onSelect, empt
 const styles = StyleSheet.create({
   row: { gap: 14, paddingHorizontal: 14, paddingVertical: 8 },
   chip: { width: 64, alignItems: "center", gap: 6 },
-  avatarOffline: { opacity: 0.85 },
   avatarWrap: {
     width: 56, height: 56, borderRadius: 28,
     backgroundColor: "rgba(255,255,255,0.08)",
@@ -115,8 +104,6 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: "rgba(255,255,255,0.14)",
   },
   avatarWrapSel: { borderColor: COLORS.brand },
-  avatar: { width: 44, height: 44 },
-  avatarHero: { width: 52, height: 52, borderRadius: 26 },
   liveDot: {
     position: "absolute", bottom: 1, right: 3,
     width: 13, height: 13, borderRadius: 7,

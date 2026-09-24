@@ -30,7 +30,8 @@ import { api, readTokenState, wsUrl } from '../api';
 import { noteNetOk } from '../netHealth';
 import { refreshCarStatus } from './carStatus';
 import { supabase, SUPABASE_ENABLED } from '../supabase';
-import { getSettings, ensureSettingsLoaded } from '../settings';
+import { getSettings, ensureSettingsLoaded, getSelfMarkerType, getVehicleClass, getClassPaint } from '../settings';
+import { getGarage } from '../garageStore';
 // THE gate (src/locationPrivacy). Every outbound position must ask it — this file was
 // the last transport that did not. See buildCarPayload and onStoreTick below.
 import { shareablePosition, noteFix, hydrateLocationPrivacy } from '../locationPrivacy';
@@ -348,6 +349,8 @@ function buildCarPayload(): Record<string, any> | null {
   // this tick.
   if (!share.share) return null;
   const s = getSettings();
+  const g = getGarage();
+  const classPaint = getClassPaint(s);
   return {
     user_id: _me.id,
     handle: _me.handle,
@@ -356,6 +359,21 @@ function buildCarPayload(): Record<string, any> | null {
     carColor: s.carColor || _me.carColor,
     activeColor: toGRCSlug(s.carColor || _me.carColor) || undefined,
     topSpeed: _me.topSpeed,
+    // ── THE CAR, ON THE COLD PATH TOO (2026-09-23) ─────────────────────────────────────
+    // The same appearance fields the phone map broadcasts (map.tsx useConvoyPresence `me`), from the same
+    // settings, so a phone whose map screen is closed (CarPlay / Android Auto cold launch, phone locked) still
+    // tells the crew which car it is — arrow or class or scan — instead of this slim payload REPLACING the
+    // rich one on the channel and flipping the driver to the default GRC on everyone's map and member icons
+    // the moment the phone screen went dark. `arrPick` reads the Garage store; before it has loaded (the first
+    // milliseconds of a cold launch) it reads as the 2D arrow and corrects on the next track.
+    marker: getSelfMarkerType(s),
+    cls: getVehicleClass(s),
+    clsPri: classPaint.primary,
+    clsSec: classPaint.secondary,
+    arrPri: s.arrowPaint?.primary,
+    arrSec: s.arrowPaint?.secondary,
+    arrPick: g.arrowPick === 'arrow3d' ? 'arrow3d' : 'arrow',
+    scanId: s.carScanStatus === 'ready' && s.carScanId ? s.carScanId : undefined,
     // Was hardcoded 'live'. The gate's own answer now — and NOTE the deliberate ASYMMETRY
     // with the warm phone map, because the obvious reading is wrong: map.tsx calls
     // noteCarConnected(true) (map.tsx:3409), so isParked() is false there and its peer

@@ -2,9 +2,8 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassFill } from "./Glass";
-import { Image } from "expo-image";
 import { COLORS } from "./theme";
-import { getVehiclePngOrDefault } from "./vehicleAssets";
+import { MemberCarIcon, memberIdentityFrom } from "./components/MemberCarIcon";
 import { api } from "./api";
 import { getSettings } from "./settings";
 import { useAccentAlpha } from "./appSkin";
@@ -111,13 +110,13 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
             )}
             <View style={styles.inner}>
               <View style={styles.header}>
-                <View style={[styles.avatar, { borderColor: skinHairline }]}>
-                  <Image
-                    source={getVehiclePngOrDefault(peer.activeColor ?? peer.carColor)}
-                    style={styles.avatarImg}
-                    contentFit="contain"
-                  />
-                </View>
+                {/* Their car as the map draws it (MemberCarIcon, 2026-09-23) in the 56 pt ring. */}
+                <MemberCarIcon
+                  size={56}
+                  shape="round"
+                  style={[styles.avatar, { borderColor: skinHairline }]}
+                  identity={memberIdentityFrom(peer)}
+                />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.handle}>{peer.handle || "Driver"}</Text>
                   {!!peer.carType && <Text style={styles.car}>{peer.carType}</Text>}
@@ -216,7 +215,6 @@ const styles = StyleSheet.create({
   inner: { padding: 18 },
   header: { flexDirection: "row", alignItems: "center", gap: 12 },
   avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 2, borderColor: "rgba(45,236,134,0.55)" },
-  avatarImg: { width: 46, height: 46 },
   handle: { color: COLORS.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
   // White, not textDim — the car line is the whole point of tapping a peer, and
   // #808080 on the glass card read as unlit grey on a phone in a mount (Jeff,

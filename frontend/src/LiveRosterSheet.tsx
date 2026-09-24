@@ -2,9 +2,8 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassFill } from "./Glass";
-import { Image } from "expo-image";
 import { COLORS } from "./theme";
-import { getVehiclePngOrDefault } from "./vehicleAssets";
+import { MemberCarIcon, memberIdentityFrom } from "./components/MemberCarIcon";
 import { api } from "./api";
 import { getSettings } from "./settings";
 import { useAccentAlpha } from "./appSkin";
@@ -100,13 +99,14 @@ export default function LiveRosterSheet({ visible, onClose, peers, myCoords, onD
                   const busy = !!p.user_id && hailing.has(p.user_id);
                   return (
                     <View key={id} style={styles.row}>
-                      <View style={[styles.avatar, { borderColor: avatarRing }]}>
-                        <Image
-                          source={getVehiclePngOrDefault(p.activeColor ?? p.carColor)}
-                          style={styles.avatarImg}
-                          contentFit="contain"
-                        />
-                      </View>
+                      {/* Their car as the map draws it — the presence Peer carries marker/class/paints/scan
+                          (MemberCarIcon, 2026-09-23); the frame is the 42 pt ring it always was. */}
+                      <MemberCarIcon
+                        size={42}
+                        shape="round"
+                        style={[styles.avatar, { borderColor: avatarRing }]}
+                        identity={memberIdentityFrom(p)}
+                      />
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={styles.handle} numberOfLines={1}>{p.handle || "Driver"}</Text>
                         <Text style={styles.sub} numberOfLines={1}>
@@ -160,7 +160,6 @@ const styles = StyleSheet.create({
   empty: { color: COLORS.textDim, fontSize: 13, paddingVertical: 14 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.08)" },
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1.5, borderColor: "rgba(45,236,134,0.45)" },
-  avatarImg: { width: 34, height: 34 },
   handle: { color: COLORS.text, fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
   // Car · distance · parked — WHITE, not textDim. This line is the reason the
   // roster exists (Jeff, 2026-07-25: the crew car info/distance read grey), and

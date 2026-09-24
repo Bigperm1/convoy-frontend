@@ -48,7 +48,7 @@ import {
 import { ensureGarageLoaded, getGarage, useGarage } from '../../src/garageStore';
 import {
   activeCarId, adoptActiveScan, checkBuildingScans, claimGarageFor, class3dOnMap, driveToday, garageIsFor, garageViewTier,
-  ownedCars, parkStrayScan, pinClass3dIfOnMap, refreshScanList, retryProfileClear, scanCarId, scanCars,
+  ownedCars, parkStrayScan, pinClass3dIfOnMap, refreshScanList, retryPendingAppearance, retryProfileClear, scanCarId, scanCars,
   settingsHoldClassCar, type GarageCar,
 } from '../../src/garageCars';
 import Stage, { type StageLabels, type StageSlot } from '../../src/components/showroom/Stage';
@@ -215,6 +215,7 @@ export default function GarageScreen() {
       }
       // A park's profile clear that did not get through (offline) is retried until it does.
       await retryProfileClear();
+      retryPendingAppearance();   // a "Drive this today" the profile never got (Codex review, 2026-09-24)
       // Any OTHER scan the Garage shows as building (a second car, or one whose pointer a newer pick
       // replaced) — it simply becomes a car in the Garage when it finishes.
       const pendingId = getSettings().carScanStatus === 'submitted' ? getSettings().carScanId : undefined;

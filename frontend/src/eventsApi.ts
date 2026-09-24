@@ -6,6 +6,7 @@
 // kind:'cruise' + the departure/stops/end/polyline fields (P3).
 
 import { api } from './api';
+import type { MemberAppearance } from './components/MemberCarIcon';
 
 export type EventPoint = { lat: number; lng: number; label?: string };
 
@@ -42,6 +43,10 @@ export type HubEvent = {
   attendees_users?: {
     id: string; handle: string;
     car_make?: string; car_model?: string; car_color?: string; car_type?: string;
+    // The profile's finished scan + chosen car, when the backend carries them — the "Who's in" row's icon
+    // (components/MemberCarIcon, 2026-09-23).
+    car_scan_id?: string | null;
+    appearance?: MemberAppearance | null;
     confirmed: boolean;
   }[];
 };

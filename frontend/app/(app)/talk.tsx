@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Pressable, TouchableOpacity, Animated,
   ScrollView, Easing, Image, Alert, Platform,
@@ -28,6 +28,9 @@ import { commsRead } from '../../src/commsRead';
 import { setPlaybackAudioMode, setIdleAudioMode } from '../../src/audioMode';
 import { useAccent, useAccentAlpha, useAppSkin } from '../../src/appSkin';
 import { COLORS } from '../../src/theme';
+import { useCrewPeers } from '../../src/convoyPresence';
+import { useGarage } from '../../src/garageStore';
+import { MemberCarIcon, memberIdentityForSelf, memberIdentityFrom, type MemberAppearance } from '../../src/components/MemberCarIcon';
 
 const YELLOW = '#2DEC86';
 
@@ -63,7 +66,21 @@ type Thread = {
   id: string; title: string; is_group: boolean;
   participants: ThreadParticipant[]; last_at?: string | null;
 };
-type RosterMember = { id: string; handle: string };
+// The crew roster as GET /communities/{id} members_users returns it — the car fields are KEPT (they used to be
+// dropped here), so the thread picker and Recent Transmissions can draw each member's car (MemberCarIcon).
+type RosterMember = {
+  id: string; handle: string;
+  car_color?: string; car_make?: string; car_model?: string;
+  car_scan_id?: string | null; appearance?: MemberAppearance | null;
+};
+const rosterMemberOf = (m: any): RosterMember => ({
+  id: m.id, handle: m.handle || 'Driver',
+  car_color: typeof m.car_color === 'string' ? m.car_color : undefined,
+  car_make: typeof m.car_make === 'string' ? m.car_make : undefined,
+  car_model: typeof m.car_model === 'string' ? m.car_model : undefined,
+  car_scan_id: typeof m.car_scan_id === 'string' && m.car_scan_id ? m.car_scan_id : undefined,
+  appearance: m.appearance && typeof m.appearance === 'object' ? m.appearance : undefined,
+});
 
 // Format helpers for the live transmission list.
 function fmtClock(iso: string): string {
@@ -523,24 +540,54 @@ export default function TalkScreen() {
     return () => { off(); };
   }, [removeThreadLocal]);
 
+  // The crew whose roster is on screen — a fetch that lands after the crew changed is dropped, so crew A's
+  // members can never sit in crew B's picker (Codex review, 2026-09-24).
+  const rosterCrewRef = useRef<string | null>(null);
+
   // Open the "new conversation" picker — load the active crew's roster so the
   // user can choose who to talk to privately. Self is filtered out.
   const openThreadPicker = useCallback(async () => {
     if (!active) { setDropdownOpen(true); return; }
     Haptics.selectionAsync().catch(() => {});
     setPicked([]);
-    setRoster([]);
     setPickerOpen(true);
+    // Refresh the roster (kept from the mount-time load below, so the picker never opens blank).
+    const id = active.id;
     try {
-      const { data } = await api.get(`/communities/${active.id}`);
+      const { data } = await api.get(`/communities/${id}`);
+      if (rosterCrewRef.current !== id) return;   // the crew changed while this was in flight
       const list = Array.isArray(data?.members_users) ? data.members_users : [];
-      setRoster(
-        list
-          .filter((m: any) => m?.id && m.id !== user?.id)
-          .map((m: any) => ({ id: m.id, handle: m.handle || 'Driver' }))
-      );
-    } catch { setRoster([]); }
+      setRoster(list.filter((m: any) => m?.id && m.id !== user?.id).map(rosterMemberOf));
+    } catch {}
   }, [active, user?.id]);
+
+  // The active crew's roster, loaded when the crew changes — Recent Transmissions needs it at all times to
+  // put each speaker's car beside their clip, not only once the thread picker has been opened (2026-09-23).
+  useEffect(() => {
+    rosterCrewRef.current = active?.id ?? null;
+    // A crew change empties the roster and the selection at once — the previous crew's members must not
+    // linger (or stay picked) while this crew's fetch is in flight or if it fails.
+    setRoster([]);
+    setPicked([]);
+    if (!active?.id) return;
+    let dead = false;
+    (async () => {
+      try {
+        const { data } = await api.get(`/communities/${active.id}`);
+        const list = Array.isArray(data?.members_users) ? data.members_users : [];
+        if (!dead) setRoster(list.filter((m: any) => m?.id && m.id !== user?.id).map(rosterMemberOf));
+      } catch {}
+    })();
+    return () => { dead = true; };
+  }, [active?.id, user?.id]);
+  const rosterById = useMemo(() => new Map(roster.map((m) => [String(m.id), m])), [roster]);
+  // Who is on the map right now (their live car), and your own car (settings + Garage) for your rows.
+  const crew = useCrewPeers();
+  const garage = useGarage();
+  const speakerIdentity = (userId: string | undefined) =>
+    userId && user?.id && userId === user.id
+      ? memberIdentityForSelf(settings, garage)
+      : memberIdentityFrom(rosterById.get(String(userId ?? '')) ?? { id: userId }, crew);
 
   const toggleMember = (id: string) => {
     Haptics.selectionAsync().catch(() => {});
@@ -919,6 +966,9 @@ export default function TalkScreen() {
                         <TouchableOpacity onPress={() => playConvo(m)} style={[styles.playBtn, { backgroundColor: accent }]} activeOpacity={0.8}>
                           <Ionicons name={playingId === m.id ? 'pause' : 'play'} size={18} color="#000" />
                         </TouchableOpacity>
+                        {/* The speaker's car, beside the play button (which stays exactly as it was): live
+                            presence when they are on the map, else the roster's profile (2026-09-23). */}
+                        <MemberCarIcon size={36} shape="round" style={styles.txCar} identity={speakerIdentity(m.user_id)} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.convoSpeaker} numberOfLines={1}>{m.handle || 'Driver'}</Text>
                           <Text style={styles.convoMeta}>{fmtClock(m.created_at)} · {fmtDur(m.duration_ms)}</Text>
@@ -957,9 +1007,13 @@ export default function TalkScreen() {
                   const on = picked.includes(m.id);
                   return (
                     <TouchableOpacity key={m.id} onPress={() => toggleMember(m.id)} style={styles.pickRow} activeOpacity={0.8}>
-                      <View style={[styles.pickAvatar, on && [styles.pickAvatarOn, { backgroundColor: accent }]]}>
-                        <Ionicons name="person" size={16} color={on ? '#000' : '#8E8E93'} />
-                      </View>
+                      {/* Their car in the 36 pt disc (accent-filled when picked, as before) — not a person glyph. */}
+                      <MemberCarIcon
+                        size={36}
+                        shape="round"
+                        style={[styles.pickAvatar, on && [styles.pickAvatarOn, { backgroundColor: accent }]]}
+                        identity={memberIdentityFrom(m, crew)}
+                      />
                       <Text style={styles.pickName} numberOfLines={1}>{m.handle}</Text>
                       <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={on ? accent : '#48484A'} />
                     </TouchableOpacity>
@@ -1112,6 +1166,7 @@ const styles = StyleSheet.create({
   convoRow: { paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#262629' },
   convoTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   playBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: YELLOW, alignItems: 'center', justifyContent: 'center' },
+  txCar: { backgroundColor: '#1c1c1e' },
   convoSpeaker: { color: '#F4F4F4', fontSize: 15, fontWeight: '600' },
   convoMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
 

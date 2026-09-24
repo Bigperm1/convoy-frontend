@@ -79,6 +79,9 @@ export type GarageState = {
   /** A park asked the backend profile to forget car_scan_id and has not had it acknowledged yet (offline,
    *  cold Render) — retried on Garage focus until it is (garageCars.retryProfileClear). */
   profileClearPending?: boolean;
+  /** "Drive this today" / a paint save could not reach the profile's `appearance` (offline, cold Render) —
+   *  retried on a timer and on Garage focus until a 2xx (garageCars.retryPendingAppearance). */
+  appearancePending?: boolean;
   /** Gold's 3D class car: the class ('hatchback' | 'supercar' | 'exotic') and the bake's GRCColorKey. Read it
    *  through garageCars.class3dChoice, never directly — that is where it is validated and defaulted. */
   class3dPick?: { cls: string; modelKey: string };
@@ -139,6 +142,7 @@ function sanitize(p: any): GarageState {
     scans,
     completeScanIds,
     profileClearPending: p?.profileClearPending === true,
+    appearancePending: p?.appearancePending === true,
     class3dPick,
     ownIdentity: p?.ownIdentity && typeof p.ownIdentity === "object" ? ident(p.ownIdentity) : undefined,
     skinHold: sanitizeHold(p?.skinHold),

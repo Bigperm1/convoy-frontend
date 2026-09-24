@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Platform,
 } from "react-native";
-import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassFill } from "./Glass";
 import * as Haptics from "expo-haptics";
@@ -17,8 +16,9 @@ import { haptics } from "./haptics";
 import { COLORS } from "./theme";
 import { api, formatErr } from "./api";
 import { getSettings } from "./settings";
-import { getVehiclePngOrDefault } from "./vehicleAssets";
 import { useAccentAlpha } from "./appSkin";
+import { useCrewPeers } from "./convoyPresence";
+import { MemberCarIcon, memberIdentityFrom, type MemberAppearance } from "./components/MemberCarIcon";
 
 // A share payload is discriminated by `kind`. The music player passes a
 // "music" payload; the map (routes) and comms screens can reuse this same
@@ -40,6 +40,9 @@ type Member = {
   car_make?: string;
   car_model?: string;
   is_admin?: boolean;
+  // The profile's finished scan + chosen car, when the backend carries them — the row's icon (MemberCarIcon).
+  car_scan_id?: string | null;
+  appearance?: MemberAppearance | null;
 };
 
 type Props = {
@@ -57,6 +60,8 @@ type Props = {
  */
 export default function ShareSheet({ visible, onClose, share }: Props) {
   const rowOnTint = useAccentAlpha(0.16);
+  // Who is on the map right now — a live member's row draws the car they are driving today.
+  const crew = useCrewPeers();
   const [members, setMembers] = useState<Member[]>([]);
   const [communityId, setCommunityId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -218,13 +223,14 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
                     onPress={() => toggle(m.id)}
                     activeOpacity={0.7}
                   >
-                    <View style={styles.avatarWrap}>
-                      <Image
-                        source={getVehiclePngOrDefault(m.car_color)}
-                        style={styles.avatar}
-                        contentFit="contain"
-                      />
-                    </View>
+                    {/* Their car — live presence when they are on the map, else the profile's appearance,
+                        else the real car (MemberCarIcon, 2026-09-23) — in the 46 pt ring as before. */}
+                    <MemberCarIcon
+                      size={46}
+                      shape="round"
+                      style={styles.avatarWrap}
+                      identity={memberIdentityFrom(m, crew)}
+                    />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.handle} numberOfLines={1}>
                         {m.handle || "Driver"}
@@ -331,7 +337,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.18)",
   },
-  avatar: { width: 38, height: 38 },
   handle: { color: COLORS.text, fontSize: 15, fontWeight: "700" },
   car: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   err: { color: "#FF6B6B", fontSize: 13, marginTop: 8, marginHorizontal: 4 },

@@ -80,6 +80,8 @@ import { askScout } from "../../src/askScout";
 import { recordOver, habitualOverKmh } from "../../src/speedProfile";
 import NavSearchScreen from "../../src/NavSearchScreen";
 import { CarouselMember } from "../../src/components/MemberCarousel";
+import { memberIdentityFrom, type MemberAppearance } from "../../src/components/MemberCarIcon";
+import { useGarage } from "../../src/garageStore";
 import { shareInbox } from "../../src/shareInbox";
 import { cruisePlot } from "../../src/cruisePlot";
 import { startNavBanner, stopNavBanner, updateNavBanner, swapNavRoute, isNavSessionLive, acquireBgLocation, askAlwaysLocationOnce, getNavStartedAt, CAR_NAV_KEY } from "../../src/navNotification";
@@ -683,7 +685,7 @@ export default function MapScreen() {
   // tap. navRoster holds the active community's members so the "drive to a
   // friend" carousel can show offline members greyed out.
   const [navSearchOpen, setNavSearchOpen] = useState(false);
-  const [navRoster, setNavRoster] = useState<{ id: string; handle: string; car_color?: string; is_admin?: boolean; car_scan_id?: string }[]>([]);
+  const [navRoster, setNavRoster] = useState<{ id: string; handle: string; car_color?: string; is_admin?: boolean; car_scan_id?: string; appearance?: MemberAppearance }[]>([]);
   // Hazard pins/alerts gate. Its only switch lived in the on-map Layers + Settings
   // sheet, which nothing opened (its Layers FAB had already been removed) — the sheet,
   // its layersOpen flag and the showTraffic toggle it alone read were deleted
@@ -869,6 +871,9 @@ export default function MapScreen() {
             // Finished 3D scan id from the backend profile (2026-09-03) — the Crew / "Drive to a
             // friend" tiles show the hero shot for OFFLINE members too, not only live peers.
             car_scan_id: typeof mem.car_scan_id === "string" && mem.car_scan_id ? mem.car_scan_id : undefined,
+            // The profile's chosen car ({kind, cls?, pri?, sec?, bake?}) when the backend carries it — an
+            // offline member's tile draws their arrow / class / 3D class car, not the default GRC (2026-09-23).
+            appearance: mem.appearance && typeof mem.appearance === "object" ? mem.appearance : undefined,
           }));
         if (!cancelled) setNavRoster(roster);
       } catch {
@@ -4636,6 +4641,9 @@ export default function MapScreen() {
     })();
   }, [sessionMaxSpeed, user?.top_speed_record]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which arrow (2D / 3D) the member picked — the map draws both alike, the crew's member icons do not
+  // (MemberCarIcon). Read here, not inside the `me` literal, so a Garage pick re-tracks presence.
+  const garage = useGarage();
   const presence = useConvoyPresence(
     presenceChannel,
     user ? {
@@ -4656,6 +4664,7 @@ export default function MapScreen() {
       clsSec: getClassPaint(settings).secondary,
       arrPri: settings.arrowPaint?.primary,
       arrSec: settings.arrowPaint?.secondary,
+      arrPick: garage.arrowPick === 'arrow3d' ? 'arrow3d' : 'arrow',
       // Finished scan → peers draw the twin; Crew/friend tiles show the hero shot (2026-09-03).
       scanId: settings.carScanStatus === 'ready' && settings.carScanId ? settings.carScanId : undefined,
       // Personal best — live max-of(sessionMaxSpeed, persisted) so peers see
@@ -4866,14 +4875,16 @@ export default function MapScreen() {
         topSpeed: p.topSpeed,
         // "parked" peers render dimmed (full-mode user with head unit off).
         status: p.status,
-        marker: (p as any).marker,
-        cls: (p as any).cls,
-        clsPri: (p as any).clsPri,
-        clsSec: (p as any).clsSec,
-        arrPri: (p as any).arrPri,
-        arrSec: (p as any).arrSec,
-        scanId: (p as any).scanId,
-      } as Peer;
+        // The appearance they broadcast (Peer extends PeerAppearance — typed since 2026-09-23).
+        marker: p.marker,
+        cls: p.cls,
+        clsPri: p.clsPri,
+        clsSec: p.clsSec,
+        arrPri: p.arrPri,
+        arrSec: p.arrSec,
+        arrPick: p.arrPick,
+        scanId: p.scanId,
+      };
     });
     return Object.values(byId);
   })();
@@ -4896,12 +4907,17 @@ export default function MapScreen() {
     return {
       id: m.id,
       handle: m.handle,
-      car_color: m.car_color ?? p?.activeColor ?? p?.carColor,
+      // `||`, not `??`: the backend sends car_color "" for a member who never set one, and "" used to
+      // block the live paint (2026-09-23).
+      car_color: m.car_color || p?.activeColor || p?.carColor,
       is_admin: m.is_admin,
       isLive,
       lat: p?.lat,
       lng: p?.lng,
       scanId: p?.scanId ?? m.car_scan_id,
+      // The tile's car: their live presence (marker/class/paints/arrow pick) when online, else the profile's
+      // appearance, else the real car (MemberCarIcon).
+      identity: memberIdentityFrom(m, p),
     };
   });
 

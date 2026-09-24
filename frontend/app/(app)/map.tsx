@@ -31,7 +31,8 @@ import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ensureLocationPermission as askLocationPermission, askPermission } from "../../src/permissionGate";
-import { useSettings, getSettings, updateSettings as updateGlobalSettings, getMapMode, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, unitForCountry, getSpeedAlertMode, getRouteColor } from "../../src/settings";
+import { useSettings, getSettings, updateSettings as updateGlobalSettings, getMapMode, getAvatarMode, setAvatarMode, getSelfMarkerType, getClassPaint, getVehicleClass, getSpeedAlertMode, getRouteColor } from "../../src/settings";
+import { borderUnit } from "../../src/borderUnits";
 import { getProximityTier, setLatestTier } from "../../src/proximityAudio";
 import { updateCrewWidget, refreshCrewMapSnapshot, type CrewPeer } from "../../src/crewWidgetFeed";
 import { useConvoyPresence, useOnlineCrewCount, ConvoyPresencePeer } from "../../src/convoyPresence";
@@ -3682,9 +3683,6 @@ export default function MapScreen() {
   // (There is no manual unit override any more — the detect is fully automatic;
   // see the SPEED UNITS note further down.)
   const lastUnitCheckRef = useRef<number>(0);
-  // Border-detection reverse-geocode is gated on BOTH the 60 s timer AND ~2 km of
-  // travel since the last lookup, so a parked or stop-and-go car stops paying for it.
-  const lastUnitCheckPosRef = useRef<{ lat: number; lng: number } | null>(null);
   // Throttle backend /location POSTs (live-avatar publish) to ~once / 4s.
   const lastLocPostRef = useRef<number>(0);
   useEffect(() => {
@@ -3877,47 +3875,24 @@ export default function MapScreen() {
             // by the border-aware unit auto-detect just below.
             // 🔒 NAV-LOCK begin map-speed-unit-border-detect — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             const now = Date.now();
-            // Border-aware speed-unit auto-detect.
-            //   * Runs ONCE immediately (lastUnitCheckRef===0), then again only once the car
-            //     is ≥ 50 km from where it last checked, OR ≥ 20 min have passed and it has
-            //     moved ≥ 2 km (always ≥ 60 s apart). It used to re-check every 60 s + 2 km —
-            //     about 30 Google Geocoding calls per hour of driving, the single biggest
-            //     Google line in the 09-17 unit-economics research (~$80/mo at 170 members).
-            //     Jeff, 2026-09-24: "go on 1,2 and 4" — cost fix #2. Worst case is now 3 calls
-            //     an hour. The 20-min rule is Codex's 09-24 catch: distance alone is a straight
-            //     line from the last check, so an Abbotsford → Sumas → Lynden drive (never 50 km
-            //     from Abbotsford) would have stayed on KM/H all day; now it flips within 20 min.
-            //   * Worldwide via unitForCountry(): mph list (US/UK/Caribbean/
-            //     territories) → MPH, everything else → KM/H.
-            //   * Fully automatic — no manual override (the SPEED UNITS toggle
-            //     was removed); re-checks the country with getSettings() inside
-            //     the network callback to avoid the stale-closure trap.
-            const unitLast = lastUnitCheckPosRef.current;
-            const unitMovedM = unitLast
-              ? haversineMeters(unitLast, { lat: pos.coords.latitude, lng: pos.coords.longitude })
-              : Infinity;
-            const unitAgeMs = now - lastUnitCheckRef.current;
-            if (lastUnitCheckRef.current === 0 || (unitAgeMs > 60000 && (unitMovedM >= 50000 || (unitAgeMs > 1200000 && unitMovedM >= 2000)))) {
+            // Border-aware speed-unit auto-detect — LOCAL, no network, on every fix (Jeff,
+            // 2026-09-24: "go ship the border rule"). West of Lake of the Woods the whole
+            // Canada–US border is the 49th parallel, so the fix itself says which side the car
+            // is on; src/borderUnits.ts holds the rule (49° with a ~220 m dead band because
+            // 0 Avenue runs along the line; Point Roberts east of −123.1° is US; Vancouver
+            // Island and the Gulf Islands west of it stay km/h; east of Manitoba only the
+            // unambiguous latitudes decide; everywhere else keeps the current unit). It flips
+            // within one GPS tick of the crossing, routed or not, with data roaming off.
+            // It replaced a Google Geocoding call that had NEVER been enabled on the project
+            // (REQUEST_DENIED since the key was made — verified 2026-09-24), so nobody had
+            // ever been auto-switched. Fully automatic — no manual override (the SPEED UNITS
+            // toggle was removed); the current unit is read from getSettings() every tick so a
+            // stale render closure can't fight the store.
+            const curUnit = getSettings().speedUnit;
+            const detected = borderUnit(pos.coords.latitude, pos.coords.longitude, curUnit);
+            if (detected !== curUnit && now - lastUnitCheckRef.current > 2000) {
               lastUnitCheckRef.current = now;
-              lastUnitCheckPosRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-              const GKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
-              if (GKEY) {
-                fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${pos.coords.latitude},${pos.coords.longitude}&result_type=country&key=${GKEY}`)
-                  .then((r) => r.json())
-                  .then((data) => {
-                    const country = data?.results?.[0]?.address_components?.find(
-                      (c: any) => c.types?.includes('country')
-                    )?.short_name;
-                    const detected = unitForCountry(country);
-                    // Race-safety re-check: settings may have changed while
-                    // the network round-trip was in flight.
-                    const cur = getSettings();
-                    if (detected !== cur.speedUnit) {
-                      updateGlobalSettings({ speedUnit: detected }).catch(() => {});
-                    }
-                  })
-                  .catch(() => {});
-              }
+              updateGlobalSettings({ speedUnit: detected }).catch(() => {});
             }
             // 🔒 NAV-LOCK end map-speed-unit-border-detect
           }

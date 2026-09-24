@@ -247,6 +247,13 @@
       "changes": [
         "app/(app)/map.tsx#map-speed-unit-border-detect region e303f8fb0c20 → 2735f1e3511a"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: \"go ship the border rule\" — the units auto-detect (map-speed-unit-border-detect) no longer calls Google Geocoding (which was never enabled on the project: REQUEST_DENIED, verified live 09-24); it now reads the car's own position against the 49th-parallel rule in src/borderUnits.ts (dead band along 0 Avenue, Point Roberts, Gulf Islands, Juan de Fuca split, unambiguous latitudes only east of Manitoba) on every fix, gated by tools/sim-qc/border_units_test.mts. Jeff's design question, verbatim: \"why cant we have it so it only checks when you are at a border crossing to the united states wouldnt that be cheaper?\"",
+      "changes": [
+        "app/(app)/map.tsx#map-speed-unit-border-detect region 2735f1e3511a → 76e3bee33c55"
+      ]
     }
   ],
   "files": {
@@ -739,7 +746,7 @@
         "map-foreground-refix": "sha256:62b3e69396b577b30dacfebf1fead78e5a91bf937e72751a079a5c5988b152e1",
         "map-fgwatch-gate": "sha256:fc6fa71b23f714f819064deaafca7cd8325f6027ae348f8967baaf6268d0d92b",
         "map-fgwatch-fix-ingest": "sha256:6ba5bc5d62e5cf95c89809a6eb2e812f4db5cf38d80bd230d0436db68388d171",
-        "map-speed-unit-border-detect": "sha256:2735f1e3511a19e5b60a678d105be6ffc3f4558511855a4e4c91bb2fa3a3378f",
+        "map-speed-unit-border-detect": "sha256:76e3bee33c555378475b9621841a4337429fe9c5fa460b870d3b82cc2d993f76",
         "map-refresh-fix-into-coords": "sha256:1af81bcb14f048c7e3e323665d07c6ede8ead4a0012bf8e7e5df8a2e8e08a867",
         "map-selfcar-pin-separation": "sha256:ac3e8b6fd7520da91cff696ed881cd6919bfae48b0a5eb673742fe9479db835e",
         "map-carspot-driving-feed": "sha256:2ce5364599c6285c40c7b4043bddc422ca075d8e5a651e704caacdbf4f1870c0",

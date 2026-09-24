@@ -1066,6 +1066,16 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **SHIPPED AS OTA-BM `dfff4cd8-32fa-484f-bcd1-a720ee53866c` (2026-09-23 — Jeff: "GO"), code `1af723ff`, runtime 1.29.0,
+  KEY_PRESENT=1 iOS + Android; the live bundle carries "MORE COLOURS" / "slowdowns blend into this line" / "Periwinkle", OTA-BL's
+  carries none.** Settings → Route Color (Jeff: "the route line spectrum it doesnt really work... maybe had like 20 more selectable
+  colours that dont overlap the current selection.. remove the spectrum"; then "YES REMOVE THE TRAFFIC COLORS EXCEPT THE SYSTEM GREEN
+  DONT TOUCH SCENIC"). The spectrum never worked (onPress locationX is relative to the child strip touched → every tap ≈ red); gone.
+  20 new swatches chosen by CIEDE2000 and rendered as route lines on the day map + at night: ≥ 10.7 from every swatch, ≥ 22 from
+  CONGESTION_COLOR moderate/heavy/severe, ≥ 14 from the day map's land/park/roads/water. Yellow/Orange/Red presets removed (they ARE
+  the traffic colours); a tester already on one keeps it, named, with a note. Gate `tools/sim-qc/route_palette_test.mts` (27 swatches,
+  all ≥ 22 from traffic). Scenic untouched (hue+160 in 🔒 `mbx-route-kind-colours`); noted: the Scenic line draws OVER the selected
+  route where they share road — with any colour, incl. Green (sim, 17:04 PDT) — not investigated, nav-locked.
 - **SHIPPED AS OTA-BL `e3a0b8a1-f1a5-4607-8408-b8b97a74a034` (2026-09-23 — Jeff: "GO FOR BOTH"), code `51194a6b`, runtime 1.29.0,
   KEY_PRESENT=1 iOS + Android; the live bundle carries "Message the crew" / "Tell the crew about this change" / `event-push-open`
   (+ `am-art pl=` on iOS only — Platform-gated, stripped from Android), OTA-BK's carries none. BACKEND deployed first: convoy-backend

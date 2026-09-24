@@ -199,6 +199,14 @@ export const AI_DIVERGE_M = 120;
 // Nothing worth replaying once the car is within this of the end of the memory.
 export const AI_MIN_REMAINING_M = 800;
 
+// The car's heading must be within this of the remembered path's direction at the matched point — a driver on the
+// opposite carriageway, or heading away, is not "on this road" (Codex review 2026-09-24).
+export const AI_HEADING_TOL_DEG = 75;
+// A replay that takes far longer than the remembered drive's remaining time is not "my way" — it is Mapbox looping
+// back to a via point the car can no longer reach (a missed exit). Rejected before it can be offered.
+export const AI_REPLAY_SLOW_FACTOR = 1.5;
+export const AI_REPLAY_SLOW_SLACK_S = 180;
+
 // Cheap planar metres between two [lng,lat] points (fine at the scale of a match radius).
 function planarM(a: [number, number], b: [number, number], cosLat: number): number {
   const dx = (a[0] - b[0]) * 111320 * cosLat;
@@ -206,41 +214,106 @@ function planarM(a: [number, number], b: [number, number], cosLat: number): numb
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+// Planar metres from point p to the SEGMENT a–b (not to its endpoints): Mapbox's full-overview geometry puts vertices
+// hundreds of metres apart on a straight highway, so a vertex-only distance called every remembered point between two
+// vertices "divergent" (Codex review 2026-09-24).
+function segDistM(p: [number, number], a: [number, number], b: [number, number], cosLat: number): number {
+  const ax = (a[0] - p[0]) * 111320 * cosLat, ay = (a[1] - p[1]) * 111320;   // p → a
+  const bx = (b[0] - a[0]) * 111320 * cosLat, by = (b[1] - a[1]) * 111320;   // a → b
+  const len2 = bx * bx + by * by;
+  let t = len2 > 0 ? -(ax * bx + ay * by) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * bx, cy = ay + t * by;                                   // p → closest point on the segment
+  return Math.sqrt(cx * cx + cy * cy);
+}
+
+function bearingDeg(a: [number, number], b: [number, number], cosLat: number): number {
+  const dx = (b[0] - a[0]) * cosLat, dy = b[1] - a[1];
+  return ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
+}
+function angleDiffDeg(a: number, b: number): number {
+  return Math.abs((((a - b) % 360) + 540) % 360 - 180);
+}
+
 // Where along the remembered path the car is: the nearest point's index + its distance. Undefined when the car is
-// not on that road, or is already so close to the end that there is nothing left to replay.
+// not on that road, is heading the other way along it (when a heading is known), or is already so close to the end
+// that there is nothing left to replay.
 export function matchAiRouteAlongPath(
   r: AiRoute,
   originLat: number,
   originLng: number,
+  headingDeg?: number | null,
 ): { route: AiRoute; idx: number; distM: number } | undefined {
   const pts = r.coords;
   if (!pts || pts.length < 2) return undefined;
   const cosLat = Math.cos((originLat * Math.PI) / 180);
   const o: [number, number] = [originLng, originLat];
-  let idx = 0, best = Infinity;
+  const withHeading = typeof headingDeg === "number" && Number.isFinite(headingDeg);
+  let idx = -1, best = Infinity;
   for (let i = 0; i < pts.length; i++) {
     const d = planarM(o, pts[i], cosLat);
-    if (d < best) { best = d; idx = i; }
+    if (d > AI_MATCH_RADIUS_M || d >= best) continue;
+    if (withHeading) {
+      const j = i < pts.length - 1 ? i : i - 1;
+      if (angleDiffDeg(bearingDeg(pts[j], pts[j + 1], cosLat), headingDeg as number) > AI_HEADING_TOL_DEG) continue;
+    }
+    best = d; idx = i;
   }
-  if (best > AI_MATCH_RADIUS_M) return undefined;
+  if (idx < 0) return undefined;
   let remaining = 0;
   for (let i = idx + 1; i < pts.length; i++) remaining += planarM(pts[i - 1], pts[i], cosLat);
   if (remaining < AI_MIN_REMAINING_M) return undefined;
   return { route: r, idx, distM: best };
 }
 
+// Path metres from index `fromIdx` to the end of the memory.
+export function remainingPathM(r: AiRoute, fromIdx: number): number {
+  const pts = r.coords;
+  if (!pts || pts.length < 2) return 0;
+  const cosLat = Math.cos((r.startLat * Math.PI) / 180);
+  let m = 0;
+  for (let i = Math.max(0, fromIdx) + 1; i < pts.length; i++) m += planarM(pts[i - 1], pts[i], cosLat);
+  return m;
+}
+
+// The replay came back — is it still "my way"? Returns null when it is, else why it is refused:
+//   • "uturn": it needs a U-turn the fastest route does not (a via point behind the car — a missed exit);
+//   • "too-slow": it takes far longer than the remembered drive's remaining time (a loop back to a via the car
+//     can no longer reach). The remembered drive's own duration, scaled by the path still ahead, is the yardstick.
+export function vetReplay(input: {
+  memory: AiRoute; fromIdx: number; aiDurationS: number; aiUturns: number; bestUturns: number;
+}): "uturn" | "too-slow" | null {
+  const { memory, fromIdx, aiDurationS, aiUturns, bestUturns } = input;
+  if (aiUturns > bestUturns) return "uturn";
+  const total = Math.max(1, memory.distance_m || 1);
+  const expectedS = Math.max(0, memory.duration_s || 0) * Math.min(1, remainingPathM(memory, fromIdx) / total);
+  if (expectedS > 0 && aiDurationS > expectedS * AI_REPLAY_SLOW_FACTOR + AI_REPLAY_SLOW_SLACK_S) return "too-slow";
+  return null;
+}
+
 // Via points for the part of the memory still AHEAD of the car. With the fastest route's geometry (`bestLngLat`),
 // they are placed only where the remembered path diverges from it by more than AI_DIVERGE_M — spread over the
 // divergent stretch(es) so Mapbox is pinned to "my way" there and left alone where the two agree. Returns [] when
 // the memory never leaves the fastest route (there is no "my way" to offer) or nothing usable lies ahead. Without
-// a Best geometry, falls back to even sampling of the points ahead.
+// a Best geometry, falls back to even sampling of the points ahead. With the car's position + heading, any leading
+// via point that lies BEHIND the car is dropped (the match landed on a ramp the car has just passed).
 export function viaPointsAhead(
   r: AiRoute,
   fromIdx: number,
   bestLngLat?: [number, number][],
   maxVia = 8,
+  car?: { lat: number; lng: number; headingDeg?: number | null },
 ): [number, number][] {
-  const ahead = r.coords.slice(Math.max(0, fromIdx) + 1, -1);   // interior only: the call supplies origin + dest
+  let ahead = r.coords.slice(Math.max(0, fromIdx) + 1, -1);   // interior only: the call supplies origin + dest
+  const cosLat = Math.cos((r.startLat * Math.PI) / 180);
+  if (car && typeof car.headingDeg === "number" && Number.isFinite(car.headingDeg)) {
+    const h = (car.headingDeg * Math.PI) / 180;
+    const hx = Math.sin(h), hy = Math.cos(h);
+    const aheadOfCar = (p: [number, number]) => (p[0] - car.lng) * cosLat * hx + (p[1] - car.lat) * hy > 0;
+    let k = 0;
+    while (k < ahead.length && !aheadOfCar(ahead[k])) k++;
+    ahead = ahead.slice(k);
+  }
   if (ahead.length < 1) return [];
   const sample = (list: [number, number][]): [number, number][] => {
     if (list.length <= maxVia) return list;
@@ -250,11 +323,10 @@ export function viaPointsAhead(
     return out;
   };
   if (!bestLngLat || bestLngLat.length < 2) return ahead.length < 2 ? [] : sample(ahead);
-  const cosLat = Math.cos((r.startLat * Math.PI) / 180);
   const divergent: boolean[] = ahead.map((p) => {
     let best = Infinity;
-    for (let i = 0; i < bestLngLat.length; i++) {
-      const d = planarM(p, bestLngLat[i], cosLat);
+    for (let i = 1; i < bestLngLat.length; i++) {
+      const d = segDistM(p, bestLngLat[i - 1], bestLngLat[i], cosLat);
       if (d < best) { best = d; if (best <= AI_DIVERGE_M) break; }
     }
     return best > AI_DIVERGE_M;

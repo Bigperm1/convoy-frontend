@@ -8,7 +8,7 @@
 //      hand back the highway, and the "AI" route was then dropped as identical to Best.
 //   3. A memory that never diverges from Best replays nothing (there is no "my way" to offer).
 import {
-  matchAiRouteAlongPath, viaPointsAhead, AI_MATCH_RADIUS_M, AI_DIVERGE_M, type AiRoute,
+  matchAiRouteAlongPath, viaPointsAhead, vetReplay, remainingPathM, AI_MATCH_RADIUS_M, AI_DIVERGE_M, type AiRoute,
 } from "../../src/aiRoutes.ts";
 
 let fails = 0;
@@ -94,6 +94,33 @@ const dist = (a: [number, number], b: [number, number]) =>
   const tiny: AiRoute = { ...route, coords: [mine[0], mine[mine.length - 1]] };
   ok("D1 two-point memory → no match past idx 0 / no vias", viaPointsAhead(tiny, 0, best).length === 0);
   ok("D2 origin far from everything → miss", matchAiRouteAlongPath(route, 50.5, -120.0) === undefined);
+}
+
+// E — Codex review 2026-09-24: heading, a missed exit, sparse Best geometry, the replay vet
+{
+  // E1/E2 — the opposite carriageway is not "this road": eastbound memory, car heading west.
+  ok("E1 heading east on the remembered road → hit", !!matchAiRouteAlongPath(route, north(10), east(3000), 90));
+  ok("E2 heading west (opposite carriageway) → miss", matchAiRouteAlongPath(route, north(10), east(3000), 270) === undefined);
+  ok("E3 no heading known → nearest point, as before", !!matchAiRouteAlongPath(route, north(10), east(3000), null));
+  // E4 — car 160 m past where the ramp leaves, still on the highway: no via point may be behind the car.
+  const missed = matchAiRouteAlongPath(route, north(0), east(24160), 90);
+  const viaMissed = missed ? viaPointsAhead(route, missed.idx, best, 8, { lat: north(0), lng: east(24160), headingDeg: 90 }) : [];
+  ok("E4 missed exit → every via point is ahead of the car", viaMissed.every((v) => v[0] > east(24160)), `n=${viaMissed.length}`);
+  // E5 — and the replay Mapbox returns for that case (a loop back to the ramp) is refused by the vet.
+  ok("E5 vet refuses a replay that needs a U-turn Best does not", vetReplay({ memory: route, fromIdx: missed?.idx ?? 400, aiDurationS: 300, aiUturns: 1, bestUturns: 0 }) === "uturn");
+  const rem = remainingPathM(route, missed?.idx ?? 400);
+  const expected = 1500 * (rem / 30400);
+  ok("E6 vet refuses a replay far slower than the remembered remaining time", vetReplay({ memory: route, fromIdx: missed?.idx ?? 400, aiDurationS: expected * 1.5 + 200, aiUturns: 0, bestUturns: 0 }) === "too-slow", `expected=${expected.toFixed(0)}s`);
+  ok("E7 vet accepts a replay near the remembered time", vetReplay({ memory: route, fromIdx: missed?.idx ?? 400, aiDurationS: expected * 1.2, aiUturns: 0, bestUturns: 0 }) === null);
+  // E8 — sparse Best geometry (a vertex every 600 m on a straight highway) must not read as a detour.
+  const sparseBest = best.filter((_, i) => i % 12 === 0);
+  const same: AiRoute = { ...route, coords: best.filter((_, i) => i % 2 === 0) };
+  const m0 = matchAiRouteAlongPath(same, north(0), east(500))!;
+  ok("E8 identical straight path vs sparse Best → no vias", viaPointsAhead(same, m0.idx, sparseBest).length === 0);
+  // E9 — with the same sparse Best, his real detour is still found and nothing else is.
+  const m1 = matchAiRouteAlongPath(route, north(0), east(1000))!;
+  const viaSparse = viaPointsAhead(route, m1.idx, sparseBest);
+  ok("E9 sparse Best: vias only on the detour", viaSparse.length >= 2 && viaSparse.every((v) => v[0] > east(24000) && v[0] < east(28500)), `n=${viaSparse.length}`);
 }
 
 console.log(fails ? `FAIL ai_route (${fails})` : "PASS ai_route");

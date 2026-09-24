@@ -270,6 +270,15 @@
         "src/ConvoyMapbox.tsx#mbx-jsx-selfcar-model region 552c4b626f35 → b4629d910aa6",
         "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region 2b8c85133b06 → cf8538e67889"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: FOR SOME REASON THE ROUTE LEARNING IS NOT WORKING... EVERYDAY I MERGE OFF THE HIGHWAY ON THE WAY TO WORK, BUT IT ALWAYS IS TAKING ME THE FASTEST WAY NOT MY WAY. LETS FIX IT",
+      "changes": [
+        "src/nav.ts: code ffbc1be136f8 → aa7741cc9fbf",
+        "app/(app)/map.tsx#map-plot-ai-route-append region a3016af3753c → d401a0a509b0",
+        "app/(app)/map.tsx#map-learn-drive-gate region d8dfc28751a2 → 2faccdb26d7f"
+      ]
     }
   ],
   "files": {
@@ -366,7 +375,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/nav.ts": {
-      "hash": "sha256:ffbc1be136f8d2b7df93ff92f9312650e7a5c3908634b41d71e4671fd8db60ce",
+      "hash": "sha256:aa7741cc9fbfe06fb12d4d871043a828522d07c219dd254e2d3f11a3b3e78943",
       "why": "pure drive-engine module: code-locked"
     },
     "src/navNotification.ts": {
@@ -731,7 +740,7 @@
         "map-plot-scenic-alternate": "sha256:ffd22eab074b49cbc809b8f18cbc6136612eb32e46b2be2adb65c3d9a062cbf0",
         "map-plot-announce-options": "sha256:24bacbe734a4b07b5497c37c2108f765c8aa511f75428bd70b1c590051fd1ab4",
         "map-plot-cruise-autoselect": "sha256:8cef7ddb16e615068dedbc0bd03e123a6832c3454542b089b444a9e8ec1674a4",
-        "map-plot-ai-route-append": "sha256:a3016af3753cec1ac5b9565466be3383123bbe09f58854c08521e86e301d728e",
+        "map-plot-ai-route-append": "sha256:d401a0a509b015ea6656be39f4fa9aef751f8478547fb30170d823ced2615d1f",
         "map-dest-drops-follow": "sha256:8511f527a6b59715d6f6a97803a1d1f166732b2af0a28ab423cc07fda1ca024d",
         "map-greeting-prepare-gate": "sha256:81bb087debc5894ea8794ef26191dbb95f35075b11b51a4df5f3bc0e036e8940",
         "map-traffic-refresh-writeback": "sha256:b0cc36f5132d800c3fba7422ce105164cf81e27c70f34177441c246b3e35d90b",
@@ -749,7 +758,7 @@
         "map-nav-banner-fg-feed": "sha256:8beab9569445d59e2cc183155b941e79e67640c4b4df76e620214316e0587479",
         "map-pan-hold-recenter": "sha256:cc0b09ef786272d2b826f90706fe88e7a42dbb95314e083fd698f1c869fb9504",
         "map-start-nav": "sha256:ccb8046ffbd443f3773607b6b1ebc07537948ac1bf3ce67e02cc335abddc01af",
-        "map-learn-drive-gate": "sha256:d8dfc28751a261485925268f9545ecd79fa9f73ad794bedc6de8b3c697210272",
+        "map-learn-drive-gate": "sha256:2faccdb26d7fdfc8e4300af6444fe09998df04033eb316121bd60baebdbfc6ae",
         "map-arrived-end-nav": "sha256:ae0d4d4a9225cc1ca97522b6aeb4da85b5a871f59252cc032ce614f6722bb2b6",
         "map-end-nav-from-car": "sha256:59ed8ad3002a862e4de818f6be8141281f7905b584cc3a686ae410478b3b740c",
         "map-carlist-showmap-reset": "sha256:85f0c68cb1eb809e9402c956345a8a2cd560f81838d5c4d847e4dd733e46b392",

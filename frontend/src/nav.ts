@@ -529,12 +529,14 @@ export async function fetchAiRoute(
   via: [number, number][],
   destination: LatLng,
   avoid?: AvoidPrefs,
+  opts?: { bearing?: number },   // the car's facing, so a learned-route replay departs the way the car points (2026-09-24)
 ): Promise<NavRoute | null> {
   let mb: MapboxRoute | null = null;
   try {
     mb = await fetchMapboxRouteVia(
       origin, via, destination,
       { tolls: !!avoid?.tolls, highways: !!avoid?.highways, ferries: !!avoid?.ferries },
+      typeof opts?.bearing === "number" ? { bearing: opts.bearing } : undefined,
     );
   } catch {
     return null;

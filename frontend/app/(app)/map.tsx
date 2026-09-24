@@ -76,7 +76,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { addRecentRoute } from "../../src/recentRoutes";
 import { prepareRouteGreeting, playPreparedGreeting, clearPreparedGreeting } from "../../src/novaGreeting";
 import { useSavedPlaces, saveSavedPlace, removeSavedPlace, resolveTarget, ensureSavedPlacesLoaded, matchSavedPlace, predictDestination, recordDeparture, type SavedPlace } from "../../src/savedPlaces";
-import { recordDrive, getAiRouteForPlace, matchAiRouteAlongPath, viaPointsAhead, ensureAiRoutesLoaded } from "../../src/aiRoutes";
+import { recordDrive, getAiRouteForPlace, matchAiRouteAlongPath, viaPointsAhead, vetReplay, ensureAiRoutesLoaded } from "../../src/aiRoutes";
 import { askScout } from "../../src/askScout";
 import { recordOver, habitualOverKmh } from "../../src/speedProfile";
 import NavSearchScreen from "../../src/NavSearchScreen";
@@ -1647,11 +1647,16 @@ export default function MapScreen() {
         if (cancelled) return;
         const place = matchSavedPlace(destination.lat, destination.lng);
         const mem = place ? getAiRouteForPlace(place.id) : undefined;
-        const hit = mem ? matchAiRouteAlongPath(mem, origin.lat, origin.lng) : undefined;
+        // `facing` is the car's heading from map-plot-depart-facing-pick above (null when unknown): the memory only
+        // matches a car heading ALONG the remembered road, via points behind the car are dropped, and the replay
+        // departs the way the car points. A replay that still needs a U-turn or runs far slower than the remembered
+        // drive is a loop back to a via the car can no longer reach (a missed exit) and is refused (Codex, 09-24).
+        const hdg = typeof facing === "number" ? facing : null;
+        const hit = mem ? matchAiRouteAlongPath(mem, origin.lat, origin.lng, hdg) : undefined;
         const bestGeom = results[0]?.polyline
           ? decodePolyline(results[0].polyline).map((pt) => [pt.lng, pt.lat] as [number, number])
           : undefined;
-        const via = hit ? viaPointsAhead(hit.route, hit.idx, bestGeom) : [];
+        const via = hit ? viaPointsAhead(hit.route, hit.idx, bestGeom, 8, { lat: origin.lat, lng: origin.lng, headingDeg: hdg }) : [];
         let why = !place ? "no-place" : !mem ? "no-memory" : !hit ? "off-path" : via.length === 0 ? "same-as-best" : "replay";
         if (hit && via.length) {
           const aiRoute = await fetchAiRoute(
@@ -1659,8 +1664,17 @@ export default function MapScreen() {
             via,
             { lat: destination.lat, lng: destination.lng },
             { tolls: settings.avoidTolls, highways: settings.avoidHighways, ferries: settings.avoidFerries },
+            hdg != null ? { bearing: hdg } : undefined,
           );
-          if (!cancelled && !navActiveRef.current && aiRoute?.polyline && aiRoute.polyline !== results[0]?.polyline) {
+          const vet = aiRoute ? vetReplay({
+            memory: hit.route, fromIdx: hit.idx,
+            aiDurationS: aiRoute.duration_in_traffic_s ?? aiRoute.duration_s,
+            aiUturns: countRouteUturns(aiRoute), bestUturns: countRouteUturns(results[0]),
+          }) : null;
+          if (!cancelled && !navActiveRef.current && aiRoute?.polyline && !vet && aiRoute.polyline !== results[0]?.polyline) {
+            // Tagged with the destination it was fetched for, so the auto-select below never adopts a route left
+            // over from the previous destination while this plot's results are still in flight.
+            (aiRoute as any).forDest = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
             // Functional update, appending to whatever is CURRENTLY there: rebuilding
             // from the captured `results` would silently drop the scenic route fetched
             // above (it lands in state, not in this closure).
@@ -1670,13 +1684,13 @@ export default function MapScreen() {
               return [...base, aiRoute as any];
             });
           } else {
-            why = cancelled ? "cancelled" : navActiveRef.current ? "nav-active" : !aiRoute?.polyline ? "fetch-failed" : "replay-equals-best";
+            why = cancelled ? "cancelled" : navActiveRef.current ? "nav-active" : !aiRoute?.polyline ? "fetch-failed" : vet ? `vet-${vet}` : "replay-equals-best";
           }
         }
         try {
           logEvent(
             `ai-match place=${place ? JSON.stringify(place.label || place.id) : "-"} why=${why} d=${hit ? Math.round(hit.distM) : -1} ` +
-            `idx=${hit ? hit.idx : -1}/${mem?.coords.length ?? 0} via=${via.length} drives=${mem?.drives ?? 0} best=${bestGeom?.length ?? 0} ms=${Date.now() - t0}`,
+            `idx=${hit ? hit.idx : -1}/${mem?.coords.length ?? 0} via=${via.length} hdg=${hdg == null ? "null" : Math.round(hdg)} drives=${mem?.drives ?? 0} best=${bestGeom?.length ?? 0} ms=${Date.now() - t0}`,
           );
         } catch {}
       } catch {}
@@ -1714,12 +1728,16 @@ export default function MapScreen() {
   // matched — Jeff: "IT ALWAYS IS TAKING ME THE FASTEST WAY NOT MY WAY. LETS FIX IT". The Cruise slot has its own
   // auto-select (map-plot-cruise-autoselect) and is left alone here.
   const aiAutoSelRef = useRef<string | null>(null);
+  useEffect(() => { aiAutoSelRef.current = null; }, [destination]);   // every new plot gets one fresh chance
   useEffect(() => {
     if (!destination || navActiveRef.current) return;
-    const aiIdx = routes.findIndex((r: any) => r?.kind === "ai" && !r?.cruise);
+    const destKey = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
+    // Only THIS plot's learned route counts: a previous destination's AI route is still on screen while the new
+    // results are in flight, and must neither be selected nor spend this plot's one chance (Codex, 2026-09-24).
+    const aiIdx = routes.findIndex((r: any) => r?.kind === "ai" && !r?.cruise && r?.forDest === destKey);
     if (aiIdx < 0) return;
-    const key = `${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
-    if (aiAutoSelRef.current === key) return;
+    const key = String((routes[aiIdx] as any)?.polyline || "");
+    if (!key || aiAutoSelRef.current === key) return;
     aiAutoSelRef.current = key;
     if (selectedRouteIndex !== 0) return;   // the driver already chose for this plot
     setSelectedRouteIndex(aiIdx);

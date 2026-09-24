@@ -8,7 +8,8 @@
 // Styling (2026-09-23, Jeff off a Mapbox screenshot — "chips good"): each category is a round
 // dark-glass chip with a ring and glyph in ITS colour (src/poiPalette.ts) and the label beneath;
 // the active chip fills with that colour. The results list repeats the same badge on every row so
-// chip ↔ row ↔ map pin read as one family. Tapping the active chip again clears the pins (toggle off).
+// chip ↔ row ↔ map pin read as one family. Tapping the active chip again opens (and folds) the results
+// list; the list's ✕ or the grid icon clears the pins.
 import React, { useRef, useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Pressable, Animated, Easing } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -196,7 +197,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
-  // Results dropdown is only shown on a LONG-press (tap just drops pins).
+  // Results dropdown: a second tap on the active chip (or a long press) shows it; a tap just drops pins.
   const [listOpen, setListOpen] = useState(false);
   // Results for the active category — drives the dropdown list (and the pins,
   // via onResults). Kept in sync with what the map shows.
@@ -230,14 +231,9 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   };
 
   const run = async (cat: Category) => {
-    // Tapping the already-active pill clears the results (toggle off).
-    if (activeKey === cat.key) {
-      reqSeq.current++;            // cancel any in-flight search
-      setActiveKey(null);
-      setResults([]);
-      onResults([]);
-      return;
-    }
+    // Only ever called for a chip that is not the active one (the active chip's tap toggles the list;
+    // clearing is closeDropdown or the grid icon), so there is no toggle-off branch here any more.
+    if (activeKey === cat.key) return;
     if (!origin) return;
     const myReq = ++reqSeq.current;
     // Clear the previous category's pins IMMEDIATELY, before the network call.
@@ -268,7 +264,14 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         // Chips sit 6 pt apart in a scroller: keep today's touch target, since a default slop would
         // take the neighbour's edge (Jeff, 2026-09-23: Apple-feel batch 1). Same for More.
         hitSlop={0}
-        onPress={() => { setListOpen(false); run(cat); }}
+        // Tap = pins; tap the ACTIVE chip again = the results list (and again to fold it). Clearing is the
+        // list's ✕ or the grid icon. A long press still opens the list when it lands — but on a scrolling
+        // row a thumb that drifts ~10 pt hands the touch to the scroller before 250 ms, so the hold was
+        // unreliable (sim-reproduced 2026-09-23; Jeff picked "tap the active chip again" over hold-only).
+        onPress={() => {
+          if (activeKey === cat.key) { setListOpen((v) => !v); return; }
+          setListOpen(false); run(cat);
+        }}
         onLongPress={() => { setListOpen(true); if (activeKey !== cat.key) run(cat); }}
         delayLongPress={250}
         style={styles.chip}

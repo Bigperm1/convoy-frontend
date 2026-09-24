@@ -519,8 +519,8 @@ export default function AdminScreen() {
           </TouchableOpacity>
         )}
       </View>
-      {/* A horizontal ScrollView inside a column collapses to nothing without an explicit height (sim, 09-24: chips cut in half). */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail} style={{ flexGrow: 0, height: 46 }}>
+      {/* Seven short chips wrap onto two lines — a horizontal ScrollView here clipped them on the sim (09-24). */}
+      <View style={styles.chipWrap}>
         {FILTERS.map((f) => {
           const on = filter === f.key;
           const n = (counts as any)[f.key] as number;
@@ -530,7 +530,7 @@ export default function AdminScreen() {
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+      </View>
       {sel.size > 0 && (
         <View style={styles.pruneBar}>
           <Text style={styles.pruneHint} numberOfLines={2}>{sel.size} inactive ticked. Untick anyone to keep.</Text>
@@ -621,7 +621,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a', borderRadius: 12, borderWidth: 1, borderColor: '#333',
   },
   search: { flex: 1, color: '#F4F4F4', fontSize: 15, paddingVertical: Platform.OS === 'ios' ? 11 : 7 },
-  chipRail: { paddingHorizontal: 14, gap: 8, alignItems: 'center', paddingBottom: 10 },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 14, paddingBottom: 10 },
   chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', backgroundColor: 'rgba(255,255,255,0.06)' },
   chipText: { color: '#C7C7CC', fontSize: 12.5, fontWeight: '700' },
   row: {

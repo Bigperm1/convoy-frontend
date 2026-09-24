@@ -261,6 +261,15 @@
       "changes": [
         "src/carplay/carActions.ts#act-search-motion-dismiss region 2f63ccf408e6 → b7a26601f1fa"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24, driving, CarPlay photo: (1) \"can we make the route line a little more tapered off, it still looks stepped when it's about to touch the car. There's a lot of different steps to fading. Let's get that fade really smooth and really silky\" → routeRibbon.ts FADE_ALPHA 6 linear steps → 16 smoothstep pieces, GLOW_RAMP 2 → 4; (2) \"can you make that car just a tad smaller? It's a little bigger than the other 3D cars on the map in 2D\" → the 2D class sprite × 0.9 on the phone (mbx-jsx-selfcar-model) and the car surfaces (car-jsx-selfcar-model).",
+      "changes": [
+        "src/routeRibbon.ts: code 4cc261ae59a5 → a713a6a14c82",
+        "src/ConvoyMapbox.tsx#mbx-jsx-selfcar-model region 552c4b626f35 → b4629d910aa6",
+        "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region 2b8c85133b06 → cf8538e67889"
+      ]
     }
   ],
   "files": {
@@ -281,7 +290,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/routeRibbon.ts": {
-      "hash": "sha256:4cc261ae59a5780e4c19c67a68ed6487d81c75ce485808227e6ccc08e5f30673",
+      "hash": "sha256:a713a6a14c82a9171461fcde027009bbdce2ac33441754c386c24aa651a26ea7",
       "why": "pure drive-engine module: code-locked"
     },
     "src/ribbonAnchor.ts": {
@@ -548,7 +557,7 @@
         "mbx-jsx-puck-camera": "sha256:c973c27de96dee196645f0dd276efa3df933651bacce4ed8acb9b24f54b49ed0",
         "mbx-jsx-route-layers": "sha256:6be936e2cc6fab47903d0382ca7a7791c3d1c12321088fce2f725ff392e522bb",
         "mbx-jsx-congestion-layers": "sha256:398fab521e8a0194fd6622c93fee0ff31e50108ae0bd841b8d21e360ddb4e829",
-        "mbx-jsx-selfcar-model": "sha256:552c4b626f351292e01d1e1db2dcb8d7c31341be57fafd6fbc8328e7ef898b17"
+        "mbx-jsx-selfcar-model": "sha256:b4629d910aa60463661f17848da71515fc74be907cfc06dfe084f221380ba806"
       },
       "ignored": [],
       "watchNew": true,
@@ -628,7 +637,7 @@
         "car-cam-style-load-seed": "sha256:5970f89e831afc8791bbb2d0f379d691b6814a55c99cda765f87b00f6f1ec4dd",
         "car-jsx-road-query-layers": "sha256:b60491f8d86c5396ac33dfed1f38da75c1b693405aea52cce3689daaf38ba0ff",
         "car-jsx-camera": "sha256:9f7bf5a288d8f29441df1ecd8519b33db62031ab76180734c8579dd03039adcd",
-        "car-jsx-selfcar-model": "sha256:2b8c85133b06110c8346a47dea4ffd0073eb68955db7f41d240ea5d53ff6f9a7",
+        "car-jsx-selfcar-model": "sha256:cf8538e678891dfd32d630118b3201ab34c9d34ce7ea4962267ebd894a5a29b0",
         "car-jsx-preview-route-layers": "sha256:9b374172cf200330c424feb4e7f274cfe51a6a79f23831c30daa2e21e6d9b7c9",
         "car-jsx-nav-ribbon-layers": "sha256:db7ab9a97374f6782263c20a966af1994f3bacb01054c39ed19d2895fbedfd8b",
         "car-jsx-preview-congestion": "sha256:87c2a860ddb0a7f79fd8f03da4a8e4ebbb178dd4265f8bf64a64cf3a5eeae014"

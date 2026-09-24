@@ -468,6 +468,10 @@ function CarClassPaintImage({ name, vehicleClass, primary, secondary, onPainted 
   const onReady = () => {
     // The LAST capture of the phone's dance: Android never remounts; iOS remounts twice, then this is the third onReady.
     const lastCapture = !(Platform.OS === 'ios' && remountsRef.current < 2);
+    // (2026-09-24: showing after the FIRST post-remount capture was tried for Jeff's white flash and withdrawn on
+    // Codex's review — the second remount re-registers the SAME image name from a mount-time capture that can be
+    // blank, and with the paint already on screen that would flash white mid-drive with no fallback. The flash he
+    // saw is fixed upstream instead: the snapshot lives across marker changes, see selfClassPaintImg.)
     carPaintReceipt(`ready:${name}:${gen}`, `car-class-paint op=ready img=${name} gen=${gen} final=${lastCapture ? 1 : 0} ms=${Date.now() - mountedAtRef.current}`);
     try { imgRef.current?.refresh?.(); } catch {}
     // belt-and-braces second capture after the view settles (the phone's 350 ms) — and, on the last capture, the moment
@@ -850,7 +854,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // self_class_paint_<cls>_<pri>_<sec>, so a Garage change registers a new image live. undefined (no paint, or not a
   // class car) → exactly the unpainted path.
   const paintHex = (c?: string) => (c ? c.replace(/[^0-9a-fA-F]/g, '') : 'x');
-  const selfClassPaintImg = selfClassCarArt && CLASS_TOPDOWN[selfClassKey] && (s.selfClassPri || s.selfClassSec)
+  // NOT gated on the marker being the class car (2026-09-24). Jeff, driving, switching tiers: "when I go to the 2D
+  // class car … it shows white for about a second and then it turns red." His crumbs: op=mount → op=show 1957 ms
+  // later, every time he came back to the class car, because the snapshot was keyed to the marker and re-mounted
+  // (a fresh epoch, "must prove itself again") on every re-select. The store carries the class and the paint
+  // whatever marker is chosen (carStore selfClass/selfClassPri/Sec come from settings), so the painted snapshot now
+  // mounts whenever the garage HAS a painted class car, proves itself once while the driver is still on the arrow
+  // or the 3D car, and is already registered — same name, same epoch — the moment the class car is picked. Only a
+  // real change of class or paint (a different name) starts a new epoch. One extra style image while on other
+  // markers; the sprite is only DRAWN when carFlat (below), exactly as before.
+  const selfClassPaintImg = CLASS_TOPDOWN[selfClassKey] && (s.selfClassPri || s.selfClassSec)
     ? `self_car_cls_paint_${selfClassKey}_${paintHex(s.selfClassPri)}_${paintHex(s.selfClassSec)}`
     : undefined;
   // The paint is DRAWN only once its snapshot is ready (CarClassPaintImage onPainted — see NEVER AN INVISIBLE CAR):
@@ -2538,7 +2551,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           // Same grey-referenced normalisation the phone uses (vehiclePngScale), × uiScale like every other car-surface
           // size (Jeff, 2026-09-23, "3 - ok"): the flat self car was the one thing left at CarPlay's size on Android
           // Auto — ~19% bigger than the peers beside it (1 / 0.837). uiScale is hudScaleFor(), 1 on CarPlay.
-          spriteSize={carFlat ? vehiclePngScale(s.selfCarColor) * uiScale : 1}
+          // × 0.9 (Jeff, driving, 2026-09-24, CarPlay photo: "make that car just a tad smaller? It's a little bigger
+          // than the other 3D cars on the map in 2D") — the class art's ink fills its box wider than a GLB's top-down
+          // footprint fills the same length. carFlat is the class car only, so this touches nothing else. Phone matches.
+          spriteSize={carFlat ? vehiclePngScale(s.selfCarColor) * uiScale * 0.9 : 1}
         />
       )}
       {/* 🔒 NAV-LOCK end car-jsx-selfcar-model */}

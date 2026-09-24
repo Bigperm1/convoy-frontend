@@ -4745,9 +4745,13 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             // and 62pt — the class marker was its own size and did not match the
             // car or the arrow. Dividing the ONE target by each snapshot's own
             // point size is what actually makes all three equal.
-            spriteSize={selfClassAsShot
+            // × 0.9 (Jeff, driving, 2026-09-24: "make that car just a tad smaller? It's a little
+            // bigger than the other 3D cars on the map in 2D") — the class art's ink fills its
+            // box wider than a GLB's top-down footprint fills the same length, so equal length
+            // read as a bigger car. Same factor on the car surfaces (CarMapView).
+            spriteSize={(selfClassAsShot
               ? SELF_MARKER_PT / SELF_CLASS_PHOTO_PT
-              : SELF_MARKER_PT / SELF_CLASS_SILHOUETTE_PT}
+              : SELF_MARKER_PT / SELF_CLASS_SILHOUETTE_PT) * 0.9}
             speedMs={userSpeedMs}
             cameraRef={cameraRef}
             getCam={getCam}

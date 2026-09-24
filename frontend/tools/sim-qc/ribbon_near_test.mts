@@ -131,7 +131,14 @@ for (const [label, fade, lead, stepM] of [["z14 highway", 150, 100, 8], ["z16.5 
   const all = [...near, ...far];
   const glowAlphas = near.filter((f: any) => f.properties.kind === RIBBON_CASING).map((f: any) => f.properties.alpha);
   ok("N5 alpha on every piece", all.every((f: any) => typeof f.properties.alpha === "number"), `${all.length} features`);
-  ok("N5 glow fades in", JSON.stringify(glowAlphas.slice(0, 3)) === JSON.stringify([0.33, 0.66, 1]), `glow alphas ${JSON.stringify(glowAlphas)}`);
+  // 2026-09-24: the ramp is four smoothstep pieces (was two linear) — pin the SHAPE, not the numbers:
+  // strictly rising, all translucent, then the solid piece.
+  const ramp = glowAlphas.slice(0, 4);
+  const rising = ramp.every((a: number, i: number) => a > 0 && a < 1 && (i === 0 || a > ramp[i - 1]));
+  ok("N5 glow fades in", ramp.length === 4 && rising && glowAlphas[4] === 1, `glow alphas ${JSON.stringify(glowAlphas)}`);
+  const coreAlphas = near.filter((f: any) => f.properties.kind === RIBBON_CORE && f.properties.alpha < 1).map((f: any) => f.properties.alpha);
+  const coreRising = coreAlphas.every((a: number, i: number) => a > 0 && (i === 0 || a > coreAlphas[i - 1]));
+  ok("N5 core fade is 16 rising pieces from almost nothing", coreAlphas.length === 16 && coreRising && coreAlphas[0] < 0.01 && coreAlphas[15] > 0.99, `core alphas ${JSON.stringify(coreAlphas)}`);
   ok("N5 far is solid", far.every((f: any) => f.properties.alpha === 1), `far alphas ${[...new Set(far.map((f: any) => f.properties.alpha))].join(",")}`);
 }
 

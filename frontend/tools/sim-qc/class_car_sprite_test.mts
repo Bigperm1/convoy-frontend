@@ -80,7 +80,10 @@ ok("S4 carStore mirrors the class paint as two strings",
 // ── S5 painted image, keyed by class + paint ─────────────────────────────────────────────────────────────────────
 ok("S5 painted image name carries class + both paints",
   /`self_car_cls_paint_\$\{selfClassKey\}_\$\{paintHex\(s\.selfClassPri\)\}_\$\{paintHex\(s\.selfClassSec\)\}`/.test(cmv)
-  && /selfClassPaintImg = selfClassCarArt && CLASS_TOPDOWN\[selfClassKey\] && \(s\.selfClassPri \|\| s\.selfClassSec\)/.test(cmv));
+  // 2026-09-24: NOT gated on the marker (selfClassCarArt) any more — the snapshot lives across marker changes so a
+  // re-selected class car is painted at once (Jeff's white flash). The name still carries class + both paints.
+  && /selfClassPaintImg = CLASS_TOPDOWN\[selfClassKey\] && \(s\.selfClassPri \|\| s\.selfClassSec\)/.test(cmv)
+  && !/selfClassPaintImg = selfClassCarArt &&/.test(cmv));
 ok("S5b mounted beside the static art, keyed by name + epoch (a change of painted image is a fresh snapshot)",
   /<Mapbox\.Images images=\{allMapImages\} \/>\s*\{\/\*[\s\S]*?\*\/\}\s*\{selfClassPaintImg \? \(\s*<CarClassPaintImage\s+key=\{`\$\{selfClassPaintImg\}#\$\{paintEpoch\}`\}/.test(cmv));
 const comp = /function CarClassPaintImage[\s\S]*?\n\}\n/.exec(cmv)?.[0] ?? "";
@@ -192,7 +195,8 @@ ok("S7a the gate: component state { img, epoch } set by THAT mount's onPainted",
   ok("S7c the gate, evaluated over render sequences: static art unless THIS mount's snapshot reported ready", gateLine !== "" && bad.length === 0, bad.join(" | "));
 }
 ok("S7b spriteSize × uiScale (1 on CarPlay: hudScaleFor returns 1 off Android)",
-  /spriteSize=\{carFlat \? vehiclePngScale\(s\.selfCarColor\) \* uiScale : 1\}/.test(cmv)
+  // × 0.9 since 2026-09-24 (Jeff: "make that car just a tad smaller") — the phone's class sprite carries the same factor.
+  /spriteSize=\{carFlat \? vehiclePngScale\(s\.selfCarColor\) \* uiScale \* 0\.9 : 1\}/.test(cmv)
   && /if \(Platform\.OS !== 'android' \|\| !\(w > 0\) \|\| !\(h > 0\)\) return 1;/.test(cmv));
 
 // ── R CarClassPaintImage, EVALUATED ─────────────────────────────────────────────────────────────────────────────────
@@ -290,6 +294,8 @@ ok("S7b spriteSize × uiScale (1 on CarPlay: hudScaleFor returns 1 off Android)"
     h.advance(3_349);
     const early = h.painted.length;
     h.advance(20_000);
+    // (2026-09-24: an early show after the SECOND onReady was tried for Jeff's white flash and withdrawn — Codex: the
+    // gen-2 remount re-registers the same name from a mount-time capture that can be blank. The last-capture gate stays.)
     ok("R2 iOS: two remounts, then onPainted once, 350 ms after the THIRD onReady — never on the first two",
       k1.endsWith("_g1") && k2.endsWith("_g2") && before1 === 0 && before2 === 0 && early === 0
       && h.painted.length === 1 && h.painted[0][1] === 3_350 && h.mounts === 3,

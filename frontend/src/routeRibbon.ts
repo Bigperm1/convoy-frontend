@@ -77,8 +77,20 @@ const BLEND_STEPS = 4;
  * Six steps, not three: at 3× on the simulator three steps read as a ladder of bands
  * in front of the nose (each ~7-13 px on a ~20 m fade); six are ~3-7 px each and read
  * as continuous. With butt caps the pieces meet flush, so the steps are the only seam.
+ *
+ * 2026-09-24, Jeff, driving, CarPlay photo: "it still looks stepped when it's about to touch
+ * the car. There's a lot of different steps to fading. Let's get that fade really smooth and
+ * really silky." Six linear steps were tuned on a 20 m fade; at his z14 highway camera the fade
+ * is 90-200 m (ribbon-trim fade=92…218), so each step was 15-35 m ≈ 25-60 px — a visible
+ * ladder. Now SIXTEEN pieces on a smoothstep curve (t²(3−2t)): ~6 m / ~10 px each at z14,
+ * ~1.5 m / ~6 px at z16.75, starting from almost nothing (0.003) instead of a 0.14 hard edge,
+ * easing into solid instead of jumping 0.86 → 1. Per-frame cost: 16 short slices instead of 6.
  */
-const FADE_ALPHA = [0.14, 0.28, 0.43, 0.57, 0.72, 0.86];
+const FADE_STEPS = 16;
+const FADE_ALPHA: number[] = Array.from({ length: FADE_STEPS }, (_, j) => {
+  const t = (j + 0.5) / FADE_STEPS;
+  return Math.round(t * t * (3 - 2 * t) * 1000) / 1000;
+});
 /**
  * How far the line start must move ON SCREEN before the source is rebuilt.
  * MEASURED against a 300-vertex, 27 km line at 49°N with 12 Hz ticks: at 1 dp a car
@@ -274,8 +286,12 @@ export function buildRibbonFeatures(
 // destination, rebuilt only when the seam moves (every RIBBON_SEAM_* metres, not every 8 m).
 // The pieces meet flush at the seam with BUTT caps on both layers, so the translucent glow can
 // no longer carry round caps: its start fades in over the second half of the fade instead.
-/** The glow's fade-in (alpha of its first pieces), over the second half of the core's fade. */
-const GLOW_RAMP = [0.33, 0.66];
+/** The glow's fade-in (alpha of its first pieces), over the second half of the core's fade —
+ *  four smoothstep pieces since 2026-09-24 (was two linear ones), same reason as FADE_ALPHA. */
+const GLOW_RAMP: number[] = Array.from({ length: 4 }, (_, j) => {
+  const t = (j + 0.5) / 4;
+  return Math.round(t * t * (3 - 2 * t) * 1000) / 1000;
+});
 /** Seam step floor (m) and how many fades it spans: the far piece moves in these steps. */
 export const RIBBON_SEAM_MIN_M = 48;
 export const RIBBON_SEAM_FADE_MULT = 1;

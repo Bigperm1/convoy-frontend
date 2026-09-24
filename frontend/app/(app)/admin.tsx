@@ -75,6 +75,19 @@ function isOrphaned(u: AdminUser): boolean {
   return u.runtime_version !== CURRENT_RUNTIME;
 }
 
+// INACTIVE (2026-09-24): nothing from this account in 30 days — no location post (last_seen), no launch
+// report (version_seen_at) — or it never reported a device at all and is older than a day. Seed accounts,
+// e2e sign-ups and testers who never installed a build all land here; the Remove button beside the row is
+// how Jeff clears them (owner-only on the server).
+function isInactive(u: AdminUser): boolean {
+  const stamps = [u.last_seen, u.version_seen_at, u.created_at]
+    .map((s) => (s ? new Date(s).getTime() : NaN))
+    .filter((t) => !isNaN(t));
+  if (!stamps.length) return false;
+  const ageDays = (Date.now() - Math.max(...stamps)) / 86400000;
+  return ageDays > 30 || (!u.device_model && ageDays > 1);
+}
+
 // Icon hint for the platform: Apple logo for iOS, Android robot otherwise.
 function deviceIcon(u: AdminUser): any {
   const p = (u.os_name || u.push_platform || '').toLowerCase();
@@ -159,6 +172,33 @@ export default function AdminScreen() {
     }
   }, []);
 
+  // Remove an account (Jeff, 2026-09-24: "remove all the inactive users in the admin panel"). Owner-only on the
+  // server, confirmed here with the handle and when it was last seen; the server pulls the id from clubs,
+  // events and threads. No undo — the confirm says so.
+  const removeUser = useCallback((u: AdminUser) => {
+    Alert.alert(
+      `Remove ${u.handle || u.email}?`,
+      `Deletes the account and takes it out of every club, event and thread. Last seen ${ago(u.last_seen)}, joined ${ago(u.created_at)}. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove', style: 'destructive',
+          onPress: async () => {
+            setBusyEmail(u.email);
+            try {
+              await api.delete(`/admin/users/${encodeURIComponent(u.id)}`);
+              setUsers((list) => list.filter((x) => x.id !== u.id));
+            } catch (e: any) {
+              Alert.alert("Couldn't remove", formatErr(e));
+            } finally {
+              setBusyEmail(null);
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
   const saveInstallUrl = useCallback(async () => {
     const url = installUrl.trim();
     if (!url.startsWith('http')) {
@@ -207,25 +247,40 @@ export default function AdminScreen() {
               {versionLabel(item)}{isOrphaned(item) ? '  ·  ORPHANED (needs a build)' : ''}
             </Text>
           </View>
+          {isInactive(item) && (
+            <Text style={styles.inactiveTag}>INACTIVE · {item.device_model ? 'no activity in 30 days' : 'never installed a build'}</Text>
+          )}
           {code && (
             <Text selectable style={[styles.codePill, { color: accent }]}>
               Code {code.code} · relay now
             </Text>
           )}
         </View>
-        <TouchableOpacity
-          style={[styles.resetBtn, { backgroundColor: accent }, busy && { opacity: 0.6 }]}
-          onPress={() => genCode(item)}
-          disabled={busy}
-          activeOpacity={0.85}
-        >
-          {busy
-            ? <ActivityIndicator size="small" color="#1a1a1a" />
-            : <Text style={styles.resetBtnText}>Reset code</Text>}
-        </TouchableOpacity>
+        <View style={{ alignItems: 'stretch', gap: 6 }}>
+          <TouchableOpacity
+            style={[styles.resetBtn, { backgroundColor: accent }, busy && { opacity: 0.6 }]}
+            onPress={() => genCode(item)}
+            disabled={busy}
+            activeOpacity={0.85}
+          >
+            {busy
+              ? <ActivityIndicator size="small" color="#1a1a1a" />
+              : <Text style={styles.resetBtnText}>Reset code</Text>}
+          </TouchableOpacity>
+          {(item.email || '').trim().toLowerCase() !== OWNER_EMAIL && (
+            <TouchableOpacity
+              style={[styles.removeBtn, busy && { opacity: 0.6 }]}
+              onPress={() => removeUser(item)}
+              disabled={busy}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.removeBtnText}>Remove</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     );
-  }, [codes, busyEmail, genCode, accent]);
+  }, [codes, busyEmail, genCode, removeUser, accent]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -328,7 +383,7 @@ const styles = StyleSheet.create({
   subtitle: { color: COLORS.textDim, fontSize: 12, marginTop: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   centerText: { color: COLORS.textDim, fontSize: 14, textAlign: 'center' },
-  retryBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.1)' },
+  retryBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)' },
   retryText: { color: COLORS.text, fontWeight: '600' },
   searchWrap: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -355,6 +410,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 10, minWidth: 96, alignItems: 'center',
   },
   resetBtnText: { color: '#1a1a1a', fontWeight: '700', fontSize: 13 },
+  removeBtn: {
+    borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,69,58,0.55)',
+    paddingHorizontal: 14, paddingVertical: 8, minWidth: 96, alignItems: 'center',
+  },
+  removeBtnText: { color: '#FF453A', fontWeight: '700', fontSize: 13 },
+  inactiveTag: { color: '#FF9F0A', fontSize: 11, fontWeight: '800', letterSpacing: 0.6, marginTop: 4 },
   installCard: {
     backgroundColor: '#161618', borderRadius: 14, borderWidth: 1, borderColor: '#2a2a2e',
     padding: 14, marginBottom: 12,

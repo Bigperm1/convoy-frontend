@@ -73,7 +73,6 @@ export default function MemberCarousel({ members, mode, selected, onSelect, empt
                   52 pt inside the 56 pt ring: the hero shot's size before this. */}
               <MemberCarIcon
                 size={52}
-                shape="round"
                 dim={!enabled}
                 identity={m.identity ?? memberIdentityFrom(m)}
               />
@@ -98,7 +97,7 @@ const styles = StyleSheet.create({
   row: { gap: 14, paddingHorizontal: 14, paddingVertical: 8 },
   chip: { width: 64, alignItems: "center", gap: 6 },
   avatarWrap: {
-    width: 56, height: 56, borderRadius: 28,
+    width: 56, height: 56, borderRadius: 16,   // the H menu button's square (28 % of the side), like every member icon
     backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",
     borderWidth: 2, borderColor: "rgba(255,255,255,0.14)",

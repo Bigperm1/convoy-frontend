@@ -278,7 +278,7 @@ export default function HubScreen() {
             fallback says "profile", not "Garage": this band opens the profile
             sheet, never the Garage (Jeff, 2026-09-23: menu reorganization). */}
         <TouchableOpacity testID="hub-profile" onPress={() => setShowProfile(true)} activeOpacity={0.85} style={styles.driverBand}>
-          <MemberCarIcon size={52} shape="round" style={styles.driverCar} identity={memberIdentityForSelf(settings, garage)} />
+          <MemberCarIcon size={52} style={styles.driverCar} identity={memberIdentityForSelf(settings, garage)} />
           <View style={{ flex: 1 }}>
             <Text style={styles.driverName}>{user?.handle || "Driver"}</Text>
             <Text style={[styles.driverCarTxt, { color: accent }]} numberOfLines={1}>
@@ -624,7 +624,7 @@ function ClubStandings({ communityId }: { communityId: string }) {
             <View style={[styles.standRank, { backgroundColor: i === 0 ? accent : "rgba(255,255,255,0.08)" }]}>
               <Text style={[styles.standRankTxt, { color: i === 0 ? "#111" : "#C7C7CC" }]}>{i + 1}</Text>
             </View>
-            <MemberCarIcon size={36} shape="round" style={styles.standCar} identity={carOf(r.userId)} />
+            <MemberCarIcon size={36} style={styles.standCar} identity={carOf(r.userId)} />
             <Text style={styles.standName} numberOfLines={1}>
               {r.handle}{r.userId === String(user?.id ?? "") ? " (you)" : ""}
             </Text>
@@ -1533,7 +1533,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                     <View key={row.userId} style={[styles.boardRow, me && styles.boardRowMe, me && { borderColor: boardMeEdge }]}>
                       <Text style={[styles.boardRank, i < 3 && styles.boardRankTop, i < 3 && { color: accent }]}>{i + 1}</Text>
                       {/* The member's car (2026-09-23) — matched to the club roster by user id. */}
-                      <MemberCarIcon size={28} shape="round" style={styles.boardCar} identity={memberIcon(rosterById.get(row.userId) ?? { id: row.userId })} />
+                      <MemberCarIcon size={28} style={styles.boardCar} identity={memberIcon(rosterById.get(row.userId) ?? { id: row.userId })} />
                       <Text style={[styles.boardHandle, me && { fontWeight: "800" }]} numberOfLines={1}>
                         {row.handle}{me ? " · you" : ""}
                       </Text>
@@ -1582,7 +1582,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
               const canRemove = c?.is_admin && !isSelf && !m.is_owner && (c?.is_owner || !m.is_admin);
               return (
                 <View key={m.id} style={styles.memberRow}>
-                  <MemberCarIcon size={42} shape="square" radius={12} style={styles.memberCarAvatar} identity={memberIcon(m)} />
+                  <MemberCarIcon size={42} style={styles.memberCarAvatar} identity={memberIcon(m)} />
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <Text style={styles.pendingName}>{m.handle || "anon"}{isSelf ? " (you)" : ""}</Text>
@@ -1642,7 +1642,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
                   <View key={u.id} style={styles.memberRow}>
                     {/* pending_users rows carry car_color + appearance since 2026-09-23 (server.py); a row without
                         either draws the default picture. */}
-                    <MemberCarIcon size={42} shape="square" radius={12} style={styles.memberCarAvatar} identity={memberIcon(u)} />
+                    <MemberCarIcon size={42} style={styles.memberCarAvatar} identity={memberIcon(u)} />
                     <Text style={styles.pendingName}>{u.handle || u.email}</Text>
                     <TouchableOpacity testID={`approve-${u.id}`} onPress={() => approve(u.id)} style={[styles.smallBtn, { backgroundColor: COLORS.success }]}>
                       <Text style={styles.smallBtnText}>Approve</Text>
@@ -1696,7 +1696,7 @@ function CommunityDetailModal({ community, onClose, onChanged }: any) {
               const already = memberIds.includes(r.id);
               return (
                 <View key={r.id} style={styles.memberRow}>
-                  <MemberCarIcon size={42} shape="square" radius={12} style={styles.memberCarAvatar} identity={memberIcon(r)} />
+                  <MemberCarIcon size={42} style={styles.memberCarAvatar} identity={memberIcon(r)} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.pendingName}>{r.handle || "anon"}</Text>
                     {(r.car_make || r.car_model || r.car_color) ? (

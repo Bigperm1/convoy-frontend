@@ -113,7 +113,6 @@ export default function PeerModal({ peer, visible, onClose, myCoords, myTopSpeed
                 {/* Their car as the map draws it (MemberCarIcon, 2026-09-23) in the 56 pt ring. */}
                 <MemberCarIcon
                   size={56}
-                  shape="round"
                   style={[styles.avatar, { borderColor: skinHairline }]}
                   identity={memberIdentityFrom(peer)}
                 />

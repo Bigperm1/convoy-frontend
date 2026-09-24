@@ -227,7 +227,6 @@ export default function ShareSheet({ visible, onClose, share }: Props) {
                         else the real car (MemberCarIcon, 2026-09-23) — in the 46 pt ring as before. */}
                     <MemberCarIcon
                       size={46}
-                      shape="round"
                       style={styles.avatarWrap}
                       identity={memberIdentityFrom(m, crew)}
                     />

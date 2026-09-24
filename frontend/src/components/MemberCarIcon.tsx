@@ -302,23 +302,35 @@ function CarArtFor({ identity, size, dim }: { identity: MemberIdentity; size: nu
 export type MemberCarIconProps = {
   /** The frame's side in pt. */
   size: number;
-  shape: "round" | "square";
-  /** square only: the corner radius (default ≈ 28 % of the side — the Club roster's 12 pt on 42). */
+  /** Always the H menu button's rounded square now (Jeff, 2026-09-24: "consistent with the same square as the H
+   *  logo menu for all places"); `round` is kept for the type only and draws the same square. */
+  shape?: "round" | "square";
+  /** The corner radius — default 28 % of the side, the ConvoyLogo / mapLogoBacking ratio (14 on 50). */
   radius?: number;
   identity?: MemberIdentity | null;
   /** Offline members: the art at 85 % (the Crew carousel's rule — a white paint must still read white). */
   dim?: boolean;
-  /** The site's own frame — ring, background, radius. Width/height come from `size`. */
+  /** The site's own tint / ring colour. The shape itself is not the site's to change: the radius is applied last. */
   style?: StyleProp<ViewStyle>;
   testID?: string;
 };
 
-function MemberCarIconImpl({ size, shape, radius, identity, dim, style, testID }: MemberCarIconProps) {
-  const r = shape === "round" ? size / 2 : (radius ?? Math.round(size * 0.28));
+/** The H menu button's frame (map.tsx mapLogoBacking: 50 × 50, r14, a 1 px 18 % white hairline over clear glass) —
+ *  every member icon wears it so a car reads the same in a roster, a sheet, a picker and the Club. On a sheet the
+ *  glass is a dark tint rather than a live blur (a blur per row is what the old pill rows cost). */
+const FRAME_BORDER = "rgba(255,255,255,0.18)";
+const FRAME_FILL = "rgba(20,22,26,0.6)";
+
+function MemberCarIconImpl({ size, radius, identity, dim, style, testID }: MemberCarIconProps) {
+  const r = radius ?? Math.round(size * 0.28);
   return (
     <View
       testID={testID}
-      style={[{ width: size, height: size, borderRadius: r, overflow: "hidden", alignItems: "center", justifyContent: "center" }, style]}
+      style={[
+        { width: size, height: size, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: FRAME_FILL, borderWidth: 1, borderColor: FRAME_BORDER },
+        style,
+        { width: size, height: size, borderRadius: r },
+      ]}
     >
       <CarArtFor identity={identity ?? { kind: "car" }} size={size} dim={dim} />
     </View>

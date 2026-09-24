@@ -968,7 +968,7 @@ export default function TalkScreen() {
                         </TouchableOpacity>
                         {/* The speaker's car, beside the play button (which stays exactly as it was): live
                             presence when they are on the map, else the roster's profile (2026-09-23). */}
-                        <MemberCarIcon size={36} shape="round" style={styles.txCar} identity={speakerIdentity(m.user_id)} />
+                        <MemberCarIcon size={36} style={styles.txCar} identity={speakerIdentity(m.user_id)} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.convoSpeaker} numberOfLines={1}>{m.handle || 'Driver'}</Text>
                           <Text style={styles.convoMeta}>{fmtClock(m.created_at)} · {fmtDur(m.duration_ms)}</Text>
@@ -1010,7 +1010,6 @@ export default function TalkScreen() {
                       {/* Their car in the 36 pt disc (accent-filled when picked, as before) — not a person glyph. */}
                       <MemberCarIcon
                         size={36}
-                        shape="round"
                         style={[styles.pickAvatar, on && [styles.pickAvatarOn, { backgroundColor: accent }]]}
                         identity={memberIdentityFrom(m, crew)}
                       />

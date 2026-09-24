@@ -1033,7 +1033,6 @@ export function EventDetailModal({ event: e, onClose, onChanged, onDeleted, onEd
                     {/* Their car, not a person glyph (2026-09-23) — 28 pt: the smallest a car still reads at. */}
                     <MemberCarIcon
                       size={28}
-                      shape="round"
                       style={styles.rosterCarIcon}
                       identity={me?.id && String(u.id) === String(me.id) ? memberIdentityForSelf(settings, garage) : memberIdentityFrom(u, crew)}
                     />

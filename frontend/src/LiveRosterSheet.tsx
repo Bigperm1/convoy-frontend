@@ -103,7 +103,6 @@ export default function LiveRosterSheet({ visible, onClose, peers, myCoords, onD
                           (MemberCarIcon, 2026-09-23); the frame is the 42 pt ring it always was. */}
                       <MemberCarIcon
                         size={42}
-                        shape="round"
                         style={[styles.avatar, { borderColor: avatarRing }]}
                         identity={memberIdentityFrom(p)}
                       />

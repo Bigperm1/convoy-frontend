@@ -69,6 +69,13 @@ novaSpeeding: boolean;
 // pre-existing choice.
 speedAlertMode?: 'off' | 'nova' | 'ding';
 novaMidDrive: boolean;
+// DRIVE CHECK-INS (Jeff, 2026-09-24): after 90 minutes of actual driving, and every 90 after,
+// Scout says one short thing — fatigue check, stretch, water, a joke, the crew, the destination.
+// src/scoutCheckIn.ts (the clock + the lines) and src/scoutCheckInRuntime.ts (the wiring).
+scoutCheckIns: boolean;
+// QA only — overrides the 90-minute interval (minutes) so the simulator can show a check-in.
+// Never set from the UI; undefined = 90.
+scoutCheckInMinutes?: number;
 // PITSTOP — when the car sits still at a gas station / food place, a live timer
 // appears on the map and CarPlay counting the stop, and the drive banks a running
 // total. Purely informational: it deliberately does NOT feed the ETA, because
@@ -302,6 +309,7 @@ novaMidDrive: false,  // mid-drive callouts OFF at first launch (Jeff, 2026-09-2
                       // the 09-17 unit-economics research; was ON since 2026-07-25). Existing installs were
                       // already moved to OFF by the novaQuietMigrated migration below; the toggle stays in
                       // Settings → Scout voice for anyone who wants it.
+scoutCheckIns: true,  // drive check-ins ON at first launch (Jeff, 2026-09-24: "build the 1.5hr drive reminder")
 pitstop: true,        // Pitstop timer ON at first launch (Jeff, 2026-07-26)
 novaMuted: false,
 novaVoice: true,

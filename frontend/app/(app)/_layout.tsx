@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import VoiceController from "../../src/VoiceController";
+import { startScoutCheckIns } from "../../src/scoutCheckInRuntime";
 
 // iOS 26+ → the tab bar floats on real Liquid Glass; older iOS/Android keep the
 // solid dark surface.
@@ -231,6 +232,10 @@ export default function AppLayout() {
   // Start phone-call detection (ducks Nova while on a call). No-op until the
   // native detector module ships in a build — see src/callState.ts.
   useEffect(() => { initCallDetection(); }, []);
+
+  // Scout's drive check-ins (Jeff, 2026-09-24): a 90-minute moving-time clock fed by the car
+  // store's speed ticks; one short spoken line when it lands, on whichever tab is open.
+  useEffect(() => { startScoutCheckIns(); }, []);
 
   // Backfill the car identity from the account profile whenever the user loads.
   // A fresh install / new build wipes local AsyncStorage, so without this the

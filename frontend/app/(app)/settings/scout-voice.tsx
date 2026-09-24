@@ -69,6 +69,8 @@ export default function ScoutVoicePage() {
         <ToggleRow icon="sparkles" iconColor="#BF5AF2" title="Route greeting" subtitle="Scout's personable hello when you tap Start on a drive" value={settings.novaGreeting !== false} onChange={(v) => setSettings({ novaGreeting: v })} />
         <Divider />
         <ToggleRow icon="navigate-circle" iconColor="#0A84FF" title="Mid-drive callouts" subtitle="Proactive faster-route and hazard-ahead suggestions while navigating" value={settings.novaMidDrive !== false} onChange={(v) => setSettings({ novaMidDrive: v })} />
+        <Divider />
+        <ToggleRow icon="cafe" iconColor="#FF9F0A" title="Drive check-ins" subtitle="Every hour and a half on the road, Scout checks in — a fatigue check, a stretch, a joke, a word on the crew or the destination. A 15-minute stop resets the clock" value={settings.scoutCheckIns !== false} onChange={(v) => setSettings({ scoutCheckIns: v })} />
       </SettingsCard>
 
       <SectionLabel>SPEED ALERT</SectionLabel>

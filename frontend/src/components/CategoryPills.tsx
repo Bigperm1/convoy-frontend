@@ -348,7 +348,9 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   </View>
                   <View style={styles.resultLeft}>
                     <View style={styles.resultTitleRow}>
-                      <Text maxFontSizeMultiplier={1} style={styles.resultName} numberOfLines={1}>{i + 1}.  {r.label}</Text>
+                      {/* The name wears the category colour and the star is yellow (Jeff, 2026-09-23: "make the
+                          stars yellow / the name of the place in the color of the menu like food coral pink"). */}
+                      <Text maxFontSizeMultiplier={1} style={[styles.resultName, { color: c.bright }]} numberOfLines={1}>{i + 1}.  {r.label}</Text>
                       <Text maxFontSizeMultiplier={1} style={styles.resultDist} numberOfLines={1}>{fmtDist(r.distanceM, unit)}</Text>
                     </View>
                     {!!r.address && <Text maxFontSizeMultiplier={1} style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>}
@@ -356,7 +358,13 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                       {/* Compact on purpose — the dropdown is ~300 pt of text width and a gas row also carries
                           its price here (sim, 2026-09-23: "246 reviews… Premium $2.42" clipped the reviews). */}
                       <Text maxFontSizeMultiplier={1} style={styles.meta} numberOfLines={1}>
-                        {typeof r.rating === "number" ? `★ ${r.rating.toFixed(1)}${typeof r.ratingCount === "number" ? ` (${r.ratingCount})` : ""} · ` : ""}{fmtEta(r.distanceM)}
+                        {typeof r.rating === "number" ? (
+                          <>
+                            <Text style={styles.star}>★</Text>
+                            {` ${r.rating.toFixed(1)}${typeof r.ratingCount === "number" ? ` (${r.ratingCount})` : ""} · `}
+                          </>
+                        ) : null}
+                        {fmtEta(r.distanceM)}
                       </Text>
                       {r.isGas && (
                         <Text maxFontSizeMultiplier={1} style={[styles.gasPrice, { color: r.cheapest ? "#2DEC86" : c.bright }]} numberOfLines={1}>
@@ -485,5 +493,6 @@ const styles = StyleSheet.create({
   resultAddr: { color: "rgba(244,244,244,0.7)", fontSize: 13, marginTop: 1 },
   metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 2 },
   meta: { color: "#9A9A9E", fontSize: 12, fontWeight: "500", letterSpacing: 0.2, flexShrink: 1 },
+  star: { color: "#FFD60A" },   // the rating star, yellow — in a list, not on the route line (DESIGN.md's traffic rule is the ribbon's)
   gasPrice: { fontSize: 13, fontWeight: "800", letterSpacing: -0.1 },
 });

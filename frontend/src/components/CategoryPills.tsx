@@ -277,7 +277,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         style={styles.chip}
       >
         <View style={[styles.chipCircle, { borderColor: c.bright }, active && { backgroundColor: c.bright }]}>
-          {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: CHIP_D / 2, overflow: "hidden" }} />}
+          {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: CHIP_R, overflow: "hidden" }} />}
           {loading ? (
             <ActivityIndicator size="small" color={active ? "#1C1C1E" : c.bright} />
           ) : (
@@ -301,7 +301,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         {/* More pill — always last, opens the overflow sheet. */}
         <PressableScale testID="cat-pill-more" hitSlop={0} onPress={() => setMoreOpen(true)} style={styles.chip}>
           <View style={[styles.chipCircle, { borderColor: "rgba(255,255,255,0.28)" }]}>
-            <GlassFill tintColor={hudTint()} style={{ borderRadius: CHIP_D / 2, overflow: "hidden" }} />
+            <GlassFill tintColor={hudTint()} style={{ borderRadius: CHIP_R, overflow: "hidden" }} />
             <MaterialCommunityIcons name="dots-horizontal" size={24} color="#F4F4F4" />
           </View>
           <Text maxFontSizeMultiplier={1} style={styles.chipLabel}>More</Text>
@@ -416,8 +416,14 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   );
 }
 
-// The round category chip: Ø 56 pt (the mock Jeff approved 2026-09-23), a 44 pt+ touch target on its own.
-const CHIP_D = 56;
+// The category chip: the SAME rounded square as the H menu button on the map — mapLogoBacking is 50 × 50 pt
+// with a 14 pt radius (Jeff, 2026-09-23: "change the gas/food etc from circle to the same square as the H menu
+// same size"). Still a 44 pt+ touch target on its own.
+const CHIP_D = 50;
+const CHIP_R = 14;
+/** The results-row badge: the chip's twin, smaller — the H menu's own 36 pt / 10 pt row tiles. */
+const BADGE_D = 36;
+const BADGE_R = 10;
 
 const styles = StyleSheet.create({
   wrap: { marginTop: 8 },
@@ -428,7 +434,7 @@ const styles = StyleSheet.create({
   row: { gap: 4, paddingRight: 16, paddingLeft: 8, alignItems: "flex-start" },
   chip: { width: CHIP_D + 6, alignItems: "center", gap: 5 },
   chipCircle: {
-    width: CHIP_D, height: CHIP_D, borderRadius: CHIP_D / 2,
+    width: CHIP_D, height: CHIP_D, borderRadius: CHIP_R,
     alignItems: "center", justifyContent: "center",
     // The ring is the category colour (set inline). Inside: the clear glass (GlassFill, which clips
     // itself) over a light dark floor — a 56 pt circle is a bigger surface than the old pill and
@@ -437,7 +443,9 @@ const styles = StyleSheet.create({
     borderWidth: 2, backgroundColor: "rgba(20,22,26,0.38)",
     shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
-  chipLabel: { color: "#C7C7CC", fontSize: 11.5, fontWeight: "600", letterSpacing: 0.1, width: CHIP_D + 16, textAlign: "center" },
+  // Label width = the chip pitch (box 56 + gap 4), so neighbouring labels never touch ("Car Wash Car Repair"
+  // ran together at 66 wide on the sim); 11 pt keeps "Car Repair" inside it.
+  chipLabel: { color: "#C7C7CC", fontSize: 11, fontWeight: "600", letterSpacing: 0.1, width: CHIP_D + 10, textAlign: "center" },
   chipLabelActive: { color: "#F4F4F4" },
   // ===== "More" bottom sheet =====
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
@@ -452,7 +460,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap" },
   gridItem: { width: "25%", alignItems: "center", marginBottom: 18 },
   gridIcon: {
-    width: 52, height: 52, borderRadius: 26,
+    width: CHIP_D, height: CHIP_D, borderRadius: CHIP_R,   // the chip's square, so More reads as more chips
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(22,26,32,0.9)",
     borderWidth: 2,   // ring in the category's colour (set inline) — the chip's twin
@@ -488,7 +496,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.08)",
   },
   // The row badge: the chip's twin at 36 pt — dark fill, thin ring + glyph in the category colour.
-  badge: { width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(22,26,32,0.9)" },
+  badge: { width: BADGE_D, height: BADGE_D, borderRadius: BADGE_R, borderWidth: 1.5, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(22,26,32,0.9)" },
   resultLeft: { flex: 1 },
   resultTitleRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
   resultName: { flex: 1, color: "#F4F4F4", fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },

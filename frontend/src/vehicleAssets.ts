@@ -664,3 +664,27 @@ export const CLASS_TOPDOWN: Partial<Record<string, any>> = {
   atv:        require("../assets/images/classes-v2/atv.png"),
   sxs:        require("../assets/images/classes-v2/sxs.png"),        // Can-Am Maverick
 };
+
+/**
+ * The SAME class art at the GR Corolla sprite's size (44 pt, @2x/@3x) — for the car surfaces' own flat car (2026-09-23).
+ * Jeff, driving: "when I'm on the silver tier and I select, say, the exotic car, it's showing my GR Corolla as the
+ * avatar or car marker when it's supposed to be the exotic car." CarPlay / Android Auto drew the driver's flat car from
+ * the GRC photo by paint whatever the class. Their sprite scale (vehiclePngScale, inside the nav-locked
+ * CarMapView car-jsx-selfcar-model JSX) is tuned for the 44 pt GRC photos, so the class art is re-made at that size —
+ * a square crop whose side is the car's length, like the photos (tools/classes-car/make.py) — instead of the 512 px
+ * CLASS_TOPDOWN, which would draw ~12x too big there. Unpainted, as the car surfaces draw every class peer.
+ */
+export const CLASS_TOPDOWN_CAR: Partial<Record<string, any>> = {
+  hatchback:  require("../assets/vehicles/classes-car/hatchback.png"),
+  sedan:      require("../assets/vehicles/classes-car/sedan.png"),
+  boat:       require("../assets/vehicles/classes-car/boat.png"),
+  jeep:       require("../assets/vehicles/classes-car/jeep.png"),
+  muscle:     require("../assets/vehicles/classes-car/muscle.png"),
+  supercar:   require("../assets/vehicles/classes-car/supercar.png"),
+  electric:   require("../assets/vehicles/classes-car/electric.png"),
+  exotic:     require("../assets/vehicles/classes-car/exotic.png"),
+  truck:      require("../assets/vehicles/classes-car/truck.png"),
+  motorcycle: require("../assets/vehicles/classes-car/motorcycle.png"),
+  atv:        require("../assets/vehicles/classes-car/atv.png"),
+  sxs:        require("../assets/vehicles/classes-car/sxs.png"),
+};

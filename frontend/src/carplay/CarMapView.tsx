@@ -51,7 +51,7 @@ const CAR_PIN_SCALE = 0.8;
 const WX_PIN_ON_CAR = Platform.OS === 'ios';
 import { buildCongestionGradient } from '../mapboxDirections';
 import { roundaboutHoldDistM, ROUNDABOUT_HOLD_M, ROUNDABOUT_HOLD_ENABLED } from '../chaseZoom';
-import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from '../vehicleAssets';
+import { getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, getVehiclePngOrDefault, isLitPreset, vehiclePngScale, CLASS_TOPDOWN, CLASS_TOPDOWN_CAR } from '../vehicleAssets';
 import {
   CAR_EMISSIVE_BY_MODE,
   ROUTE_GREEN_CORE,
@@ -741,7 +741,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // 🔒 NAV-LOCK end car-follow-pitch-target
   // Sprite id for the flat car. Registered as a Mapbox image below — the car map had
   // no <Images> at all before this, so the sprite path could not have worked.
-  const carFlatImg = 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
+  // A CLASS car draws its class — the flat car was the GR Corolla photo by paint for every class (Jeff, driving,
+  // 2026-09-23: "it's showing my GR Corolla as the avatar or car marker when it's supposed to be the exotic car").
+  // CLASS_TOPDOWN_CAR is the class art at the GRC photo's 44 pt, so the locked sprite scale below draws it the same size.
+  const selfClassKey = canonicalClass(s.selfClass);
+  const selfClassCarArt = s.selfMarkerType === 'class' ? (CLASS_TOPDOWN_CAR as any)[selfClassKey] : undefined;
+  const carFlatImg = selfClassCarArt ? 'self_car_cls_' + selfClassKey : 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
 
   // ── PEERS AS REAL CARS, NOT GREEN DOTS (Jeff, 2026-08-12) ───────────────────
   // "on CarPlay when I hit the crew, it doesn't show the high resolution car. It shows
@@ -860,7 +865,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const tier = useAppSkin();
   const allMapImages = React.useMemo(
     () => ({
-      [carFlatImg]: getVehiclePngOrDefault(s.selfCarColor),
+      [carFlatImg]: selfClassCarArt ?? getVehiclePngOrDefault(s.selfCarColor),
       // The waypoint pin. Same asset the phone's destination and stop markers use, so a
       // stop looks like the SAME object on both screens rather than a car-only invention.
       brand_pin: require('../../assets/images/brand-pin.png'),
@@ -869,7 +874,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         : {}),
       ...peerImages,
     }),
-    [carFlatImg, s.selfCarColor, peerImages, tier],
+    [carFlatImg, selfClassCarArt, s.selfCarColor, peerImages, tier],
   );
 
   // ── WAYPOINT PINS — THE STOPS AND THE DESTINATION (2026-08-31) ───────────────

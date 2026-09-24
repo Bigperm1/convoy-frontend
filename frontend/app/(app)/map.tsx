@@ -49,7 +49,7 @@ import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, h
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
-import { useMapView2D, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
+import { useMapView2D, useMapView2DLocked, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
 import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
 import { takeIntent, subscribeIntent } from "../../src/deepLinks";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
@@ -2219,6 +2219,8 @@ export default function MapScreen() {
   // 2D convoy view (see src/mapViewMode.ts). Drives the FAB label AND is handed to the
   // map engine below so pitch + marker art follow it.
   const view2D = useMapView2D();
+  // Free's arrow / Silver's class car keep the map 2D (mapViewMode isMapView2DLocked) — no 3D to offer, so no FAB.
+  const view2DLocked = useMapView2DLocked();
   const hazardsRef = useRef<Hazard[]>([]);
   useEffect(() => { hazardsRef.current = hazards; }, [hazards]);
   const destRef = useRef(destination);
@@ -6010,7 +6012,8 @@ export default function MapScreen() {
         {/* ONLY WHILE ROUTING (Jeff, 2026-08-18): idle is pinned to the 2D sprite view,
             3D exists only during a drive — so the toggle has nothing to do when no
             route is running and would only offer a rule-breaking idle 3D. */}
-        {navMode === "turn-by-turn" && (
+        {/* …and not with a 2D car on the road (Jeff, 2026-09-23: Free and Silver are "stuck on 2D"). */}
+        {navMode === "turn-by-turn" && !view2DLocked && (
         <PressableScale
           testID="view-2d-3d-fab"
           // 60 pt FABs stacked 10 pt apart: keep today's touch targets, since a default slop would let

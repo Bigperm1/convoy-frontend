@@ -11,7 +11,7 @@ import type { MapMode, Settings } from '../settings';
 // VALUE import (this used to be type-only): the settings→car mirror at the bottom of
 // this file needs the live accessors. No import cycle — settings.ts imports only
 // AsyncStorage and react (settings.ts:2-3).
-import { getSettings, getMapMode, getRouteColor, getSelfMarkerType, subscribeSettings } from '../settings';
+import { getSettings, getMapMode, getRouteColor, getSelfMarkerType, getVehicleClass, subscribeSettings } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 import type { CarStatusCode } from './carStatusRule';
 // Timer-liveness receipt (2026-09-04/05) — see src/timerLiveness.ts. setCarSelfPosition
@@ -173,6 +173,10 @@ export type CarState = {
   // 'class' falls back to the 3D car on the head unit for now (the top-down
   // class sprite is phone-only until the CarPlay parity pass).
   selfMarkerType?: 'car' | 'arrow' | 'photo' | 'class';
+  // The driver's CLASS (mirror of settings.vehicleClass, canonical) — so a 'class' marker draws THAT class's top-down
+  // art on the car surfaces, not the GR Corolla photo by paint (Jeff, 2026-09-23: "it's showing my GR Corolla as the
+  // avatar or car marker when it's supposed to be the exotic car").
+  selfClass?: string;
   // Driver's speed unit (mirror of settings.speedUnit). CarSurface reads
   // getSettings().speedUnit directly at render — correct (one JS context, shared
   // module cache) but NOT reactive: nothing re-renders the car tree when the unit
@@ -657,6 +661,7 @@ function mirrorSettingsToCar(s: Settings): void {
       selfScanId: s.carScanId,
       mapMode: getMapMode(s),
       selfMarkerType: getSelfMarkerType(s),
+      selfClass: getVehicleClass(s),
       routeColor: getRouteColor(s),
       speedUnit: s.speedUnit,
     });

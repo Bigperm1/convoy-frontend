@@ -7,9 +7,10 @@
 // ON the route (mapboxDirections.ts CONGESTION_COLOR — DESIGN.md: a route line that reads as traffic is the one thing
 // the route colour must never do).
 //   R1 every MORE swatch is ≥ 10.5 ΔE2000 from every other swatch (presets included)
-//   R2 every MORE swatch is ≥ 22 from each traffic colour (moderate / heavy / severe)
+//   R2 EVERY swatch, presets included, is ≥ 22 from each traffic colour (moderate / heavy / severe) — Jeff, 2026-09-23:
+//      "YES REMOVE THE TRAFFIC COLORS EXCEPT THE SYSTEM GREEN" (Yellow / Orange / Red were those exact colours)
 //   R3 every MORE swatch is ≥ 14 from the day map's land / park / roads / water / white (sampled 2026-09-23)
-//   R4 there are 30 swatches, no duplicates, and the spectrum (locationX) is gone
+//   R4 there are 27 swatches (7 presets + 20), no duplicates, the system Green is still one, and the spectrum is gone
 // Run: node --experimental-strip-types tools/sim-qc/route_palette_test.mts
 
 import { readFileSync } from "node:fs";
@@ -69,21 +70,22 @@ function de2000([L1, a1, b1]: Lab, [L2, a2, b2]: Lab): number {
 }
 
 const all = [...PRESETS, ...MORE];
-ok("R4 30 swatches (10 presets + 20 more), no duplicate hex",
-  PRESETS.length === 10 && MORE.length === 20 && new Set(all.map((s) => s.hex.toLowerCase())).size === 30,
+ok("R4 27 swatches (7 presets + 20 more), no duplicate hex",
+  PRESETS.length === 7 && MORE.length === 20 && new Set(all.map((s) => s.hex.toLowerCase())).size === 27,
   `${PRESETS.length}+${MORE.length}`);
+ok("R4d the system Green (#2DEC86) is still a preset", PRESETS.some((s) => s.hex.toUpperCase() === "#2DEC86"));
 ok("R4b the spectrum is gone (no nativeEvent.locationX tap mapping)", !/nativeEvent\.locationX/.test(src));
 ok("R4c read the three traffic colours", TRAFFIC.every((h) => /^#/.test(h)), TRAFFIC.join(","));
 
 const close: string[] = [], traffic: string[] = [], hidden: string[] = [];
+for (const s of all) for (const t of TRAFFIC) if (de2000(lab(s.hex), lab(t)) < 22) traffic.push(`${s.name}~${t} ${de2000(lab(s.hex), lab(t)).toFixed(1)}`);
 for (const s of MORE) {
   const l = lab(s.hex);
   for (const o of all) if (o !== s && de2000(l, lab(o.hex)) < 10.5) close.push(`${s.name}~${o.name} ${de2000(l, lab(o.hex)).toFixed(1)}`);
-  for (const t of TRAFFIC) if (de2000(l, lab(t)) < 22) traffic.push(`${s.name}~${t} ${de2000(l, lab(t)).toFixed(1)}`);
   for (const [k, m] of Object.entries(MAP)) if (de2000(l, lab(m)) < 14) hidden.push(`${s.name}~${k} ${de2000(l, lab(m)).toFixed(1)}`);
 }
 ok("R1 every new swatch is tellable from every other swatch (ΔE2000 ≥ 10.5)", close.length === 0, close.join(" "));
-ok("R2 no new swatch reads as traffic (ΔE2000 ≥ 22 from yellow/orange/red)", traffic.length === 0, traffic.join(" "));
+ok("R2 no swatch — presets included — reads as traffic (ΔE2000 ≥ 22 from yellow/orange/red)", traffic.length === 0, traffic.join(" "));
 ok("R3 every new swatch stands out on the day map (ΔE2000 ≥ 14)", hidden.length === 0, hidden.join(" "));
 
 console.log(failed ? `\nFAIL route_palette (${failed})` : "\nPASS route_palette");

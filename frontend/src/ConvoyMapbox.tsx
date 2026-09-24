@@ -4222,7 +4222,10 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         attributionEnabled
         logoPosition={{ bottom: 8, left: 8 }}
         attributionPosition={{ bottom: 8, right: 8 }}
-        pitchEnabled
+        // No two-finger TILT in the 2D view — it held a perspective camera for the 20 s pan hold, so a Free / Silver car
+        // could be tilted by hand after all (Jeff, 2026-09-23: "it needs to be stuck on 2D"; review of 0b176b39).
+        // CarMapView has always had pitchEnabled={false}; the 3D view keeps it.
+        pitchEnabled={!flatView}
         rotateEnabled
         onDidFinishLoadingMap={() => { readyRef.current = true; onMapReady?.(); }}
         // Double-tap belongs to PIN DROP (map.tsx detects two quick presses), so

@@ -28,6 +28,8 @@ export type AiRoute = {
   endLat: number; endLng: number;
   coords: [number, number][];       // decimated [lng,lat] driven path, origin -> dest
   t?: number[];                     // seconds from the drive's start at each kept coord (memories since 2026-09-24)
+  m?: number[];                     // metres driven from the start at each kept coord, summed over the RAW fixes —
+                                    // the kept coords are chords that cut corners on a winding road (Codex, 09-24)
   drives: number;                   // times learned/reinforced
   lastDrivenAt: number;
   duration_s: number;               // last observed drive duration (fallback ETA)
@@ -132,15 +134,25 @@ export async function recordDrive(input: {
 
   const coordsLngLat: [number, number][] = raw.map((p) => [p.lng, p.lat]);
   const coords = decimate(coordsLngLat);
-  const distance_m = pathDistanceM(coords);
+  // Distance is the RAW fix stream's length, not the kept chords': decimation (60 m gaps, then the 400-point cap
+  // on a long drive) cuts corners, and on a winding road the chords can be well under half the road.
+  const distance_m = pathDistanceM(coordsLngLat);
   if (distance_m < MIN_LEARN_DISTANCE_M) return null;
   const duration_s = Math.max(0, Math.round((raw[raw.length - 1].ts - raw[0].ts) / 1000));
-  // Seconds from the start at each kept coord, so a replay from mid-drive is judged against the time the
-  // remembered drive really took from there — the last 3 km of a commute are local roads, not highway speed.
+  // Seconds and metres from the start at each kept coord (keyed by the coord array's identity, which decimate
+  // preserves), so a replay from mid-drive is judged against what the remembered drive really took from there —
+  // the last 3 km of a commute are local roads, not highway speed, and a mountain road is longer than its chords.
   const t0 = raw[0].ts;
   const tByCoord = new Map<[number, number], number>();
-  raw.forEach((p, i) => tByCoord.set(coordsLngLat[i], Math.max(0, Math.round((p.ts - t0) / 1000))));
+  const mByCoord = new Map<[number, number], number>();
+  let acc = 0;
+  raw.forEach((p, i) => {
+    if (i > 0) acc += haversineM(raw[i - 1].lat, raw[i - 1].lng, p.lat, p.lng);
+    tByCoord.set(coordsLngLat[i], Math.max(0, Math.round((p.ts - t0) / 1000)));
+    mByCoord.set(coordsLngLat[i], Math.round(acc));
+  });
   const t = coords.map((c) => tByCoord.get(c) ?? 0);
+  const m = coords.map((c) => mByCoord.get(c) ?? 0);
 
   const start = coords[0];
   const end = coords[coords.length - 1];
@@ -151,6 +163,7 @@ export async function recordDrive(input: {
     endLat: end[1], endLng: end[0],
     coords,
     t,
+    m,
     drives: (prev?.drives ?? 0) + 1,
     lastDrivenAt: Date.now(),
     duration_s,
@@ -274,13 +287,21 @@ export function matchAiRouteAlongPath(
   return { route: r, idx, distM: best };
 }
 
-// Path metres from index `fromIdx` to the end of the memory.
+// True when the memory carries per-point driven metres that line up with its coords.
+export function hasDrivenMetres(r: AiRoute): boolean {
+  return Array.isArray(r.m) && r.m.length === r.coords.length && r.m.length >= 2;
+}
+
+// Metres from index `fromIdx` to the end of the memory: the driven metres when the memory has them, else the
+// kept chords (an under-count on a winding road — which is why the distance vet only runs with driven metres).
 export function remainingPathM(r: AiRoute, fromIdx: number): number {
   const pts = r.coords;
   if (!pts || pts.length < 2) return 0;
+  const from = Math.min(Math.max(0, fromIdx), pts.length - 1);
+  if (hasDrivenMetres(r)) return Math.max(0, (r.m as number[])[pts.length - 1] - (r.m as number[])[from]);
   const cosLat = Math.cos((r.startLat * Math.PI) / 180);
   let m = 0;
-  for (let i = Math.max(0, fromIdx) + 1; i < pts.length; i++) m += planarM(pts[i - 1], pts[i], cosLat);
+  for (let i = from + 1; i < pts.length; i++) m += planarM(pts[i - 1], pts[i], cosLat);
   return m;
 }
 
@@ -292,18 +313,21 @@ export const AI_REPLAY_LONG_SLACK_M = 1000;
 
 // The replay came back — is it still "my way"? Returns null when it is, else why it is refused:
 //   • "uturn": it needs a U-turn the fastest route does not (a via point behind the car — a missed exit);
-//   • "too-long": its road distance is far more than the remembered path still ahead (a loop back);
+//   • "too-long": only for memories with per-point driven metres (`m`): its road distance is far more than the
+//     remembered road still ahead (a loop back). Chords from an older memory cut corners and are NOT a yardstick;
 //   • "too-slow": only for memories with per-point times (`t`): it takes far longer than the remembered drive
-//     really took from this point. Older memories have no `t`, and a whole-trip average speed is NOT used as a
-//     yardstick — the last 3 km of a commute are local roads, and an exact replay of them would have been
-//     refused (Codex review 2026-09-24).
+//     really took from this point. A whole-trip average speed is NOT used — the last 3 km of a commute are local
+//     roads, and an exact replay of them would have been refused (Codex reviews 2026-09-24).
+// Every memory written from 2026-09-24 carries both; recordDrive overwrites an older one on the next completed drive.
 export function vetReplay(input: {
   memory: AiRoute; fromIdx: number; aiDistanceM: number; aiDurationS: number; aiUturns: number; bestUturns: number;
 }): "uturn" | "too-long" | "too-slow" | null {
   const { memory, fromIdx, aiDistanceM, aiDurationS, aiUturns, bestUturns } = input;
   if (aiUturns > bestUturns) return "uturn";
-  const remainingM = remainingPathM(memory, fromIdx);
-  if (remainingM > 0 && aiDistanceM > remainingM * AI_REPLAY_LONG_FACTOR + AI_REPLAY_LONG_SLACK_M) return "too-long";
+  if (hasDrivenMetres(memory)) {
+    const remainingM = remainingPathM(memory, fromIdx);
+    if (remainingM > 0 && aiDistanceM > remainingM * AI_REPLAY_LONG_FACTOR + AI_REPLAY_LONG_SLACK_M) return "too-long";
+  }
   const t = memory.t;
   if (t && t.length === memory.coords.length && memory.duration_s > 0) {
     const from = Math.min(Math.max(0, fromIdx), t.length - 1);

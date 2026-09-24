@@ -109,9 +109,14 @@ const dist = (a: [number, number], b: [number, number]) =>
   // E5 — and the replay Mapbox returns for that case (a loop back to the ramp) is refused by the vet.
   const fromIdx = missed?.idx ?? 400;
   const rem = remainingPathM(route, fromIdx);
-  ok("E5 vet refuses a replay that needs a U-turn Best does not", vetReplay({ memory: route, fromIdx, aiDistanceM: rem, aiDurationS: 300, aiUturns: 1, bestUturns: 0 }) === "uturn");
-  ok("E6 vet refuses a replay far LONGER than the remembered path ahead (next exit and back)", vetReplay({ memory: route, fromIdx, aiDistanceM: rem * 1.3 + 1500, aiDurationS: 600, aiUturns: 0, bestUturns: 0 }) === "too-long", `rem=${rem.toFixed(0)}m`);
-  ok("E7 vet accepts a replay of the remembered length, whatever it takes in time (no per-point times stored)", vetReplay({ memory: route, fromIdx, aiDistanceM: rem * 1.03, aiDurationS: 900, aiUturns: 0, bestUturns: 0 }) === null);
+  // A memory with driven metres (as recordDrive writes from 2026-09-24): straight road, so metres == chords here.
+  const cum: number[] = [0];
+  for (let i = 1; i < mine.length; i++) cum.push(cum[i - 1] + dist(mine[i - 1], mine[i]));
+  const metered: AiRoute = { ...route, m: cum.map((v) => Math.round(v)) };
+  ok("E5 vet refuses a replay that needs a U-turn Best does not", vetReplay({ memory: metered, fromIdx, aiDistanceM: rem, aiDurationS: 300, aiUturns: 1, bestUturns: 0 }) === "uturn");
+  ok("E6 vet refuses a replay far LONGER than the remembered road ahead (next exit and back)", vetReplay({ memory: metered, fromIdx, aiDistanceM: rem * 1.3 + 1500, aiDurationS: 600, aiUturns: 0, bestUturns: 0 }) === "too-long", `rem=${rem.toFixed(0)}m`);
+  ok("E7 vet accepts a replay of the remembered length, whatever it takes in time (no per-point times stored)", vetReplay({ memory: metered, fromIdx, aiDistanceM: rem * 1.03, aiDurationS: 900, aiUturns: 0, bestUturns: 0 }) === null);
+  ok("E7d an OLDER memory (no driven metres) is never refused by distance — its chords cut corners", vetReplay({ memory: route, fromIdx, aiDistanceM: rem * 2.5, aiDurationS: 600, aiUturns: 0, bestUturns: 0 }) === null);
   // E7b — Codex's case: a 30-min commute whose last 3 km take 10 min. With per-point times, an exact replay of that
   // local-road tail is accepted and a replay taking three times as long is not.
   const tTimed = mine.map((_, i) => (i < mine.length - 51 ? Math.round(i * (1200 / (mine.length - 51))) : 1200 + Math.round((i - (mine.length - 51)) * (600 / 50))));
@@ -128,6 +133,33 @@ const dist = (a: [number, number], b: [number, number]) =>
   const m1 = matchAiRouteAlongPath(route, north(0), east(1000))!;
   const viaSparse = viaPointsAhead(route, m1.idx, sparseBest);
   ok("E9 sparse Best: vias only on the detour", viaSparse.length >= 2 && viaSparse.every((v) => v[0] > east(24000) && v[0] < east(28500)), `n=${viaSparse.length}`);
+}
+
+// F — Codex round 3: a winding road through recordDrive's decimation + 400-point cap must keep its true length.
+{
+  const { recordDrive } = await import("../../src/aiRoutes.ts");
+  // 40 km straight at 20 m fixes, then 8.5 km of switchbacks (±40 m every 100 m) — 2,425 raw fixes → capped to 400.
+  const raw: { lat: number; lng: number; ts: number }[] = [];
+  let ts = 0;
+  for (let m = 0; m <= 40000; m += 20) raw.push({ lat: north(0), lng: east(m), ts: (ts += 700) });
+  for (let m = 20; m <= 8500; m += 20) {
+    const phase = (m % 200) / 200;
+    const off = phase < 0.5 ? (phase / 0.5) * 80 - 40 : 40 - ((phase - 0.5) / 0.5) * 80;
+    raw.push({ lat: north(off), lng: east(40000 + m), ts: (ts += 2000) });
+  }
+  const rawLen = raw.slice(1).reduce((a, p, i) => a + dist([p.lng, p.lat], [raw[i].lng, raw[i].lat]), 0);
+  const rec = await recordDrive({ placeId: "winding-sim", trace: raw });
+  ok("F1 recordDrive keeps a capped memory (≤ 400 points) with t[] and m[] aligned", !!rec && rec.coords.length <= 400 && rec.t?.length === rec.coords.length && rec.m?.length === rec.coords.length, `pts=${rec?.coords.length}`);
+  ok("F2 the memory's distance is the RAW road length, not the chords", !!rec && Math.abs(rec.distance_m - rawLen) / rawLen < 0.02, `stored=${rec?.distance_m} raw=${rawLen.toFixed(0)}`);
+  if (rec) {
+    const atBend = matchAiRouteAlongPath(rec, north(0), east(40000))!;
+    const remDriven = remainingPathM(rec, atBend.idx);
+    const chords = (() => { let s = 0; for (let i = atBend.idx + 1; i < rec.coords.length; i++) s += dist(rec.coords[i - 1], rec.coords[i]); return s; })();
+    // The zigzag's true length is 1.28× its horizontal run (each 100 m leg climbs 80 m); the capped chords fall short of it.
+    ok("F3 remaining metres come from the driven fixes (the chords under-count the switchbacks)", remDriven > chords * 1.1 && Math.abs(remDriven - 8500 * 1.28) < 1500, `driven=${remDriven.toFixed(0)} chords=${chords.toFixed(0)}`);
+    ok("F4 an exact road-length replay of the winding tail is accepted", vetReplay({ memory: rec, fromIdx: atBend.idx, aiDistanceM: remDriven * 1.02, aiDurationS: (rec.t![rec.t!.length - 1] - rec.t![atBend.idx]) * 1.1, aiUturns: 0, bestUturns: 0 }) === null);
+    ok("F5 …and a loop twice that long is not", vetReplay({ memory: rec, fromIdx: atBend.idx, aiDistanceM: remDriven * 2, aiDurationS: 600, aiUturns: 0, bestUturns: 0 }) === "too-long");
+  }
 }
 
 console.log(fails ? `FAIL ai_route (${fails})` : "PASS ai_route");

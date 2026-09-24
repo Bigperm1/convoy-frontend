@@ -845,6 +845,14 @@ function armSearchAutoDismiss(): void {
   } catch {}
   // 🔒 NAV-LOCK begin act-search-motion-dismiss — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   subscribeCarState((st) => {
+    // ANDROID AUTO IS EXEMPT (Jeff, 2026-09-24: "go on the fix" — Say Phin's report the same
+    // morning). The AA host enforces driving restrictions itself: keyboard off while moving and
+    // its own "voice only while driving" prompt with a mic, so the screen stays USABLE in motion.
+    // This rule popped his search screen 0.25–2.1 s after each of three taps at 41–60 km/h
+    // (`aa-stack op=pop had=1` ×3 at 14:25 UTC), before the mic could be pressed. BACK stays in
+    // the AA header (aaSearchConfig headerAction) and aaPop() still runs on select, so nothing
+    // can strand. iOS keeps the rule: CarPlay hides the keyboard and leaves a dead modal (8/19).
+    if (Platform.OS === 'android') return;
     // OWNERSHIP or VISIBILITY — either says the template is (or may be) on the stack.
     // Ownership alone was the 8/19 trap: a wrong release left _searchPushed=false while
     // the template sat stacked, and this guard then bailed forever. _searchPresented is

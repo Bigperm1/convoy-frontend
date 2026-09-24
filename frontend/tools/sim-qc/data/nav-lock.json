@@ -254,6 +254,13 @@
       "changes": [
         "app/(app)/map.tsx#map-speed-unit-border-detect region 2735f1e3511a → 76e3bee33c55"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: \"go on the fix and reply\" — Say Phin's 09-24 Android Auto report: the search screen was popped by act-search-motion-dismiss 0.25–2.1 s after every tap while driving (aa-stack op=pop had=1 ×3 at 14:25 UTC, 41–60 km/h). Android Auto is now exempt from the motion dismiss (the AA host enforces its own driving restrictions: keyboard off, voice prompt + mic; BACK stays in the header); iOS keeps the rule for the 8/19 stuck-keyboard trap.",
+      "changes": [
+        "src/carplay/carActions.ts#act-search-motion-dismiss region 2f63ccf408e6 → b7a26601f1fa"
+      ]
     }
   ],
   "files": {
@@ -799,7 +806,7 @@
         "act-carnav-inflight-release": "sha256:db26d4a38bec5c9538c5846912bda11a16c312f627bb240daa4e53edcf01f192",
         "act-endnav-bank-stop": "sha256:b598cac43935d5f5fcdde929220b793b3437184235c3fc0fcc6ce41ef3a4b9fa",
         "act-endnav-clear-state": "sha256:f70cd02a0b6688ba7501f819d66080a5e2bc4e3192536767e88253a2886c36b2",
-        "act-search-motion-dismiss": "sha256:2f63ccf408e6bee9463952d7aba16350c17b90c466888c1a68592c9ac0e08efa",
+        "act-search-motion-dismiss": "sha256:b7a26601f1fa04c34182dcf0342fee7f8f6a83dd810d7622d8827d54c2299004",
         "act-search-hide-release": "sha256:2a3bff703f7d145838a71b57aa463c5653bfc6252593dc21469b28a42e424904",
         "act-view-2d-when-idle": "sha256:9d02a53aebfdd72cb25c3fdda8731f37f1286d6b0c406ce5ee925d1c4d759a9f",
         "act-zoom-step": "sha256:c66dd5f6fbd2118fa41ef22f75c98d38270ab4a130b6344699525ea57ed762f0"

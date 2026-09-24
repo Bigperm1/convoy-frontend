@@ -27,6 +27,7 @@ export type AiRoute = {
   startLat: number; startLng: number;
   endLat: number; endLng: number;
   coords: [number, number][];       // decimated [lng,lat] driven path, origin -> dest
+  t?: number[];                     // seconds from the drive's start at each kept coord (memories since 2026-09-24)
   drives: number;                   // times learned/reinforced
   lastDrivenAt: number;
   duration_s: number;               // last observed drive duration (fallback ETA)
@@ -134,6 +135,12 @@ export async function recordDrive(input: {
   const distance_m = pathDistanceM(coords);
   if (distance_m < MIN_LEARN_DISTANCE_M) return null;
   const duration_s = Math.max(0, Math.round((raw[raw.length - 1].ts - raw[0].ts) / 1000));
+  // Seconds from the start at each kept coord, so a replay from mid-drive is judged against the time the
+  // remembered drive really took from there — the last 3 km of a commute are local roads, not highway speed.
+  const t0 = raw[0].ts;
+  const tByCoord = new Map<[number, number], number>();
+  raw.forEach((p, i) => tByCoord.set(coordsLngLat[i], Math.max(0, Math.round((p.ts - t0) / 1000))));
+  const t = coords.map((c) => tByCoord.get(c) ?? 0);
 
   const start = coords[0];
   const end = coords[coords.length - 1];
@@ -143,6 +150,7 @@ export async function recordDrive(input: {
     startLat: start[1], startLng: start[0],
     endLat: end[1], endLng: end[0],
     coords,
+    t,
     drives: (prev?.drives ?? 0) + 1,
     lastDrivenAt: Date.now(),
     duration_s,
@@ -276,18 +284,32 @@ export function remainingPathM(r: AiRoute, fromIdx: number): number {
   return m;
 }
 
+// A replay much LONGER than the remembered path still ahead is a loop back to a via the car can no longer
+// reach (a missed exit: on to the next exit and back). Distance needs no speed assumption, so it is the rule
+// for every memory; the timed rule below only applies when the memory carries per-point times.
+export const AI_REPLAY_LONG_FACTOR = 1.3;
+export const AI_REPLAY_LONG_SLACK_M = 1000;
+
 // The replay came back — is it still "my way"? Returns null when it is, else why it is refused:
 //   • "uturn": it needs a U-turn the fastest route does not (a via point behind the car — a missed exit);
-//   • "too-slow": it takes far longer than the remembered drive's remaining time (a loop back to a via the car
-//     can no longer reach). The remembered drive's own duration, scaled by the path still ahead, is the yardstick.
+//   • "too-long": its road distance is far more than the remembered path still ahead (a loop back);
+//   • "too-slow": only for memories with per-point times (`t`): it takes far longer than the remembered drive
+//     really took from this point. Older memories have no `t`, and a whole-trip average speed is NOT used as a
+//     yardstick — the last 3 km of a commute are local roads, and an exact replay of them would have been
+//     refused (Codex review 2026-09-24).
 export function vetReplay(input: {
-  memory: AiRoute; fromIdx: number; aiDurationS: number; aiUturns: number; bestUturns: number;
-}): "uturn" | "too-slow" | null {
-  const { memory, fromIdx, aiDurationS, aiUturns, bestUturns } = input;
+  memory: AiRoute; fromIdx: number; aiDistanceM: number; aiDurationS: number; aiUturns: number; bestUturns: number;
+}): "uturn" | "too-long" | "too-slow" | null {
+  const { memory, fromIdx, aiDistanceM, aiDurationS, aiUturns, bestUturns } = input;
   if (aiUturns > bestUturns) return "uturn";
-  const total = Math.max(1, memory.distance_m || 1);
-  const expectedS = Math.max(0, memory.duration_s || 0) * Math.min(1, remainingPathM(memory, fromIdx) / total);
-  if (expectedS > 0 && aiDurationS > expectedS * AI_REPLAY_SLOW_FACTOR + AI_REPLAY_SLOW_SLACK_S) return "too-slow";
+  const remainingM = remainingPathM(memory, fromIdx);
+  if (remainingM > 0 && aiDistanceM > remainingM * AI_REPLAY_LONG_FACTOR + AI_REPLAY_LONG_SLACK_M) return "too-long";
+  const t = memory.t;
+  if (t && t.length === memory.coords.length && memory.duration_s > 0) {
+    const from = Math.min(Math.max(0, fromIdx), t.length - 1);
+    const expectedS = Math.max(0, memory.duration_s - (t[from] ?? 0));
+    if (expectedS > 0 && aiDurationS > expectedS * AI_REPLAY_SLOW_FACTOR + AI_REPLAY_SLOW_SLACK_S) return "too-slow";
+  }
   return null;
 }
 

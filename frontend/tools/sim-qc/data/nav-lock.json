@@ -279,6 +279,13 @@
         "app/(app)/map.tsx#map-plot-ai-route-append region a3016af3753c → d401a0a509b0",
         "app/(app)/map.tsx#map-learn-drive-gate region d8dfc28751a2 → 2faccdb26d7f"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: FOR SOME REASON THE ROUTE LEARNING IS NOT WORKING... EVERYDAY I MERGE OFF THE HIGHWAY ON THE WAY TO WORK, BUT IT ALWAYS IS TAKING ME THE FASTEST WAY NOT MY WAY. LETS FIX IT",
+      "changes": [
+        "app/(app)/map.tsx#map-plot-ai-route-append region d401a0a509b0 → 65a804171a3e"
+      ]
     }
   ],
   "files": {
@@ -740,7 +747,7 @@
         "map-plot-scenic-alternate": "sha256:ffd22eab074b49cbc809b8f18cbc6136612eb32e46b2be2adb65c3d9a062cbf0",
         "map-plot-announce-options": "sha256:24bacbe734a4b07b5497c37c2108f765c8aa511f75428bd70b1c590051fd1ab4",
         "map-plot-cruise-autoselect": "sha256:8cef7ddb16e615068dedbc0bd03e123a6832c3454542b089b444a9e8ec1674a4",
-        "map-plot-ai-route-append": "sha256:d401a0a509b015ea6656be39f4fa9aef751f8478547fb30170d823ced2615d1f",
+        "map-plot-ai-route-append": "sha256:65a804171a3e3aa403b49f7b400f9c1d97dadf71a9c92f189e30e73882e5f0f9",
         "map-dest-drops-follow": "sha256:8511f527a6b59715d6f6a97803a1d1f166732b2af0a28ab423cc07fda1ca024d",
         "map-greeting-prepare-gate": "sha256:81bb087debc5894ea8794ef26191dbb95f35075b11b51a4df5f3bc0e036e8940",
         "map-traffic-refresh-writeback": "sha256:b0cc36f5132d800c3fba7422ce105164cf81e27c70f34177441c246b3e35d90b",

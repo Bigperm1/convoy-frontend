@@ -1651,7 +1651,10 @@ export default function MapScreen() {
         // matches a car heading ALONG the remembered road, via points behind the car are dropped, and the replay
         // departs the way the car points. A replay that still needs a U-turn or runs far slower than the remembered
         // drive is a loop back to a via the car can no longer reach (a missed exit) and is refused (Codex, 09-24).
-        const hdg = typeof facing === "number" ? facing : null;
+        // Only a MOVING course is a fact about the road the car is on: a parked compass heading (the phone in
+        // its holder, the car nosed into a driveway) or a course held from before parking must not veto the
+        // memory, so those plot with no heading and the match falls back to the nearest point (Codex, 09-24).
+        const hdg = typeof facing === "number" && departureBearingSource() === "course" ? facing : null;
         const hit = mem ? matchAiRouteAlongPath(mem, origin.lat, origin.lng, hdg) : undefined;
         const bestGeom = results[0]?.polyline
           ? decodePolyline(results[0].polyline).map((pt) => [pt.lng, pt.lat] as [number, number])
@@ -1668,7 +1671,7 @@ export default function MapScreen() {
           );
           const vet = aiRoute ? vetReplay({
             memory: hit.route, fromIdx: hit.idx,
-            aiDurationS: aiRoute.duration_in_traffic_s ?? aiRoute.duration_s,
+            aiDistanceM: aiRoute.distance_m, aiDurationS: aiRoute.duration_in_traffic_s ?? aiRoute.duration_s,
             aiUturns: countRouteUturns(aiRoute), bestUturns: countRouteUturns(results[0]),
           }) : null;
           if (!cancelled && !navActiveRef.current && aiRoute?.polyline && !vet && aiRoute.polyline !== results[0]?.polyline) {

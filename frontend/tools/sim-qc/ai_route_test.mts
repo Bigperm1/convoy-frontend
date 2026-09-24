@@ -107,11 +107,18 @@ const dist = (a: [number, number], b: [number, number]) =>
   const viaMissed = missed ? viaPointsAhead(route, missed.idx, best, 8, { lat: north(0), lng: east(24160), headingDeg: 90 }) : [];
   ok("E4 missed exit → every via point is ahead of the car", viaMissed.every((v) => v[0] > east(24160)), `n=${viaMissed.length}`);
   // E5 — and the replay Mapbox returns for that case (a loop back to the ramp) is refused by the vet.
-  ok("E5 vet refuses a replay that needs a U-turn Best does not", vetReplay({ memory: route, fromIdx: missed?.idx ?? 400, aiDurationS: 300, aiUturns: 1, bestUturns: 0 }) === "uturn");
-  const rem = remainingPathM(route, missed?.idx ?? 400);
-  const expected = 1500 * (rem / 30400);
-  ok("E6 vet refuses a replay far slower than the remembered remaining time", vetReplay({ memory: route, fromIdx: missed?.idx ?? 400, aiDurationS: expected * 1.5 + 200, aiUturns: 0, bestUturns: 0 }) === "too-slow", `expected=${expected.toFixed(0)}s`);
-  ok("E7 vet accepts a replay near the remembered time", vetReplay({ memory: route, fromIdx: missed?.idx ?? 400, aiDurationS: expected * 1.2, aiUturns: 0, bestUturns: 0 }) === null);
+  const fromIdx = missed?.idx ?? 400;
+  const rem = remainingPathM(route, fromIdx);
+  ok("E5 vet refuses a replay that needs a U-turn Best does not", vetReplay({ memory: route, fromIdx, aiDistanceM: rem, aiDurationS: 300, aiUturns: 1, bestUturns: 0 }) === "uturn");
+  ok("E6 vet refuses a replay far LONGER than the remembered path ahead (next exit and back)", vetReplay({ memory: route, fromIdx, aiDistanceM: rem * 1.3 + 1500, aiDurationS: 600, aiUturns: 0, bestUturns: 0 }) === "too-long", `rem=${rem.toFixed(0)}m`);
+  ok("E7 vet accepts a replay of the remembered length, whatever it takes in time (no per-point times stored)", vetReplay({ memory: route, fromIdx, aiDistanceM: rem * 1.03, aiDurationS: 900, aiUturns: 0, bestUturns: 0 }) === null);
+  // E7b — Codex's case: a 30-min commute whose last 3 km take 10 min. With per-point times, an exact replay of that
+  // local-road tail is accepted and a replay taking three times as long is not.
+  const tTimed = mine.map((_, i) => (i < mine.length - 51 ? Math.round(i * (1200 / (mine.length - 51))) : 1200 + Math.round((i - (mine.length - 51)) * (600 / 50))));
+  const timed: AiRoute = { ...route, t: tTimed, duration_s: 1800 };
+  const tail = mine.length - 51;                      // ~3 km from the end
+  ok("E7b timed memory: exact 600 s replay of the slow local tail → accepted", vetReplay({ memory: timed, fromIdx: tail, aiDistanceM: remainingPathM(timed, tail), aiDurationS: 600, aiUturns: 0, bestUturns: 0 }) === null);
+  ok("E7c timed memory: a replay three times slower than the remembered tail → too-slow", vetReplay({ memory: timed, fromIdx: tail, aiDistanceM: remainingPathM(timed, tail), aiDurationS: 1800, aiUturns: 0, bestUturns: 0 }) === "too-slow");
   // E8 — sparse Best geometry (a vertex every 600 m on a straight highway) must not read as a detour.
   const sparseBest = best.filter((_, i) => i % 12 === 0);
   const same: AiRoute = { ...route, coords: best.filter((_, i) => i % 2 === 0) };

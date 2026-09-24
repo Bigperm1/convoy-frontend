@@ -410,8 +410,12 @@ const CHIP_D = 56;
 
 const styles = StyleSheet.create({
   wrap: { marginTop: 8 },
-  row: { gap: 6, paddingRight: 16, paddingLeft: 6, alignItems: "flex-start" },
-  chip: { width: 80, alignItems: "center", gap: 5 },
+  // Chips sit as close as the Crew button and the compass do (Jeff, 2026-09-23: "make the icons closer
+  // together… same space as the crew/compass" — map.tsx fabStack gap is 10): the chip box is the circle
+  // plus 3 pt a side, 4 pt apart, so circle edges are 10 pt apart. Labels run a little wider than the box
+  // and centre on it.
+  row: { gap: 4, paddingRight: 16, paddingLeft: 8, alignItems: "flex-start" },
+  chip: { width: CHIP_D + 6, alignItems: "center", gap: 5 },
   chipCircle: {
     width: CHIP_D, height: CHIP_D, borderRadius: CHIP_D / 2,
     alignItems: "center", justifyContent: "center",
@@ -422,7 +426,7 @@ const styles = StyleSheet.create({
     borderWidth: 2, backgroundColor: "rgba(20,22,26,0.38)",
     shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
-  chipLabel: { color: "#C7C7CC", fontSize: 12, fontWeight: "600", letterSpacing: 0.2, maxWidth: 80, textAlign: "center" },
+  chipLabel: { color: "#C7C7CC", fontSize: 11.5, fontWeight: "600", letterSpacing: 0.1, width: CHIP_D + 16, textAlign: "center" },
   chipLabelActive: { color: "#F4F4F4" },
   // ===== "More" bottom sheet =====
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },

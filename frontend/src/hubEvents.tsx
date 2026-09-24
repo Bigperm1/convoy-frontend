@@ -24,7 +24,7 @@ import { PressableScale } from './ui/PressableScale';
 import { COLORS } from './theme';
 import { useAccentAlpha, useAccent, useAppSkinColors } from './appSkin';
 import { api, formatErr } from './api';
-import { autocompletePlaces, placeDetails, type Suggestion } from './places';
+import { autocompletePlaces, newPlacesSession, placeDetails, type PlacesSession, type Suggestion } from './places';
 import WhenPicker, { fmtWhen } from './components/WhenPicker';
 import { shareInbox } from './shareInbox';
 import { cruisePlot } from './cruisePlot';
@@ -213,20 +213,26 @@ function VenueField({ label, value, onPick }: { label: string; value: EventPoint
   const [q, setQ] = useState('');
   const [sugs, setSugs] = useState<Suggestion[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Places (New) billing session — one per venue search, spent by the pick (src/places.ts).
+  const sessRef = useRef<PlacesSession | null>(null);
 
   const onType = (text: string) => {
     setQ(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (text.trim().length < 2) { setSugs([]); return; }
     debounceRef.current = setTimeout(async () => {
-      try { setSugs(await autocompletePlaces(text.trim())); } catch { setSugs([]); }
+      sessRef.current ??= newPlacesSession();
+      try { setSugs(await autocompletePlaces(text.trim(), undefined, sessRef.current)); } catch { setSugs([]); }
     }, 250);
   };
 
   const pick = async (s: Suggestion) => {
     setSugs([]);
+    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
+    const session = sessRef.current;
+    sessRef.current = null;   // spent — the next search starts a fresh one
     try {
-      const p = await placeDetails(s.place_id);
+      const p = await placeDetails(s.place_id, session, s.main || s.description);
       if (p) { onPick({ lat: p.lat, lng: p.lng, label: p.label || s.description }); setQ(''); }
     } catch {}
   };

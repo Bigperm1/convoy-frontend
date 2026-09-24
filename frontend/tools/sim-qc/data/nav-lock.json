@@ -1,6 +1,6 @@
 {
   "approvedBy": "Jeff",
-  "approvedAt": "2026-09-23",
+  "approvedAt": "2026-09-24",
   "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
   "approvals": [
     {
@@ -231,6 +231,21 @@
         "src/ConvoyMapbox.tsx#mbx-self-marker-kind-nav region c2bec087ae64 → 2054827b6c69",
         "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region 817f57360ceb → 2b8c85133b06",
         "src/carplay/carActions.ts#act-view-2d-when-idle region 52ffba5c852a → 9d02a53aebfd"
+      ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: \"go on 1,2 and 4 keep open/closed\" — cost fixes from the 09-17 unit-economics research: (1) faster-route check OFF by default (DEFAULT_SETTINGS.novaMidDrive true → false), (2) units-country geocode only after a 50 km move (map-speed-unit-border-detect: 2 km → 50 km gate), (4) Places (New) autocomplete session tokens (not nav-locked); (3) the Scout arrival field mask stays — open/closed kept",
+      "changes": [
+        "app/(app)/map.tsx#map-speed-unit-border-detect region b14515d3b1cc → e303f8fb0c20",
+        "src/settings.ts:DEFAULT_SETTINGS.novaMidDrive true → false"
+      ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: \"go on 1,2 and 4 keep open/closed\" — cost fix #2 refined after Codex's read-only review: the units-country geocode re-runs at ≥ 50 km from the last check OR after ≥ 20 min and ≥ 2 km (was 50 km alone in the first relock; distance alone is a straight line, so a driver who crossed the border and stayed within 50 km of the last check point would never have re-checked). Worst case 3 Geocoding calls an hour instead of 30.",
+      "changes": [
+        "app/(app)/map.tsx#map-speed-unit-border-detect region e303f8fb0c20 → 2735f1e3511a"
       ]
     }
   ],
@@ -724,7 +739,7 @@
         "map-foreground-refix": "sha256:62b3e69396b577b30dacfebf1fead78e5a91bf937e72751a079a5c5988b152e1",
         "map-fgwatch-gate": "sha256:fc6fa71b23f714f819064deaafca7cd8325f6027ae348f8967baaf6268d0d92b",
         "map-fgwatch-fix-ingest": "sha256:6ba5bc5d62e5cf95c89809a6eb2e812f4db5cf38d80bd230d0436db68388d171",
-        "map-speed-unit-border-detect": "sha256:b14515d3b1cc07d251e79265c2cd86295646a2943d5a1a2ba37aef5f7f3b067a",
+        "map-speed-unit-border-detect": "sha256:2735f1e3511a19e5b60a678d105be6ffc3f4558511855a4e4c91bb2fa3a3378f",
         "map-refresh-fix-into-coords": "sha256:1af81bcb14f048c7e3e323665d07c6ede8ead4a0012bf8e7e5df8a2e8e08a867",
         "map-selfcar-pin-separation": "sha256:ac3e8b6fd7520da91cff696ed881cd6919bfae48b0a5eb673742fe9479db835e",
         "map-carspot-driving-feed": "sha256:2ce5364599c6285c40c7b4043bddc422ca075d8e5a651e704caacdbf4f1870c0",
@@ -825,7 +840,7 @@
         "DEFAULT_SETTINGS.novaGreeting": "true",
         "DEFAULT_SETTINGS.departureIQ": "false",
         "DEFAULT_SETTINGS.adaptiveSpeedAlerts": "true",
-        "DEFAULT_SETTINGS.novaMidDrive": "true",
+        "DEFAULT_SETTINGS.novaMidDrive": "false",
         "DEFAULT_SETTINGS.mapView": "\"heading_up\"",
         "DEFAULT_SETTINGS.mapMode": "\"auto\"",
         "DEFAULT_SETTINGS.show3dBuildings": "true",

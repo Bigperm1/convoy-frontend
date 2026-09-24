@@ -17,7 +17,7 @@
 // may be missing, a suggestion may not geocode — in all cases the caller gets a shorter
 // list (or none) and the planner simply doesn't offer suggestions.
 import { api } from "./api";
-import { autocompletePlaces, placeDetails } from "./places";
+import { autocompletePlaces, newPlacesSession, placeDetails } from "./places";
 
 export type ScoutStop = { lat: number; lng: number; label: string; why?: string };
 
@@ -58,10 +58,12 @@ export async function scoutScenicStops(opts: {
     const name = (s?.name || "").trim();
     if (!name) continue;
     try {
-      const sugs = await autocompletePlaces(name, opts.origin);   // bias to the driver's region
+      // One billing session per name: the autocomplete + the Details that resolves it.
+      const session = newPlacesSession();
+      const sugs = await autocompletePlaces(name, opts.origin, session);   // bias to the driver's region
       const first = sugs?.[0];
       if (!first) continue;
-      const p = await placeDetails(first.place_id);
+      const p = await placeDetails(first.place_id, session, first.main || name);
       if (!p || typeof p.lat !== "number" || typeof p.lng !== "number") continue;
       out.push({ lat: p.lat, lng: p.lng, label: p.label || name, why: s.why });
     } catch {

@@ -297,7 +297,11 @@ routeColor: "#2DEC86",
 show3dBuildings: true,
 novaGreeting: true,   // route greeting ON at first launch (Jeff, 2026-09-17)
 novaSpeeding: false,
-novaMidDrive: true,   // mid-drive callouts ON at first launch (Jeff, 2026-07-25)
+novaMidDrive: false,  // mid-drive callouts OFF at first launch (Jeff, 2026-09-24: "go on 1,2 and 4" — the
+                      // 60 s faster-route re-fetch behind this flag was ~$92/mo of Mapbox at 170 members in
+                      // the 09-17 unit-economics research; was ON since 2026-07-25). Existing installs were
+                      // already moved to OFF by the novaQuietMigrated migration below; the toggle stays in
+                      // Settings → Scout voice for anyone who wants it.
 pitstop: true,        // Pitstop timer ON at first launch (Jeff, 2026-07-26)
 novaMuted: false,
 novaVoice: true,

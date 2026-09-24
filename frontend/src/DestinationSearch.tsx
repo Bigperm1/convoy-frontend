@@ -10,10 +10,13 @@ import { GOOGLE_MAPS_KEY } from "./api";
 import { GlassFill, hudTint } from "./Glass";
 import { useAccent, useAccentAlpha } from "./appSkin";
 import { PressableScale } from "./ui/PressableScale";
+import { newPlacesSession, type PlacesSession } from "./places";
 
 const KEY = GOOGLE_MAPS_KEY;
 
-type Suggestion = { place_id: string; description: string };
+// `main` = the prediction's primary line ("Tim Hortons") — the pick's label, so Place
+// Details never has to ask for the Pro-tier displayName (billing note in src/places.ts).
+type Suggestion = { place_id: string; description: string; main?: string };
 type Props = {
   origin?: { lat: number; lng: number };
   onSelect: (loc: { lat: number; lng: number; label: string }) => void;
@@ -72,7 +75,9 @@ function ensureGoogleWeb(): Promise<void> {
 // first enabled Places after 1 Mar 2025 (convoy-497805's key was created later),
 // so they return REQUEST_DENIED and the search silently showed no suggestions.
 // Places (New) uses POST + a JSON body + an X-Goog-Api-Key header.
-async function autocompleteRest(input: string, origin?: { lat: number; lng: number }, onDebug?: (s: string) => void): Promise<Suggestion[]> {
+// `session` is the per-search billing token (see src/places.ts) — the same one goes on
+// every keystroke of a search and on the placeDetailsRest() that ends it.
+async function autocompleteRest(input: string, origin?: { lat: number; lng: number }, session?: PlacesSession | null, onDebug?: (s: string) => void): Promise<Suggestion[]> {
   try {
     const body: any = { input };
     if (origin) {
@@ -80,6 +85,7 @@ async function autocompleteRest(input: string, origin?: { lat: number; lng: numb
         circle: { center: { latitude: origin.lat, longitude: origin.lng }, radius: 50000.0 },
       };
     }
+    if (session?.token) body.sessionToken = session.token;
     const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Goog-Api-Key": KEY },
@@ -95,19 +101,23 @@ async function autocompleteRest(input: string, origin?: { lat: number; lng: numb
       .map((s: any) => ({
         place_id: s.placePrediction.placeId,
         description: s.placePrediction.text?.text ?? "",
+        main: s.placePrediction.structuredFormat?.mainText?.text || undefined,
       }));
   } catch (e) { onDebug?.(`THREW key=\u2026${(KEY || "").slice(-5)}: ${String(e).slice(0, 150)}`); return []; }
 }
 
 // Place Details via the Places API (New): GET /v1/places/{placeId} with a field
 // mask header. Returns location + names we map back to our {lat,lng,label} shape.
-async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: number; label: string } | null> {
+// `labelHint` is the prediction's main line — it becomes the label so the mask can stay
+// Essentials-only (location + formattedAddress: $5/1000, 10k free; displayName is Pro at $17).
+async function placeDetailsRest(place_id: string, session?: PlacesSession | null, labelHint?: string): Promise<{ lat: number; lng: number; label: string } | null> {
   try {
-    const res = await fetch(`https://places.googleapis.com/v1/places/${place_id}`, {
+    const qs = session?.token ? `?sessionToken=${encodeURIComponent(session.token)}` : "";
+    const res = await fetch(`https://places.googleapis.com/v1/places/${place_id}${qs}`, {
       method: "GET",
       headers: {
         "X-Goog-Api-Key": KEY,
-        "X-Goog-FieldMask": "location,displayName,formattedAddress",
+        "X-Goog-FieldMask": "location,formattedAddress",
       },
     });
     const data = await res.json();
@@ -115,7 +125,7 @@ async function placeDetailsRest(place_id: string): Promise<{ lat: number; lng: n
     return {
       lat: data.location.latitude,
       lng: data.location.longitude,
-      label: data.displayName?.text || data.formattedAddress || "",
+      label: labelHint || data.formattedAddress || "",
     };
   } catch { return null; }
 }
@@ -125,6 +135,10 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const tRef = useRef<any>(null);
+  // Native Places (New) billing session: born on the first keystroke of a search, spent by
+  // the Place Details call that ends it (never reused after — Google would bill every
+  // request of the session as token-less). The web path keeps its own SDK token below.
+  const sessRef = useRef<PlacesSession | null>(null);
   const accent = useAccent();
   // Green floor under the "Let's go" glass — follows the skin, keeps its 62% alpha.
   const letsGoFloor = useAccentAlpha(0.62);
@@ -156,7 +170,8 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
         }
       );
     } else {
-      const list = await autocompleteRest(q, origin);
+      sessRef.current ??= newPlacesSession();
+      const list = await autocompleteRest(q, origin, sessRef.current);
       setSuggestions(list);
     }
   };
@@ -180,7 +195,12 @@ export default function DestinationSearch({ origin, onSelect, onClear, initialVa
         onSelect({ lat, lng, label });
       });
     } else {
-      const detail = await placeDetailsRest(s.place_id);
+      // A debounced autocomplete still pending would fire AFTER the pick and open a stray
+      // session for a query nobody is looking at — cancel it first.
+      if (tRef.current) { clearTimeout(tRef.current); tRef.current = null; }
+      const session = sessRef.current;
+      sessRef.current = null;   // spent — the next search starts a fresh one
+      const detail = await placeDetailsRest(s.place_id, session, s.main || s.description);
       if (!detail) return;
       setText(detail.label); setOpen(false); setSuggestions([]);
       onSelect(detail);

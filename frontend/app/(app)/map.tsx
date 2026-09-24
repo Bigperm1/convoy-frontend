@@ -3878,9 +3878,15 @@ export default function MapScreen() {
             // 🔒 NAV-LOCK begin map-speed-unit-border-detect — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             const now = Date.now();
             // Border-aware speed-unit auto-detect.
-            //   * Runs ONCE immediately (lastUnitCheckRef===0), then every
-            //     60s while the watcher is active so a road-trip from BC
-            //     into Washington flips KM/H → MPH within ~1 minute.
+            //   * Runs ONCE immediately (lastUnitCheckRef===0), then again only once the car
+            //     is ≥ 50 km from where it last checked, OR ≥ 20 min have passed and it has
+            //     moved ≥ 2 km (always ≥ 60 s apart). It used to re-check every 60 s + 2 km —
+            //     about 30 Google Geocoding calls per hour of driving, the single biggest
+            //     Google line in the 09-17 unit-economics research (~$80/mo at 170 members).
+            //     Jeff, 2026-09-24: "go on 1,2 and 4" — cost fix #2. Worst case is now 3 calls
+            //     an hour. The 20-min rule is Codex's 09-24 catch: distance alone is a straight
+            //     line from the last check, so an Abbotsford → Sumas → Lynden drive (never 50 km
+            //     from Abbotsford) would have stayed on KM/H all day; now it flips within 20 min.
             //   * Worldwide via unitForCountry(): mph list (US/UK/Caribbean/
             //     territories) → MPH, everything else → KM/H.
             //   * Fully automatic — no manual override (the SPEED UNITS toggle
@@ -3890,7 +3896,8 @@ export default function MapScreen() {
             const unitMovedM = unitLast
               ? haversineMeters(unitLast, { lat: pos.coords.latitude, lng: pos.coords.longitude })
               : Infinity;
-            if (lastUnitCheckRef.current === 0 || (now - lastUnitCheckRef.current > 60000 && unitMovedM >= 2000)) {
+            const unitAgeMs = now - lastUnitCheckRef.current;
+            if (lastUnitCheckRef.current === 0 || (unitAgeMs > 60000 && (unitMovedM >= 50000 || (unitAgeMs > 1200000 && unitMovedM >= 2000)))) {
               lastUnitCheckRef.current = now;
               lastUnitCheckPosRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
               const GKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;

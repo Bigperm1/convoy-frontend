@@ -25,6 +25,7 @@
 // session either live (bus, phone open) or on next open (persisted key).
 
 import { api, GOOGLE_MAPS_KEY } from '../api';
+import { newPlacesSession, type PlacesSession } from '../places';
 import { getSettings } from '../settings';
 import { getGarage } from '../garageStore';
 import { fetchRoutes, type NavRoute } from '../nav';
@@ -213,8 +214,13 @@ export async function reportPoliceFromCar(): Promise<void> {
 
 // ── destination search (Google Places API v1 — the New API; the legacy
 //    place/* endpoints REQUEST_DENIED on this key) ──────────────────────────
-type CarSearchResult = { placeId: string; description: string };
+// `main` = the prediction's primary line ("Tim Hortons") — the pick's label, so Place Details
+// never has to ask for the Pro-tier displayName (billing note in src/places.ts).
+type CarSearchResult = { placeId: string; description: string; main?: string };
 let _lastResults: CarSearchResult[] = [];
+// Places (New) billing session for the head-unit search — born on the first keystroke, spent
+// by the placeDetails() of the pick, never reused after (src/places.ts has the rules).
+let _searchSession: PlacesSession | null = null;
 
 async function placesAutocomplete(input: string): Promise<CarSearchResult[]> {
   const s = getCarState();
@@ -222,6 +228,8 @@ async function placesAutocomplete(input: string): Promise<CarSearchResult[]> {
   if (typeof s.selfLat === 'number' && typeof s.selfLng === 'number') {
     body.locationBias = { circle: { center: { latitude: s.selfLat, longitude: s.selfLng }, radius: 50000.0 } };
   }
+  _searchSession ??= newPlacesSession();
+  body.sessionToken = _searchSession.token;
   const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_MAPS_KEY },
@@ -231,17 +239,26 @@ async function placesAutocomplete(input: string): Promise<CarSearchResult[]> {
   return (data.suggestions || [])
     .filter((x: any) => x.placePrediction)
     .slice(0, 8)
-    .map((x: any) => ({ placeId: x.placePrediction.placeId, description: x.placePrediction.text?.text ?? '' }))
+    .map((x: any) => ({
+      placeId: x.placePrediction.placeId,
+      description: x.placePrediction.text?.text ?? '',
+      main: x.placePrediction.structuredFormat?.mainText?.text || undefined,
+    }))
     .filter((x: CarSearchResult) => x.placeId && x.description);
 }
 
-async function placeDetails(placeId: string): Promise<{ lat: number; lng: number; label?: string } | null> {
-  const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
-    headers: { 'X-Goog-Api-Key': GOOGLE_MAPS_KEY, 'X-Goog-FieldMask': 'location,displayName,formattedAddress' },
+// `labelHint` is the picked prediction's main line — the label, so the mask stays
+// Essentials-only (location + formattedAddress; displayName would make it Pro).
+async function placeDetails(placeId: string, labelHint?: string): Promise<{ lat: number; lng: number; label?: string } | null> {
+  const session = _searchSession;
+  _searchSession = null;   // spent — the next search starts a fresh one
+  const qs = session ? `?sessionToken=${encodeURIComponent(session.token)}` : '';
+  const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}${qs}`, {
+    headers: { 'X-Goog-Api-Key': GOOGLE_MAPS_KEY, 'X-Goog-FieldMask': 'location,formattedAddress' },
   });
   const data = await res.json();
   if (typeof data?.location?.latitude !== 'number') return null;
-  return { lat: data.location.latitude, lng: data.location.longitude, label: data.displayName?.text || data.formattedAddress || undefined };
+  return { lat: data.location.latitude, lng: data.location.longitude, label: labelHint || data.formattedAddress || undefined };
 }
 
 // ── start / end navigation from the car ──────────────────────────────────────
@@ -663,7 +680,7 @@ async function aaSelect(rowId: string): Promise<void> {
   }
   const picked = _aaResults[idx];
   if (!picked) return;
-  const dest = await placeDetails(picked.placeId).catch(() => null);
+  const dest = await placeDetails(picked.placeId, picked.main || picked.description).catch(() => null);
   if (!dest) { toast('Could not load that place'); return; }
   const ok = await startCarNav({ ...dest, label: dest.label || picked.description });
   if (ok) { _searchPushed = false; aaPop(); }
@@ -916,7 +933,7 @@ function getSearchTemplate(): any | null {
         }
         const picked = _lastResults[index];
         if (!picked) return;
-        const dest = await placeDetails(picked.placeId).catch(() => null);
+        const dest = await placeDetails(picked.placeId, picked.main || picked.description).catch(() => null);
         if (!dest) { toast('Could not load that place'); return; }
         const ok = await startCarNav({ ...dest, label: dest.label || picked.description });
         if (ok) popCarSearchDeferred();   // same rule: release only when the pop really happens

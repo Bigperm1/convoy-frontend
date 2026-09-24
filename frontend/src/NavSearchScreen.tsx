@@ -23,7 +23,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "./theme";
-import { autocompletePlaces, placeDetails, Suggestion } from "./places";
+import { autocompletePlaces, newPlacesSession, placeDetails, type PlacesSession, Suggestion } from "./places";
 import { getRecentRoutes, removeRecentRoute, RecentRoute } from "./recentRoutes";
 import MemberCarousel, { CarouselMember } from "./components/MemberCarousel";
 import { useSavedPlaces, predictDestination, type Prediction } from "./savedPlaces";
@@ -59,6 +59,9 @@ export default function NavSearchScreen({
   // "PREDICTIVE" row at the top of the idle list (replaces the old always-on
   // map banner). null when there's no confident guess (no anchors saved, etc.).
   const [prediction, setPrediction] = useState<Prediction>(null);
+  // Places (New) billing session — one per search: born on the first keystroke, spent by
+  // the Place Details call of the pick, never reused (see src/places.ts).
+  const sessRef = useRef<PlacesSession | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -91,14 +94,20 @@ export default function NavSearchScreen({
     }
     setLoading(true);
     tRef.current = setTimeout(async () => {
-      const list = await autocompletePlaces(q, origin ?? undefined);
+      sessRef.current ??= newPlacesSession();
+      const list = await autocompletePlaces(q, origin ?? undefined, sessRef.current);
       setSuggestions(list);
       setLoading(false);
     }, 220);
   };
 
   const pickSuggestion = async (s: Suggestion) => {
-    const detail = await placeDetails(s.place_id);
+    // Cancel a pending debounced autocomplete: firing after the pick would open a stray
+    // session for a query nobody is looking at.
+    if (tRef.current) { clearTimeout(tRef.current); tRef.current = null; }
+    const session = sessRef.current;
+    sessRef.current = null;   // spent — the next search starts a fresh one
+    const detail = await placeDetails(s.place_id, session, s.main || s.description);
     if (!detail) return;
     onSelectPlace(detail);
     onClose();

@@ -52,7 +52,7 @@ export default function TierChip({ tier, scansLeft }: { tier: GarageTier; scansL
 const styles = StyleSheet.create({
   chip: {
     height: 28,
-    borderRadius: 14,
+    borderRadius: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
     justifyContent: "center",
@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
   word: { fontSize: 11, fontWeight: "800", letterSpacing: 1.4 },
   scanChip: {
     height: 28,
-    borderRadius: 14,
+    borderRadius: 8,
     paddingHorizontal: 10,
     borderWidth: 1,
     flexDirection: "row",

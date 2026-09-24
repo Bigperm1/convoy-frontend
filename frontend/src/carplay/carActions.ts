@@ -26,14 +26,15 @@
 
 import { api, GOOGLE_MAPS_KEY } from '../api';
 import { getSettings } from '../settings';
+import { getGarage } from '../garageStore';
 import { fetchRoutes, type NavRoute } from '../nav';
 import { startNavBanner, stopNavBanner, CAR_NAV_KEY } from '../navNotification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
-import { toggleMapView2D, setMapView2D } from '../mapViewMode';
+import { toggleMapView2D, setMapView2D, isMapView2DLocked } from '../mapViewMode';
 import { getDepartureBearing, departureBearingSource, orderRoutesForward, routeInitialBearing } from '../departureBearing';
-import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, carIcon } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, CAR_ICON_VIEW_3D, carIcon } from './carButtonIcons';
 import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
@@ -1128,6 +1129,21 @@ export const CAR_MAP_BUTTON_CONFIG = {
   ],
 };
 
+// WHICH GLYPH THE VIEW BUTTON WAS BUILT WITH — one row per distinct answer per JS context, at most 6. It settles an open
+// question (review, 2026-09-23 — HYPOTHESIS, not measured): on a car-first cold launch, is the template built before
+// settings / the garage hydrate? isMapView2DLocked would then read the defaults (selfMarkerType unset → 'car' →
+// unlocked) and a Free / Silver driver would see the 2D glyph for that whole connect: marker=unset on a driver whose
+// Garage car is a class or an arrow is exactly that. No personal data: the marker type and the arrow pick.
+const _viewGlyphRows = new Set<string>();
+function viewGlyphReceipt(surf: 'cp' | 'aa', glyph: 'view3d' | 'view2d'): void {
+  try {
+    const row = `car-view-glyph surf=${surf} glyph=${glyph} marker=${getSettings().selfMarkerType ?? 'unset'} pick=${getGarage().arrowPick ?? 'unset'}`;
+    if (_viewGlyphRows.has(row) || _viewGlyphRows.size >= 6) return;
+    _viewGlyphRows.add(row);
+    logEvent(row);
+  } catch {}
+}
+
 // SKIN-AWARE map buttons (2026-08-28). Same array, same order, same ids — only the
 // metal changes. The comms mic is deliberately NOT skinned: it is already chrome and
 // is a COMMS affordance, not a tier surface.
@@ -1141,13 +1157,20 @@ export const CAR_MAP_BUTTON_CONFIG = {
 // A button that wears last drive's metal for one trip is not worth that risk.
 //
 // appSkinNow() (not the hook) because this is module-scope, called outside React.
+// THE 3D TEASE (Jeff, 2026-09-23): a driver whose car keeps the map 2D (Free's arrow, Silver's class car —
+// mapViewMode.isMapView2DLocked) sees the 3D glyph on this button, and the tap answers "Upgrade to Gold for 3D" (handleCarMapButton).
+// Resolved here, i.e. at template build like the skin above: a Garage change mid-session shows on the next connect
+// (nothing in src calls updateMapButtons; the TAP is read live, so it always does the right thing — only the glyph can
+// be a connect old). viewGlyphReceipt records what the button was built with.
 export function carMapButtonConfig() {
   const s = appSkinNow();
+  const viewGlyph = isMapView2DLocked() ? 'view3d' : 'view2d';
+  viewGlyphReceipt('cp', viewGlyph);
   return {
     ...CAR_MAP_BUTTON_CONFIG,
     mapButtons: [
       { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
-      { id: 'car-view', image: carIcon('view2d', s), focusedImage: carIcon('view2d', s) },
+      { id: 'car-view', image: carIcon(viewGlyph, s), focusedImage: carIcon(viewGlyph, s) },
       { id: 'car-crew', image: carIcon('crew', s), focusedImage: carIcon('crew', s) },
       { id: 'car-compass', image: carIcon('compass', s), focusedImage: carIcon('compass', s) },
     ],
@@ -1224,8 +1247,18 @@ export const AA_ACTION_STRIP = [
 //   - INERT on build 78: RNCarPlay.requestPermissions does not exist there, so canRequestFromCar()
 //     is false and the stock strip is returned.
 export const AA_ALLOW_LOCATION_ID = 'car-allow-location';
+// THE 3D TEASE (Jeff, 2026-09-23) on Android Auto too: with a 2D-locked car (isMapView2DLocked) the view slot wears the
+// 3D glyph — the same brand-metal art CarPlay's unskinned map button uses (AA_ACTION_STRIP is unskinned) — and the tap
+// answers "Upgrade to Gold for 3D". Re-read ONLY where AndroidAutoRoot rebuilds the strip (connect, route start / end, the
+// askable flip) — its updateTemplate effect does not yet re-run on a Garage change, so a mid-session car swap shows its
+// glyph at the next of those. "Allow location" still wins the slot while it applies.
 export function aaActionStrip(): (typeof AA_ACTION_STRIP)[number][] {
-  if (!isAskableStatus(getCarState().carStatus) || !canRequestFromCar()) return AA_ACTION_STRIP;
+  if (!isAskableStatus(getCarState().carStatus) || !canRequestFromCar()) {
+    const locked = isMapView2DLocked();
+    viewGlyphReceipt('aa', locked ? 'view3d' : 'view2d');
+    if (!locked) return AA_ACTION_STRIP;
+    return AA_ACTION_STRIP.map((a) => (a.id === 'car-view' ? { id: a.id, icon: CAR_ICON_VIEW_3D, visibility: AA_PERSISTENT } : a));
+  }
   return AA_ACTION_STRIP.map((a) => (a.id === 'car-view'
     ? { id: AA_ALLOW_LOCATION_ID, title: CAR_ALLOW_LOCATION_TITLE, visibility: AA_PERSISTENT }
     : a));
@@ -1343,6 +1376,17 @@ export function handleCarMapButton(id: string, src = "?"): void {
   }
   // 🔒 NAV-LOCK begin act-view-2d-when-idle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (id === 'car-view') {
+    // THE 3D TEASE (Jeff, 2026-09-23: "on the free/silver 2d maps can we change the 2d button to 3d to entice the free
+    // silver users to see 3d and when they tap it it says upgrade to gold?"). Free's arrow and Silver's class car keep
+    // the map 2D (mapViewMode.isMapView2DLocked), so for them this button wears the 3D glyph (carMapButtonConfig /
+    // aaActionStrip) and a tap answers with the upgrade instead of a view change — idle or routing alike. The words are
+    // Jeff's own ("it says upgrade to gold") and FIT Android Auto's one-line status pill: 'Upgrade to Gold for 3D' is
+    // ~144 dp at 14 pt bold (Roboto, unhinted advances) against the ~155 dp of text a 213 dp head unit leaves; the first
+    // wording, '3D map is Gold — upgrade in the Garage' (~252 dp), was cut to "3D map is Gold — upgra…" (review).
+    if (isMapView2DLocked()) {
+      toast('Upgrade to Gold for 3D');
+      return;
+    }
     // Pure VIEW toggle — routing, the route line and guidance are all untouched.
     // 8/18 rule: 3D exists only while ROUTING. Idle press pins 2D instead of
     // toggling, so the car can never sit in an idle 3D view.

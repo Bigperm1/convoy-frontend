@@ -25,7 +25,7 @@ import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSou
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "../poseSeed";
 import { noteFixAccepted } from "../heatProbe";
 import { navMapFps } from '../framePacer';
-import { Platform, StyleSheet, Image as RNImage, AppState } from 'react-native';
+import { Platform, StyleSheet, Image as RNImage, AppState, View } from 'react-native';
 import Mapbox, {
   MapView,
   Camera,
@@ -40,6 +40,7 @@ import Mapbox, {
 import { useCarStore, getCarState, setCarState, subscribeCarGesture, type CarGesture } from './carStore';
 import { canonicalClass } from '../settings';
 import { useMapView2D } from '../mapViewMode';
+import { ClassSprite } from '../classLayers';
 import { cornerBlend, cornerNose, newCornerBlendState, newFixClock, noteFix } from '../cornerBlend';
 import { useAppSkin } from '../appSkin';
 import { wxCalloutUri, WX_CALLOUT_KINDS, WX_CALLOUT_TEXT_X, WX_CALLOUT_TEXT_CY, WX_CALLOUT_W, WX_CALLOUT_H } from '../wxCalloutImages';
@@ -401,6 +402,103 @@ const CARPLAY_CAR_PT = 45;
 const CARPLAY_ARROW_PT = 33.5;
 const CARPLAY_ARROW_2D_PT = 26;
 
+// ── THE CLASS CAR IN THE DRIVER'S PAINT (Jeff, 2026-09-23: "car color on both") ───────────────────────────────────────
+// The phone paints a class car with the saved primary / secondary by snapshotting <ClassSprite> into a map image
+// (ConvoyMapbox: <Images key=…_g{gen}><MBXImage> + refresh() on onReady + the iOS remount). The car surfaces drew the
+// UNPAINTED CLASS_TOPDOWN_CAR art. This is the phone's mechanism, mirrored — with one difference in the geometry:
+//
+// SIZE. The painted image must be interchangeable with CLASS_TOPDOWN_CAR[class]: SelfCarModel draws ONE of the two
+// (sprite = the static art until the paint is ready, then this) under ONE iconSize. CLASS_TOPDOWN_CAR is a 44 pt square
+// whose HEIGHT is the car's length (tools/classes-car/make.py crops the art to its ink length, centred on the ink).
+// ClassSprite draws the 512 px classes-v2 art, whose ink is rows 12..500 — 488 px long, centred at x 255.5-256, y 256
+// on all twelve classes (PIL getbbox, 2026-09-23). So the sprite is drawn at art = 44 x 512 / 488 = 46.16 pt, where the
+// ink is exactly 44 pt long, and shifted by inset = 46.16 x 12 / 512 = 1.08 pt up and left inside a 44 x 44 clip: the
+// ink then spans rows 0..44 and is centred at 22 pt, the same box and the same rotation centre as CLASS_TOPDOWN_CAR. 44
+// is also a multiple of 4, which matters on iOS: RNMBXImage.swift rounds the snapshot canvas UP to a multiple of 4 pt
+// from the top left, so any other box would move the rotation centre off the car.
+// Registered at the view's point size on both platforms (iOS: the UIImage's scale; Android: addStyleImage pixelRatio =
+// bitmap.density / 160), so iconSize means the same thing for this image as for the 44 pt asset — read from rnmapbox's
+// source, NOT measured on a head unit (on Android Auto it holds only if RN's layout density is the Bitmap default
+// density; a mismatch would show as the car changing size when the paint lands).
+//
+// NEVER AN INVISIBLE CAR — THE PAINT IS SHOWN ONLY ONCE IT IS READY (review, 2026-09-23). Both platforms register this
+// image's NAME the moment it mounts, from whatever the child view shows then — before ClassSprite's bitmaps have loaded,
+// i.e. a transparent or unpainted frame (Android: RNMBXImages.addToMap -> onStyleLoaded -> refresh -> viewToBitmap on a
+// TRANSPARENT bitmap; iOS: insertReactSubview -> setImage 10 us later). So "the name is registered" proves nothing, and
+// SelfCarModel's layer has no fallback to fall back to (its iconImage is inside the unapproved lock
+// mbx-selfcar-source-layers). CarMapView therefore keeps drawing the static CLASS_TOPDOWN_CAR art and switches to this
+// image only when onPainted(name) fires: 350 ms after the refresh that follows the LAST onReady (Android: the first;
+// iOS: the one after the second remount, when the phone's dance is over). A snapshot that never runs on a head unit —
+// no onReady, a timer frozen on a locked CarPlay — leaves the unpainted class on screen, never nothing.
+//
+// BOUNDED RECEIPTS (≤ 40 rows per JS context): op=mount once per paint key, op=ready once per paint key AND gen (so a
+// drive tells the first capture from the post-remount ones; final=1 marks the one that shows), op=show once per paint key
+// when the car actually switches to the paint. A mount row with no show row from that platform = the driver saw the
+// unpainted class. No personal data: the class and the two paint hex codes.
+const carPaintReceiptsSent = new Set<string>();
+function carPaintReceipt(key: string, message: string): void {
+  if (carPaintReceiptsSent.has(key) || carPaintReceiptsSent.size >= 40) return;
+  carPaintReceiptsSent.add(key);
+  try { logEvent(message); } catch {}
+}
+
+function CarClassPaintImage({ name, vehicleClass, primary, secondary, onPainted }: {
+  name: string;
+  vehicleClass: string;
+  primary?: string;
+  secondary?: string;
+  // Called ONCE per mount with `name` when the painted snapshot is ready to be drawn (see NEVER AN INVISIBLE CAR).
+  onPainted?: (name: string) => void;
+}) {
+  const imgRef = useRef<any>(null);
+  // iOS captures an RNMBXImage's child ONCE, ~10 µs after mount — before the paint-mask bitmaps decode — so, exactly as
+  // the phone does, remount the image (bump the key) after onReady: fast and late, twice per paint key, then stop.
+  const [gen, setGen] = useState(0);
+  const remountsRef = useRef(0);
+  const mountedAtRef = useRef(Date.now());
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    carPaintReceipt('mount:' + name, `car-class-paint op=mount img=${name}`);
+    return () => { timersRef.current.forEach((t) => clearTimeout(t)); timersRef.current = []; };
+  }, [name]);
+  const later = (fn: () => void, ms: number) => { timersRef.current.push(setTimeout(fn, ms)); };
+  const box = 44;                    // CLASS_TOPDOWN_CAR's point size (tools/sim-qc/class_car_sprite_test S1b pins 44)
+  const art = (box * 512) / 488;     // ClassSprite size at which the art's 488 px ink is exactly `box` long
+  const inset = (art * 12) / 512;    // the art's 12 px margin at that size, shifted off the top and the left
+  const onReady = () => {
+    // The LAST capture of the phone's dance: Android never remounts; iOS remounts twice, then this is the third onReady.
+    const lastCapture = !(Platform.OS === 'ios' && remountsRef.current < 2);
+    carPaintReceipt(`ready:${name}:${gen}`, `car-class-paint op=ready img=${name} gen=${gen} final=${lastCapture ? 1 : 0} ms=${Date.now() - mountedAtRef.current}`);
+    try { imgRef.current?.refresh?.(); } catch {}
+    // belt-and-braces second capture after the view settles (the phone's 350 ms) — and, on the last capture, the moment
+    // the car may switch to the paint: the first refresh has had 350 ms to land in the style.
+    later(() => {
+      try { imgRef.current?.refresh?.(); } catch {}
+      if (lastCapture) {
+        carPaintReceipt('show:' + name, `car-class-paint op=show img=${name} gen=${gen} ms=${Date.now() - mountedAtRef.current}`);
+        try { onPainted?.(name); } catch {}
+      }
+    }, 350);
+    if (!lastCapture) {
+      remountsRef.current += 1;
+      later(() => setGen((g) => g + 1), remountsRef.current === 1 ? 300 : 1200);
+    }
+  };
+  return (
+    <Mapbox.Images key={`${name}_g${gen}`}>
+      <Mapbox.Image name={name} ref={imgRef}>
+        {/* ONE child, never flattened (collapsable={false}): RNMBXImage snapshots only subview[0] — the phone's
+            "Image supports max 1 subview" bug (classLayers.tsx). */}
+        <View collapsable={false} style={{ width: box, height: box, overflow: 'hidden' }}>
+          <View collapsable={false} style={{ position: 'absolute', left: -inset, top: -inset, width: art, height: art }}>
+            <ClassSprite vehicleClass={vehicleClass} primary={primary} secondary={secondary} size={art} onReady={onReady} />
+          </View>
+        </View>
+      </Mapbox.Image>
+    </Mapbox.Images>
+  );
+}
+
 type Props = {
   // Called when the GL map fails or never paints on the CarPlay window, so the
   // parent (CarSurface) can schedule a REMOUNT retry. Driven by onMapLoadingError
@@ -747,6 +845,20 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const selfClassKey = canonicalClass(s.selfClass);
   const selfClassCarArt = s.selfMarkerType === 'class' ? (CLASS_TOPDOWN_CAR as any)[selfClassKey] : undefined;
   const carFlatImg = selfClassCarArt ? 'self_car_cls_' + selfClassKey : 'self_car_flat_' + getVehicleModelKey(s.selfCarColor);
+  // …and in the driver's saved PAINT when there is one (Jeff, 2026-09-23: "car color on both"): a live snapshot of the
+  // phone's <ClassSprite>, see CarClassPaintImage. Named from class + paint like the phone's
+  // self_class_paint_<cls>_<pri>_<sec>, so a Garage change registers a new image live. undefined (no paint, or not a
+  // class car) → exactly the unpainted path.
+  const paintHex = (c?: string) => (c ? c.replace(/[^0-9a-fA-F]/g, '') : 'x');
+  const selfClassPaintImg = selfClassCarArt && CLASS_TOPDOWN[selfClassKey] && (s.selfClassPri || s.selfClassSec)
+    ? `self_car_cls_paint_${selfClassKey}_${paintHex(s.selfClassPri)}_${paintHex(s.selfClassSec)}`
+    : undefined;
+  // The paint is DRAWN only once its snapshot is ready (CarClassPaintImage onPainted — see NEVER AN INVISIBLE CAR):
+  // until then, and for good if the snapshot never runs on this head unit, the car is the static carFlatImg (the
+  // unpainted class art, always registered in allMapImages). Component state, so a map remount (GL retry) or a paint
+  // change starts unpainted again until the NEW image is ready.
+  const [carPaintShown, setCarPaintShown] = useState<string | null>(null);
+  const selfSpriteImg = selfClassPaintImg && carPaintShown === selfClassPaintImg ? selfClassPaintImg : carFlatImg;
 
   // ── PEERS AS REAL CARS, NOT GREEN DOTS (Jeff, 2026-08-12) ───────────────────
   // "on CarPlay when I hit the crew, it doesn't show the high resolution car. It shows
@@ -2343,6 +2455,19 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           every render (12 Hz while navigating) invites needless re-registration of every
           car photo. Two review lenses flagged it independently. */}
       <Mapbox.Images images={allMapImages} />
+      {/* The class car in the driver's paint — a live snapshot, registered BESIDE the static class art above, never
+          instead of it (the car draws the static art until onPainted). Keyed by the image name: a paint change is a
+          fresh snapshot. */}
+      {selfClassPaintImg ? (
+        <CarClassPaintImage
+          key={selfClassPaintImg}
+          name={selfClassPaintImg}
+          vehicleClass={selfClassKey}
+          primary={s.selfClassPri}
+          secondary={s.selfClassSec}
+          onPainted={setCarPaintShown}
+        />
+      ) : null}
 
       {/* 3D self car + the native location feed, BOTH driven off ONE rAF-eased pose
           (SelfCarModel, reused verbatim from the phone). This is THE smoothness fix:
@@ -2392,9 +2517,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           pitchTilt={isArrow ? ARROW_MODEL_PITCH : 0}
           // Flat top-down PNG while not routing, the 3D GLB while routing — the
           // phone's rule (see carFlat above). undefined → 3D model.
-          sprite={carFlat ? carFlatImg : undefined}
-          // Same grey-referenced normalisation the phone uses (vehiclePngScale).
-          spriteSize={carFlat ? vehiclePngScale(s.selfCarColor) : 1}
+          // A painted class car draws its paint snapshot (Jeff, 2026-09-23: "car color on both") — but only once that
+          // snapshot is READY (selfSpriteImg = carFlatImg until CarClassPaintImage's onPainted), so a snapshot that never
+          // runs on the head unit leaves the unpainted class on screen, never an invisible car. Both images are the same
+          // 44 pt geometry (see CarClassPaintImage), so the one spriteSize below sizes either. No paint → carFlatImg,
+          // exactly as before.
+          sprite={carFlat ? selfSpriteImg : undefined}
+          // Same grey-referenced normalisation the phone uses (vehiclePngScale), × uiScale like every other car-surface
+          // size (Jeff, 2026-09-23, "3 - ok"): the flat self car was the one thing left at CarPlay's size on Android
+          // Auto — ~19% bigger than the peers beside it (1 / 0.837). uiScale is hudScaleFor(), 1 on CarPlay.
+          spriteSize={carFlat ? vehiclePngScale(s.selfCarColor) * uiScale : 1}
         />
       )}
       {/* 🔒 NAV-LOCK end car-jsx-selfcar-model */}

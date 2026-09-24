@@ -223,6 +223,15 @@
       "changes": [
         "src/ConvoyMapbox.tsx#mbx-selfcar-pump-guard region 4712422a4ad9 → cd8b3a5d1c86"
       ]
+    },
+    {
+      "at": "2026-09-23",
+      "quote": "Jeff, 2026-09-23 (CarPlay tier follow-ups): '1- yes' to the phone drawing a Silver class car as its class while navigating instead of the green arrow (mbx-self-marker-kind-nav); '2 - car color on both' — the car surfaces draw the saved class paint, and '3 - ok' — the Android Auto self sprite scaled by uiScale to match the crew (car-jsx-selfcar-model); 'on the free/silver 2d maps can we change the 2d button to 3d to entice the free silver users to see 3d and when they tap it it says upgrade to gold?' (act-view-2d-when-idle)",
+      "changes": [
+        "src/ConvoyMapbox.tsx#mbx-self-marker-kind-nav region c2bec087ae64 → 2054827b6c69",
+        "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region 817f57360ceb → 2b8c85133b06",
+        "src/carplay/carActions.ts#act-view-2d-when-idle region 52ffba5c852a → 9d02a53aebfd"
+      ]
     }
   ],
   "files": {
@@ -492,7 +501,7 @@
         "mbx-preview-fit-routes": "sha256:24334e0d40416b6f226f04f37e1b8b66be759dfd9de0ea3ef3840cd84fb55b81",
         "mbx-preview-congestion-fetch": "sha256:338cfa828e18dda9716ed0f9c004026d25d9e2ce5c0f09f263e0cc6ec6da30f6",
         "mbx-self-pos-parked-live": "sha256:bf06a1afb75ed6c0643261cd7dd28e1e507d3d7ea2cd68423b087c3432621a15",
-        "mbx-self-marker-kind-nav": "sha256:c2bec087ae6423725464aa6feaac04562c7a87ebf4b709cdb713ee3f7f2d5590",
+        "mbx-self-marker-kind-nav": "sha256:2054827b6c69c45d3443976330f83ee409563f1b1fece9235c55fb341e120625",
         "mbx-route-projection": "sha256:0e18dc664c8c3cc012ad814a463fd6906aa5d38e38ebb3d5e5dcf3e5502e8895",
         "mbx-ribbon-trim-lead-inputs": "sha256:757d5820b3bd57c31358c1edbb4d4de60e53c63b925df6415cc06fc968a69291",
         "mbx-ribbon-fix-ease": "sha256:f65a67b4d7a2ba03aa5c1491bac0e7ed4f3d124ac21e670e6565d45e490b9be0",
@@ -590,7 +599,7 @@
         "car-cam-style-load-seed": "sha256:5970f89e831afc8791bbb2d0f379d691b6814a55c99cda765f87b00f6f1ec4dd",
         "car-jsx-road-query-layers": "sha256:b60491f8d86c5396ac33dfed1f38da75c1b693405aea52cce3689daaf38ba0ff",
         "car-jsx-camera": "sha256:9f7bf5a288d8f29441df1ecd8519b33db62031ab76180734c8579dd03039adcd",
-        "car-jsx-selfcar-model": "sha256:817f57360cebd301a79795635b0de27dea89ef9ee42e79c9e38a79666a1f6fed",
+        "car-jsx-selfcar-model": "sha256:2b8c85133b06110c8346a47dea4ffd0073eb68955db7f41d240ea5d53ff6f9a7",
         "car-jsx-preview-route-layers": "sha256:9b374172cf200330c424feb4e7f274cfe51a6a79f23831c30daa2e21e6d9b7c9",
         "car-jsx-nav-ribbon-layers": "sha256:db7ab9a97374f6782263c20a966af1994f3bacb01054c39ed19d2895fbedfd8b",
         "car-jsx-preview-congestion": "sha256:87c2a860ddb0a7f79fd8f03da4a8e4ebbb178dd4265f8bf64a64cf3a5eeae014"
@@ -770,7 +779,7 @@
         "act-endnav-clear-state": "sha256:f70cd02a0b6688ba7501f819d66080a5e2bc4e3192536767e88253a2886c36b2",
         "act-search-motion-dismiss": "sha256:2f63ccf408e6bee9463952d7aba16350c17b90c466888c1a68592c9ac0e08efa",
         "act-search-hide-release": "sha256:2a3bff703f7d145838a71b57aa463c5653bfc6252593dc21469b28a42e424904",
-        "act-view-2d-when-idle": "sha256:52ffba5c852a5fd5f2b6e583e34d358ab44c7ef34b53342882b7d50c304cd1d6",
+        "act-view-2d-when-idle": "sha256:9d02a53aebfdd72cb25c3fdda8731f37f1286d6b0c406ce5ee925d1c4d759a9f",
         "act-zoom-step": "sha256:c66dd5f6fbd2118fa41ef22f75c98d38270ab4a130b6344699525ea57ed762f0"
       },
       "ignored": [],

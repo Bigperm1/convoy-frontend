@@ -134,7 +134,8 @@ export function useMapView2D(): boolean {
   return v;
 }
 
-/** React binding: the car on the road keeps the map 2D, so a 2D/3D button has nothing to offer (the phone hides its FAB). */
+/** React binding: the car on the road keeps the map 2D. The 2D/3D buttons then become the Gold tease ("Upgrade to Gold
+ *  for 3D") on the phone FAB and the car's view button, and the Android Auto strip rebuilds when this changes. */
 export function useMapView2DLocked(): boolean {
   const [v, setV] = useState(isMapView2DLocked());
   useEffect(() => {

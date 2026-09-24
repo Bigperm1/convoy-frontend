@@ -3557,23 +3557,29 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // 3D models are for chase-cam / routing ONLY. When no route/chase-cam is active
   // the self marker shows the SAME flat top-down appearance peers see — the class
   // sprite, or the GR Corolla top-down PNG in the chosen color. When a route IS
-  // active it goes 3D: car→3D car GLB, class→3D arrow, arrow→3D arrow. The
+  // active it goes 3D: car→3D car GLB, arrow→3D arrow; class stays the flat sprite (its
+  // map is held 2D — Jeff, 2026-09-23 "1- yes", see mbx-self-marker-kind-nav). The
   // presence BROADCAST is built from settings (map.tsx), NOT from this, so peers
   // always see the driver's chosen class/car regardless of this local swap.
   // 🔒 NAV-LOCK begin mbx-self-marker-kind-nav — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
-  const navActive = !!navigationActive;
-  // 'arrow' appearance → the green arrow GLB. A CLASS driver ALSO switches to the
-  // arrow while navigating (there's no 3D class model). Renders through SelfCarModel.
+  // 'arrow' appearance → the green arrow GLB. Renders through SelfCarModel.
   // (Auto-boat — every appearance became the boat sprite on water — was REMOVED on Jeff's
   // word, 2026-09-17: the driver's chosen look stays on water too.)
-  const selfIsArrow = selfMarkerType === "arrow" || (selfMarkerType === "class" && navActive);
-  // Flat "class" top-down sprite: a class driver AT REST.
+  // A CLASS driver is NOT the arrow any more, navigating or not (Jeff, 2026-09-23: "1- yes" to
+  // "While you're navigating, the phone still shows a Silver class car as the green arrow, not the
+  // exotic… Want the exotic on the phone during drives too?"). The old reason for the swap — "there's
+  // no 3D class model", so a pitched chase camera had nothing flat to draw — is gone: a class car now
+  // holds the map 2D on every surface (mapViewMode isMapView2DLocked → flatView → pitch 0), so the
+  // flat sprite reads correctly for the whole drive. CarPlay/AA already drew it while navigating
+  // (CarMapView carFlat = view2D && class); the phone now matches.
+  const selfIsArrow = selfMarkerType === "arrow";
+  // Flat "class" top-down sprite: a class driver, AT REST AND WHILE NAVIGATING.
   //  • photo class, no paint  → the photo AS-SHOT (static registration)
   //  • photo class, painted   → live MBXImage snapshot of <ClassSprite> (photo
   //    + primary/secondary band layers tinted at runtime — any hex works)
   //  • no photo yet           → the tinted silhouette placeholder
   // Image name carries class+paint so changing either re-registers live.
-  const selfIsClass = selfMarkerType === "class" && !navActive;
+  const selfIsClass = selfMarkerType === "class";
   // 🔒 NAV-LOCK end mbx-self-marker-kind-nav
   // ── ULTRA PREMIUM HAS NO SPRITE (Jeff, 2026-08-24) ──────────────────────────
   // "the sprite is only for the classes section the ultra premium will not have a sprite"

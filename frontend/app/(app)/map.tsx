@@ -2219,7 +2219,8 @@ export default function MapScreen() {
   // 2D convoy view (see src/mapViewMode.ts). Drives the FAB label AND is handed to the
   // map engine below so pitch + marker art follow it.
   const view2D = useMapView2D();
-  // Free's arrow / Silver's class car keep the map 2D (mapViewMode isMapView2DLocked) — no 3D to offer, so no FAB.
+  // Free's arrow / Silver's class car keep the map 2D (mapViewMode isMapView2DLocked). The FAB still shows "3D"
+  // for them, and a tap is the Gold upsell toast instead of a toggle (Jeff, 2026-09-23).
   const view2DLocked = useMapView2DLocked();
   const hazardsRef = useRef<Hazard[]>([]);
   useEffect(() => { hazardsRef.current = hazards; }, [hazards]);
@@ -6012,8 +6013,11 @@ export default function MapScreen() {
         {/* ONLY WHILE ROUTING (Jeff, 2026-08-18): idle is pinned to the 2D sprite view,
             3D exists only during a drive — so the toggle has nothing to do when no
             route is running and would only offer a rule-breaking idle 3D. */}
-        {/* …and not with a 2D car on the road (Jeff, 2026-09-23: Free and Silver are "stuck on 2D"). */}
-        {navMode === "turn-by-turn" && !view2DLocked && (
+        {/* With a 2D car on the road (Free's arrow, Silver's class car — the map is held 2D) the FAB STAYS,
+            showing "3D" as the tease: a tap says 3D is Gold's and changes nothing (Jeff, 2026-09-23: "on the
+            free/silver 2d maps can we change the 2d button to 3d to entice the free silver users to see 3d and
+            when they tap it it says upgrade to gold?"). It already reads "3D" there: view2D is true while locked. */}
+        {navMode === "turn-by-turn" && (
         <PressableScale
           testID="view-2d-3d-fab"
           // 60 pt FABs stacked 10 pt apart: keep today's touch targets, since a default slop would let
@@ -6022,6 +6026,13 @@ export default function MapScreen() {
           style={[styles.fab, styles.fabPolice]}
           onPress={() => {
             haptics.snap();
+            // Locked 2D (a 2D car on the road — Free's arrow, Silver's class car): the Gold nudge, no toggle —
+            // toggleMapView2D would no-op anyway. WORD FOR WORD the CarPlay / AA toast (carActions
+            // act-view-2d-when-idle), so one tap reads the same on all four surfaces (review, 2026-09-23).
+            if (view2DLocked) {
+              showInfoToast("Upgrade to Gold for 3D");
+              return;
+            }
             toggleMapView2D();
           }}
         >
@@ -6117,8 +6128,12 @@ export default function MapScreen() {
           under the music broadcast pill. Fed by `hailBus` (push + WS). */}
       <HailToast message={hailToast} />
       {/* Info toast (e.g. the still-learning AI route chip). Floated ABOVE the open
-          drive drawer so it isn't hidden behind the sheet. */}
-      <InfoToast message={infoToast} bottom={TAB_BAR_H + navInset + previewBannerH + 12} />
+          drive drawer so it isn't hidden behind the sheet. DURING GUIDANCE it rides the FAB stack's base
+          (controlsBottom: step bar + expanded list + a pin banner) instead: previewBannerH is only ever
+          measured by the preview sheet / pin banner and never reset, so in turn-by-turn it was stale — 0 on a
+          drive the phone adopted from the car, which put the pill (and the 3D-FAB Gold tease) inside the step
+          bar's band (review, 2026-09-23; arithmetic, not a screenshot). */}
+      <InfoToast message={infoToast} bottom={navBarUp ? controlsBottom : TAB_BAR_H + navInset + previewBannerH + 12} />
 
       {/* ===== Step Drawer — slide-up turn list =====
           Appears the moment a user taps a route. The active route's maneuvers

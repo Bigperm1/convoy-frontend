@@ -24,6 +24,7 @@
 // Live drive data flows in through carStore, which map.tsx mirrors via
 // useConvoyCarPlay while a route is active.
 
+import { useMapView2DLocked } from '../mapViewMode';
 import { useEffect, useRef } from 'react';
 import { CarSurface } from './ConvoyCarPlay';
 import { useCarStore } from './carStore';
@@ -94,6 +95,10 @@ export default function AndroidAutoRoot() {
   // Build 79 (2026-09-14): while location is askable from the car, the strip carries "Allow location"
   // (carActions.aaActionStrip). A boolean, so the updateTemplate effect below re-runs only on the flip.
   const askable = isAskableStatus(s.carStatus);
+  // A Free / Silver car on the road keeps the map 2D and the strip's view button becomes the 3D tease
+  // (carActions aaActionStrip). Rebuilt through the SAME updateTemplate path below when the Garage pick changes
+  // mid-session (Jeff, 2026-09-23: "change the 2d button to 3d to entice the free silver users").
+  const locked2D = useMapView2DLocked();
 
   // Build the single navigation template once and make it the car's root.
   useEffect(() => {
@@ -276,7 +281,7 @@ export default function AndroidAutoRoot() {
     // never a push or pop, which has evicted the driver to the app drawer (memory
     // aa-poptotemplate-evicts-driver). A native parse failure is caught in CarPlayModule.updateTemplate
     // and leaves the old strip in place.
-  }, [s.navigating, askable]);
+  }, [s.navigating, askable, locked2D]);
 
   return null;
 }

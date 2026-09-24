@@ -11,7 +11,7 @@ import type { MapMode, Settings } from '../settings';
 // VALUE import (this used to be type-only): the settings→car mirror at the bottom of
 // this file needs the live accessors. No import cycle — settings.ts imports only
 // AsyncStorage and react (settings.ts:2-3).
-import { getSettings, getMapMode, getRouteColor, getSelfMarkerType, getVehicleClass, subscribeSettings } from '../settings';
+import { getSettings, getMapMode, getRouteColor, getSelfMarkerType, getVehicleClass, getClassPaint, subscribeSettings } from '../settings';
 import type { RoadEvent } from '../driveBcEvents';
 import type { CarStatusCode } from './carStatusRule';
 // Timer-liveness receipt (2026-09-04/05) — see src/timerLiveness.ts. setCarSelfPosition
@@ -177,6 +177,10 @@ export type CarState = {
   // art on the car surfaces, not the GR Corolla photo by paint (Jeff, 2026-09-23: "it's showing my GR Corolla as the
   // avatar or car marker when it's supposed to be the exotic car").
   selfClass?: string;
+  // The class's saved PAINT (mirror of getClassPaint(settings): primary / secondary hex, undefined = unpainted) — so the
+  // car surfaces draw the class car in the driver's colours like the phone does (Jeff, 2026-09-23: "car color on both").
+  selfClassPri?: string;
+  selfClassSec?: string;
   // Driver's speed unit (mirror of settings.speedUnit). CarSurface reads
   // getSettings().speedUnit directly at render — correct (one JS context, shared
   // module cache) but NOT reactive: nothing re-renders the car tree when the unit
@@ -637,7 +641,7 @@ export function subscribeCarGesture(fn: (g: CarGesture) => void): () => void {
 //   2. Memoising that metadata effect removes the accidental refresh that was masking
 //      (1) on the warm path — so this mirror is its mandatory companion, not a nicety.
 //
-// Writes ONLY these seven keys (five + the scan pair, 2026-08-29). Every other settings change (activeThreadId, the audio
+// Writes ONLY these keys (five + the scan pair, 2026-08-29; + the class and its paint pair, 2026-09-23). Every other settings change (activeThreadId, the audio
 // sliders, gas brands…) lands on setCarState's equality short-circuit above and
 // notifies nobody.
 //
@@ -653,6 +657,7 @@ export function subscribeCarGesture(fn: (g: CarGesture) => void): () => void {
 // drops the duplicate.)
 function mirrorSettingsToCar(s: Settings): void {
   try {
+    const classPaint = getClassPaint(s);
     setCarState({
       selfCarColor: s.carColor,
       // Same ready-gate as the phone (map.tsx): a submitted-but-unfinished scan, or
@@ -662,6 +667,11 @@ function mirrorSettingsToCar(s: Settings): void {
       mapMode: getMapMode(s),
       selfMarkerType: getSelfMarkerType(s),
       selfClass: getVehicleClass(s),
+      // Two strings, not the paint object: setCarState's equality gate compares by Object.is, and getClassPaint can
+      // return a fresh object (the legacy classColors fallback, the `{}` default) — an object here would notify every
+      // car listener on every settings write. '' reads as unpainted, same as the phone (ConvoyMapbox selfClassPainted).
+      selfClassPri: classPaint.primary || undefined,
+      selfClassSec: classPaint.secondary || undefined,
       routeColor: getRouteColor(s),
       speedUnit: s.speedUnit,
     });

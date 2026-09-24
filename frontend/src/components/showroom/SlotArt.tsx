@@ -39,8 +39,10 @@ const LOCK_H = 56;
 const ARROW_2D_W = 136;
 /** Shrunk from 230 (Jeff, 2026-09-22: "shrink the 3d arrow down a bit"). */
 const ARROW_3D_W = 180;
-/** The top-down class sprite's square: the car stands ~180 pt tall on it, clear of the words above. */
-const CLASS_2D = 190;
+/** The top-down class sprite's square. The car fills ~95 % of its height, so at 148 it stands ~140 pt tall —
+ *  a touch longer than the 2D arrow's 132 pt (ARROW_2D_W × its 0.97 ink). Was 190 (~180 pt car): Jeff,
+ *  2026-09-23, "the class car 2d car is too big, shrink it down just a little bigger then the 2d arrow". */
+const CLASS_2D = 148;
 
 /** The class car in its class paint — flat and straight down, hovering over the turntable like the 2D arrow. */
 function ClassSlot({ s }: { s: Settings }) {

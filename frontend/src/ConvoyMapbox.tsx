@@ -63,7 +63,8 @@ import RibbonNear, { type DrawSinkRef } from "./RibbonNear";
 import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, nextRibbonSeam, type RibbonSeamState, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind } from "./driveBcEvents";
-import { NeonPin, hazardPin, hazardPinImage, HAZARD_PIN_KINDS, HAZARD_PIN_DEFAULT, CAMERA_PIN, INCIDENT_PIN, INCIDENT_PIN_KINDS, PLACE_TONE, NEON_TONE, NEON_PIN_H, NEON_PIN_HOLE_ABOVE_TIP } from "./components/NeonPin";
+import { NeonPin, hazardPin, hazardPinImage, HAZARD_PIN_KINDS, HAZARD_PIN_DEFAULT, CAMERA_PIN, INCIDENT_PIN, INCIDENT_PIN_KINDS, NEON_TONE, NEON_PIN_H, NEON_PIN_HOLE_ABOVE_TIP } from "./components/NeonPin";
+import { POI_PIN_IMAGES, POI_PIN_SCALE, POI_PIN_NUM_PT, POI_PIN_HEAD_ABOVE_TIP, POI_PIN_HEAD_R, POI_PIN_W, POI_PIN_H, poiPinUri, poiPinImageName } from "./poiPinImages";
 import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { scanMapUrl } from "./carScan";
@@ -1169,7 +1170,7 @@ export function routeInitialBearing(line: { latitude: number; longitude: number 
 // 🔒 NAV-LOCK end mbx-route-start-bearing
 
 type CarPoint = { id: string; lat: number; lng: number; color?: string; heading?: number; leader?: boolean; peer?: Peer; status?: "live" | "parked"; cls?: string; clsPri?: string; clsSec?: string; arrow?: boolean; arrPri?: string; arrSec?: string; scanId?: string };
-type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean };
+type PlacePoint = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; cat?: string };
 
 // ===== SelfCarModel =====
 // ── ABOVE THE STREET LABELS (2026-07-30) ─────────────────────────────────────
@@ -2539,14 +2540,24 @@ export function IncidentMarker({ event, scale = 1 }: { event: RoadEvent; scale?:
 }
 
 // ===== PlaceMarker =====
+// The car surfaces' search pin (the phone draws the same pins through the gl-places SymbolLayer).
+// CarPlay must match the phone: the SAME baked 2x PNG — the category's deep-fill solid teardrop, bright
+// for the cheapest gas station — with the result number drawn live in white on the head, so the map
+// pins and the Results list line up (1, 2, 3 …). Jeff, 2026-09-23: no glyph, no ring on the pin.
 export function PlaceMarker({ place, index, onPress, scale = 1 }: { place: PlacePoint; index: number; onPress?: (p: PlacePoint) => void; scale?: number }) {
-  // Same metal as the phone's GL pin — CarPlay must match the phone. The result number sits in
-  // the ring so the map pins and the Results list line up (1, 2, 3 …).
-  const tone = PLACE_TONE[useAppSkin()] ?? "brand";
+  const w = POI_PIN_W * scale, h = POI_PIN_H * scale;
+  const headTop = (POI_PIN_H - POI_PIN_HEAD_ABOVE_TIP - POI_PIN_HEAD_R) * scale;   // head circle's top edge
+  const headD = POI_PIN_HEAD_R * 2 * scale;
   return (
     <MarkerView coordinate={[place.lng, place.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
-      <Pressable onPress={() => onPress?.(place)} hitSlop={6}>
-        <NeonPin tone={tone} number={index + 1} size={NEON_PIN_H * scale} />
+      <Pressable onPress={() => onPress?.(place)} hitSlop={6} style={{ width: w, height: h }}>
+        <Image source={{ uri: poiPinUri(place.cat, place.cheapest ? "bright" : "deep") }} style={{ position: "absolute", left: 0, top: 0, width: w, height: h }} resizeMode="contain" />
+        <Text
+          allowFontScaling={false}
+          style={{ position: "absolute", left: 0, right: 0, top: headTop, height: headD, lineHeight: headD, textAlign: "center", color: "#FFFFFF", fontSize: POI_PIN_NUM_PT * scale, fontWeight: "700" }}
+        >
+          {index + 1}
+        </Text>
       </Pressable>
     </MarkerView>
   );
@@ -2622,6 +2633,9 @@ const PIN_IMAGE_MAP: Record<string, any> = {
   brand_pin_grey: require("../assets/images/brand-pin-grey.png"),
   brand_pin_gold: require("../assets/images/brand-pin-gold.png"),
   brand_pin_silver: require("../assets/images/brand-pin-silver.png"),
+  // The search-category pins ride the bundle as data URIs (like the weather callouts): one baked PNG
+  // per category × deep/bright, registered by name (poi_<cat>_<variant>) for the gl-places SymbolLayer.
+  ...POI_PIN_IMAGES,
 };
 
 // ── NEON PIN SIZING (2026-09-10) ─────────────────────────────────────────────────────────
@@ -2717,9 +2731,9 @@ function GLPinLayers({
     icon: `neon_inc_${INCIDENT_PIN[e.kind] ? e.kind : "event"}`, kind: e.kind, road: e.road || "", headline: e.headline,
     minor: e.severity === "MAJOR" || e.severity === "MODERATE" ? 0 : 1, near: nearIds.has(e.id) ? 1 : 0,
   })) }), [incidents, nearIds]);
-  const placeFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: places.map((p, i) => fcPoint(p.id, p.lng, p.lat, { num: String(i + 1) })) }), [places]);
-  const tier = useAppSkin();
-  const placeTone = PLACE_TONE[tier] ?? "brand";
+  // Each search pin carries its own image name: the category's deep-fill teardrop, or the bright one
+  // for the cheapest gas station (src/poiPinImages.ts — baked, so CarPlay's MarkerView draws the same pixels).
+  const placeFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: places.map((p, i) => fcPoint(p.id, p.lng, p.lat, { num: String(i + 1), img: poiPinImageName(p.cat, p.cheapest ? "bright" : "deep") })) }), [places]);
 
   const tapHazard = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const h = hazards.find((x) => x.id === id); if (h) onHazardPress?.(h); }, [hazards, onHazardPress]);
   const tapPlace = useCallback((e: any) => { const id = e?.features?.[0]?.properties?.id; const p = places.find((x) => x.id === id); if (p) onPlacePress?.(p); }, [places, onPlacePress]);
@@ -2787,13 +2801,14 @@ function GLPinLayers({
         </ShapeSource>
       )}
 
-      {/* Place pins — the ring in the page's metal with the result number in the hole (the list and
-          the map line up: 1, 2, 3 …). Not zoom-scaled: the number's offset is in em and must stay
-          on the hole. */}
+      {/* Place pins (2026-09-23, Jeff's Mapbox reference): a small SOLID teardrop in the category's deep
+          colour with the result number in white on the head — no glyph, no ring; the glyph and the bright
+          colour belong to the chip and the results row. The image is the 2x baked PNG (iconSize 0.5 →
+          points). Not zoom-scaled: the number's offset is in em and must stay on the head. */}
       {places.length > 0 && (
         <ShapeSource id="gl-places" shape={placeFC} onPress={tapPlace}>
-          <SymbolLayer id="gl-places-pin" slot="top" style={neonSym({ iconImage: `neon_place_${tier}`, iconSize: 1, iconOpacity: 1 })} />
-          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: 11, textColor: NEON_TONE[placeTone].rim, textHaloColor: NEON_TONE[placeTone].glow, textHaloWidth: 0.3, textHaloBlur: 1, textOffset: [0, -NEON_PIN_HOLE_ABOVE_TIP / 11] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
+          <SymbolLayer id="gl-places-pin" slot="top" style={neonSym({ iconImage: ["get", "img"] as any, iconSize: 1 / POI_PIN_SCALE, iconOpacity: 1 })} />
+          <SymbolLayer id="gl-places-num" slot="top" style={{ textField: ["get", "num"] as any, textSize: POI_PIN_NUM_PT, textColor: "#FFFFFF", textHaloColor: "rgba(0,0,0,0.35)", textHaloWidth: 0.6, textHaloBlur: 0.5, textOffset: [0, -POI_PIN_HEAD_ABOVE_TIP / POI_PIN_NUM_PT] as any, textRotationAlignment: "viewport", textPitchAlignment: "viewport", textEmissiveStrength: 1, textAllowOverlap: true, textIgnorePlacement: true }} />
         </ShapeSource>
       )}
     </>

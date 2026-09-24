@@ -5,10 +5,10 @@
 // six pills (Gas → Parking) are always visible and scroll horizontally; a
 // trailing "More" pill opens a sheet with the rest of the categories.
 //
-// Styling mirrors Google's dark translucent pills so the row reads as one
-// family with the existing search bar. The active pill fills convoy-yellow so
-// it's obvious which category is currently showing; tapping it again clears
-// the pins (toggle off).
+// Styling (2026-09-23, Jeff off a Mapbox screenshot — "chips good"): each category is a round
+// dark-glass chip with a ring and glyph in ITS colour (src/poiPalette.ts) and the label beneath;
+// the active chip fills with that colour. The results list repeats the same badge on every row so
+// chip ↔ row ↔ map pin read as one family. Tapping the active chip again clears the pins (toggle off).
 import React, { useRef, useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Pressable, Animated, Easing } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -16,13 +16,14 @@ import { GOOGLE_MAPS_KEY } from "../api";
 import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
 import { GlassFill, hudTint, drawerTint } from "../Glass";
-import { useAccentAlpha } from "../appSkin";
 import { skin } from "../tierTheme";
+import { poiColors } from "../poiPalette";
 import { useWaveMetal, useWaveY } from "../ui/SkinWave";
 import { PressableScale } from "../ui/PressableScale";
 import { COLORS } from "../theme";
 
-export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; address?: string; rating?: number; ratingCount?: number; distanceM?: number };
+// `cat` is the chip's category key — it picks the pin's colour family (src/poiPalette.ts) on every surface.
+export type PlaceResult = { id: string; lat: number; lng: number; label: string; price?: string; isGas?: boolean; cheapest?: boolean; address?: string; rating?: number; ratingCount?: number; distanceM?: number; cat?: string };
 
 // Format a straight-line distance (m) for the results dropdown, in the driver's unit.
 function fmtDist(m: number | undefined, unit: "kmh" | "mph"): string {
@@ -216,9 +217,8 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   // The pill icons turn as the unlock wave's band crosses this row (src/skinWave.ts); 0.18 until measured.
   const wavePos = useWaveY(0.18);
   const accent = skin(useWaveMetal(wavePos.y.current)).accent;
-  const accentWell = useAccentAlpha(0.14);
-  const accentHairline = useAccentAlpha(0.35);
   const unit = getSettings().speedUnit;
+  const activeCat = activeKey ? [...PRIMARY, ...MORE].find((c) => c.key === activeKey) : undefined;
 
   const closeDropdown = () => {
     reqSeq.current++;
@@ -250,7 +250,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
     setResults([]);
     onResults([]);
     setLoadingKey(cat.key);
-    const found = await textSearchNearby(cat.query, origin, cat.key === "gas");
+    const found = (await textSearchNearby(cat.query, origin, cat.key === "gas")).map((p) => ({ ...p, cat: cat.key }));
     if (myReq !== reqSeq.current) return;  // a newer tap superseded this search
     setLoadingKey(null);
     setResults(found);
@@ -260,25 +260,28 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   const renderPill = (cat: Category) => {
     const active = activeKey === cat.key;
     const loading = loadingKey === cat.key;
+    const c = poiColors(cat.key);
     return (
       <PressableScale
         key={cat.key}
         testID={`cat-pill-${cat.key}`}
-        // Pills sit 8 pt apart in a scroller: keep today's touch target, since a default slop would
+        // Chips sit 6 pt apart in a scroller: keep today's touch target, since a default slop would
         // take the neighbour's edge (Jeff, 2026-09-23: Apple-feel batch 1). Same for More.
         hitSlop={0}
         onPress={() => { setListOpen(false); run(cat); }}
         onLongPress={() => { setListOpen(true); if (activeKey !== cat.key) run(cat); }}
         delayLongPress={250}
-        style={[styles.pill, active && styles.pillActive, active && { backgroundColor: accent }]}
+        style={styles.chip}
       >
-        {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />}
-        {loading ? (
-          <ActivityIndicator size="small" color={active ? "#1C1C1E" : accent} />
-        ) : (
-          <MaterialCommunityIcons name={cat.icon} size={15} color={active ? "#1C1C1E" : accent} />
-        )}
-        <Text maxFontSizeMultiplier={1} style={[styles.pillText, active && styles.pillTextActive]}>{cat.label}</Text>
+        <View style={[styles.chipCircle, { borderColor: c.bright }, active && { backgroundColor: c.bright }]}>
+          {!active && <GlassFill tintColor={hudTint()} style={{ borderRadius: CHIP_D / 2, overflow: "hidden" }} />}
+          {loading ? (
+            <ActivityIndicator size="small" color={active ? "#1C1C1E" : c.bright} />
+          ) : (
+            <MaterialCommunityIcons name={cat.icon} size={24} color={active ? "#1C1C1E" : c.bright} />
+          )}
+        </View>
+        <Text maxFontSizeMultiplier={1} style={[styles.chipLabel, active && styles.chipLabelActive]} numberOfLines={1}>{cat.label}</Text>
       </PressableScale>
     );
   };
@@ -293,10 +296,12 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
       >
         {PRIMARY.map(renderPill)}
         {/* More pill — always last, opens the overflow sheet. */}
-        <PressableScale testID="cat-pill-more" hitSlop={0} onPress={() => setMoreOpen(true)} style={styles.pill}>
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 13, overflow: "hidden" }} />
-          <MaterialCommunityIcons name="dots-horizontal" size={16} color={accent} />
-          <Text maxFontSizeMultiplier={1} style={styles.pillText}>More</Text>
+        <PressableScale testID="cat-pill-more" hitSlop={0} onPress={() => setMoreOpen(true)} style={styles.chip}>
+          <View style={[styles.chipCircle, { borderColor: "rgba(255,255,255,0.28)" }]}>
+            <GlassFill tintColor={hudTint()} style={{ borderRadius: CHIP_D / 2, overflow: "hidden" }} />
+            <MaterialCommunityIcons name="dots-horizontal" size={24} color="#F4F4F4" />
+          </View>
+          <Text maxFontSizeMultiplier={1} style={styles.chipLabel}>More</Text>
         </PressableScale>
       </ScrollView>
 
@@ -311,7 +316,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         >
           <GlassFill tintColor={drawerTint()} style={StyleSheet.absoluteFill} />
           <View style={styles.dropHeader}>
-            <Text maxFontSizeMultiplier={1} style={styles.dropTitle}>Results</Text>
+            <Text maxFontSizeMultiplier={1} style={styles.dropTitle}>{activeCat ? `${activeCat.label} Nearby` : "Nearby"}</Text>
             <TouchableOpacity onPress={closeDropdown} hitSlop={10} testID="results-close">
               <MaterialCommunityIcons name="close" size={20} color="#9A9A9E" />
             </TouchableOpacity>
@@ -325,7 +330,12 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
             <Text maxFontSizeMultiplier={1} style={styles.dropEmpty}>No results nearby</Text>
           ) : (
             <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {results.map((r, i) => (
+              {results.map((r, i) => {
+                // The row's badge is the chip's twin (same colour, same glyph) and the number matches the
+                // map pin. A gas price rides the meta line in the category colour; the cheapest station
+                // goes brand green with the word, the way its pin goes bright on the map.
+                const c = poiColors(r.cat ?? activeKey ?? undefined);
+                return (
                 <TouchableOpacity
                   key={r.id}
                   testID={`result-${i}`}
@@ -333,26 +343,32 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   onPress={() => onSelect?.(r)}
                   style={styles.resultRow}
                 >
-                  <View style={styles.resultLeft}>
-                    <Text maxFontSizeMultiplier={1} style={styles.resultName} numberOfLines={1}>{i + 1}. {r.label}</Text>
-                    {!!r.address && <Text maxFontSizeMultiplier={1} style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>}
+                  <View style={[styles.badge, { borderColor: c.bright }]}>
+                    <MaterialCommunityIcons name={activeCat?.icon ?? "map-marker"} size={18} color={c.bright} />
                   </View>
-                  <View style={styles.resultRight}>
-                    {r.isGas ? (
-                      <Text maxFontSizeMultiplier={1} style={[styles.gasPrice, { color: accent }]} numberOfLines={1}>{r.price ? `Premium ${r.price}` : "Premium —"}</Text>
-                    ) : (
-                      <View style={styles.ratingRow}>
-                        {[0, 1, 2, 3, 4].map((d) => (
-                          <View key={d} style={[styles.dot, d < Math.round(r.rating ?? 0) ? [styles.dotOn, { backgroundColor: accent }] : styles.dotOff]} />
-                        ))}
-                        {typeof r.ratingCount === "number" && <Text maxFontSizeMultiplier={1} style={styles.ratingCount}>{r.ratingCount}</Text>}
-                      </View>
-                    )}
-                    <Text maxFontSizeMultiplier={1} style={styles.timeDist} numberOfLines={1}>{fmtEta(r.distanceM)} · {fmtDist(r.distanceM, unit)}</Text>
+                  <View style={styles.resultLeft}>
+                    <View style={styles.resultTitleRow}>
+                      <Text maxFontSizeMultiplier={1} style={styles.resultName} numberOfLines={1}>{i + 1}.  {r.label}</Text>
+                      <Text maxFontSizeMultiplier={1} style={styles.resultDist} numberOfLines={1}>{fmtDist(r.distanceM, unit)}</Text>
+                    </View>
+                    {!!r.address && <Text maxFontSizeMultiplier={1} style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>}
+                    <View style={styles.metaRow}>
+                      {/* Compact on purpose — the dropdown is ~300 pt of text width and a gas row also carries
+                          its price here (sim, 2026-09-23: "246 reviews… Premium $2.42" clipped the reviews). */}
+                      <Text maxFontSizeMultiplier={1} style={styles.meta} numberOfLines={1}>
+                        {typeof r.rating === "number" ? `★ ${r.rating.toFixed(1)}${typeof r.ratingCount === "number" ? ` (${r.ratingCount})` : ""} · ` : ""}{fmtEta(r.distanceM)}
+                      </Text>
+                      {r.isGas && (
+                        <Text maxFontSizeMultiplier={1} style={[styles.gasPrice, { color: r.cheapest ? "#2DEC86" : c.bright }]} numberOfLines={1}>
+                          {r.price ? `Premium ${r.price}` : "Premium —"}{r.cheapest ? " · cheapest" : ""}
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   {onSelect && <MaterialCommunityIcons name="chevron-right" size={20} color="#5A5A5E" style={{ alignSelf: "center" }} />}
                 </TouchableOpacity>
-              ))}
+                );
+              })}
             </ScrollView>
           )}
         </Animated.View>
@@ -372,8 +388,8 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
                   style={styles.gridItem}
                   onPress={() => { setMoreOpen(false); run(cat); }}
                 >
-                  <View style={[styles.gridIcon, { backgroundColor: accentWell, borderColor: accentHairline }]}>
-                    <MaterialCommunityIcons name={cat.icon} size={22} color={accent} />
+                  <View style={[styles.gridIcon, { borderColor: poiColors(cat.key).bright }]}>
+                    <MaterialCommunityIcons name={cat.icon} size={22} color={poiColors(cat.key).bright} />
                   </View>
                   <Text maxFontSizeMultiplier={1} style={styles.gridLabel} numberOfLines={1}>{cat.label}</Text>
                 </TouchableOpacity>
@@ -389,26 +405,25 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   );
 }
 
+// The round category chip: Ø 56 pt (the mock Jeff approved 2026-09-23), a 44 pt+ touch target on its own.
+const CHIP_D = 56;
+
 const styles = StyleSheet.create({
   wrap: { marginTop: 8 },
-  row: { gap: 8, paddingRight: 16, paddingLeft: 2, alignItems: "center" },
-  pill: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 12, paddingVertical: 8,
-    // Squared-off rounded corners (the app's card/panel radius family) instead of
-    // the fully-round 999 capsule — matches the search bar / glass panels.
-    borderRadius: 13,
-    // Transparent so the CLEAR glass bends the map at the pill edges. Stability now
-    // comes from the GlassContainer inside GlassFill (not an opaque floor, which
-    // would give the edges a flat colour to refract instead of the live map).
-    backgroundColor: "transparent",
-    // No hard stroke — the clear glass draws its own clean edge; a hairline on top
-    // read as an unfinished double edge. Shadow keeps the pill lifted off the map.
+  row: { gap: 6, paddingRight: 16, paddingLeft: 6, alignItems: "flex-start" },
+  chip: { width: 80, alignItems: "center", gap: 5 },
+  chipCircle: {
+    width: CHIP_D, height: CHIP_D, borderRadius: CHIP_D / 2,
+    alignItems: "center", justifyContent: "center",
+    // The ring is the category colour (set inline). Inside: the clear glass (GlassFill, which clips
+    // itself) over a light dark floor — a 56 pt circle is a bigger surface than the old pill and
+    // reads as thicker material (Apple-design §12), and map labels no longer print through the glyph.
+    // The category colour replaces both when active.
+    borderWidth: 2, backgroundColor: "rgba(20,22,26,0.38)",
     shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
-  pillActive: { backgroundColor: "#2DEC86", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.15)" },
-  pillText: { color: "#F4F4F4", fontSize: 13, fontWeight: "600", letterSpacing: 0.1 },
-  pillTextActive: { color: "#1C1C1E" },
+  chipLabel: { color: "#C7C7CC", fontSize: 12, fontWeight: "600", letterSpacing: 0.2, maxWidth: 80, textAlign: "center" },
+  chipLabelActive: { color: "#F4F4F4" },
   // ===== "More" bottom sheet =====
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet: {
@@ -424,8 +439,8 @@ const styles = StyleSheet.create({
   gridIcon: {
     width: 52, height: 52, borderRadius: 26,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(45,236,134,0.14)",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(45,236,134,0.35)",
+    backgroundColor: "rgba(22,26,32,0.9)",
+    borderWidth: 2,   // ring in the category's colour (set inline) — the chip's twin
     marginBottom: 6,
   },
   gridLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", textAlign: "center" },
@@ -457,15 +472,14 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.08)",
   },
+  // The row badge: the chip's twin at 36 pt — dark fill, thin ring + glyph in the category colour.
+  badge: { width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(22,26,32,0.9)" },
   resultLeft: { flex: 1 },
-  resultRight: { alignItems: "flex-end", maxWidth: 140 },
-  resultName: { color: "#F4F4F4", fontSize: 15, fontWeight: "700", letterSpacing: -0.1 },
-  resultAddr: { color: "#9A9A9E", fontSize: 12, marginTop: 2 },
-  ratingRow: { flexDirection: "row", alignItems: "center" },
-  dot: { width: 7, height: 7, borderRadius: 4, marginLeft: 3 },
-  dotOn: { backgroundColor: "#2DEC86" },
-  dotOff: { backgroundColor: "rgba(255,255,255,0.18)" },
-  ratingCount: { color: "#9A9A9E", fontSize: 11, marginLeft: 4, fontWeight: "600" },
-  gasPrice: { color: "#2DEC86", fontSize: 14, fontWeight: "800", letterSpacing: -0.1 },
-  timeDist: { color: "#9A9A9E", fontSize: 12, marginTop: 2, fontWeight: "500" },
+  resultTitleRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  resultName: { flex: 1, color: "#F4F4F4", fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
+  resultDist: { color: "#9A9A9E", fontSize: 13, fontWeight: "500" },
+  resultAddr: { color: "rgba(244,244,244,0.7)", fontSize: 13, marginTop: 1 },
+  metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 2 },
+  meta: { color: "#9A9A9E", fontSize: 12, fontWeight: "500", letterSpacing: 0.2, flexShrink: 1 },
+  gasPrice: { fontSize: 13, fontWeight: "800", letterSpacing: -0.1 },
 });

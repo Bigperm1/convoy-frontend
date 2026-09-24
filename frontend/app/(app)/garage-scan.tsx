@@ -23,6 +23,7 @@ import {
   Animated,
   Easing,
   Image,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -30,6 +31,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -138,6 +140,13 @@ export default function GarageScan() {
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] });
   const pulseFade = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] });
 
+  // The tab bar is position:absolute — 84 pt plus the Android nav inset — and react-native's SafeAreaView
+  // adds NO bottom inset on Android, so this page's 48 pt bottom padding left "Start Capture" UNDER the
+  // bar there (Victor, Android, 2026-09-23: "It doesn't have that option for me"; iOS got the 34 pt home
+  // inset for free). Pad past the bar on both platforms so the button is the last thing you scroll to.
+  const insets = useSafeAreaInsets();
+  const bottomPad = (Platform.OS === "ios" ? 86 : 84) + (Platform.OS === "android" ? insets.bottom : 0) + 24;
+
   const startCapture = () => {
     Haptics.selectionAsync();
     // Straight to the disclaimer, never to the camera. The two-render rule is
@@ -147,7 +156,7 @@ export default function GarageScan() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: bottomPad }]} showsVerticalScrollIndicator={false}>
         {/* header */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>

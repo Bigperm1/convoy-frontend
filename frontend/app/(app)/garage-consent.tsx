@@ -12,6 +12,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import {
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -82,7 +83,9 @@ export default function GarageConsentScreen() {
         <View style={styles.backBtn} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      {/* Past the absolute tab bar (84/86 pt) so "I understand" is reachable — same trap as the scan guide's
+          Start Capture on Android (Victor, 2026-09-23); this SafeAreaView already adds the nav inset. */}
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: (Platform.OS === "ios" ? 86 : 84) + 24 }]} showsVerticalScrollIndicator={false}>
         <TierTitle tier="diamond" style={styles.tierTitle} />
 
         {/* ── attempts ───────────────────────────────────────────────────── */}

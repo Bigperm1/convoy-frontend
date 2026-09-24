@@ -198,7 +198,7 @@ export type CarState = {
   hazards?: { id: string; kind: string; lat: number; lng: number; confirms?: number; disputes?: number }[];
   speedCameras?: { id: string; lat: number; lng: number }[];
   roadEvents?: RoadEvent[];
-  places?: { id: string; lat: number; lng: number; label?: string }[];
+  places?: { id: string; lat: number; lng: number; label?: string; cat?: string; cheapest?: boolean }[];
   // Posted speed limit (km/h) for the road the driver is on (OSM/Overpass, fed by
   // the navNotification location feed). undefined/0 → no badge shown.
   speedLimitKmh?: number;

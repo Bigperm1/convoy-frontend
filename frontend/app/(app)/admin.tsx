@@ -76,16 +76,18 @@ function isOrphaned(u: AdminUser): boolean {
 }
 
 // INACTIVE (2026-09-24): nothing from this account in 30 days — no location post (last_seen), no launch
-// report (version_seen_at) — or it never reported a device at all and is older than a day. Seed accounts,
-// e2e sign-ups and testers who never installed a build all land here; the Remove button beside the row is
-// how Jeff clears them (owner-only on the server).
+// report (version_seen_at) — or it has NEVER been seen on the road (no last_seen at all) and is older
+// than a day. Seed accounts, e2e sign-ups (which do report a device — the emulator's — but never drive)
+// and testers who never installed a build all land here; the Remove button beside the row and the
+// "Remove selected" bar are how Jeff clears them (owner-only on the server). Every real tester has a
+// last_seen from their first drive, so nobody who has driven is ever pre-ticked by this second clause.
 function isInactive(u: AdminUser): boolean {
   const stamps = [u.last_seen, u.version_seen_at, u.created_at]
     .map((s) => (s ? new Date(s).getTime() : NaN))
     .filter((t) => !isNaN(t));
   if (!stamps.length) return false;
   const ageDays = (Date.now() - Math.max(...stamps)) / 86400000;
-  return ageDays > 30 || (!u.device_model && ageDays > 1);
+  return ageDays > 30 || (!u.last_seen && ageDays > 1);
 }
 
 // Icon hint for the platform: Apple logo for iOS, Android robot otherwise.
@@ -294,7 +296,7 @@ export default function AdminScreen() {
             </Text>
           </View>
           {isInactive(item) && (
-            <Text style={styles.inactiveTag}>INACTIVE · {item.device_model ? 'no activity in 30 days' : 'never installed a build'}</Text>
+            <Text style={styles.inactiveTag}>INACTIVE · {!item.last_seen ? 'never seen on the road' : 'no activity in 30 days'}</Text>
           )}
           {code && (
             <Text selectable style={[styles.codePill, { color: accent }]}>
@@ -347,7 +349,7 @@ export default function AdminScreen() {
       {sel.size > 0 && !loading && (
         <View style={styles.pruneBar}>
           <Text style={styles.pruneHint} numberOfLines={2}>
-            {sel.size} inactive account{sel.size === 1 ? '' : 's'} ticked — untick anyone to keep, then remove the rest.
+            {sel.size} inactive ticked. Untick anyone to keep.
           </Text>
           <TouchableOpacity style={[styles.pruneBtn, pruning && { opacity: 0.6 }]} onPress={pruneSelected} disabled={pruning} activeOpacity={0.85}>
             {pruning ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.pruneBtnText}>Remove selected · {sel.size}</Text>}

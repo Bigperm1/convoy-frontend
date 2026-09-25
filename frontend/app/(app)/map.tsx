@@ -4409,7 +4409,7 @@ export default function MapScreen() {
   // session, never for our own pins, and skip very fresh pins so we don't
   // prompt the instant one is reported next to us.
   useEffect(() => {
-    if (!coords || !showHazards || passPrompt) return;
+    if (!coords || !showHazards || passPrompt || showReport) return;   // no prompt while the Report sheet is up (Codex r4)
     const myHandle = user?.handle;
     for (const h of hazards) {
       if (!h || !h.id) continue;
@@ -4429,7 +4429,7 @@ export default function MapScreen() {
         break;
       }
     }
-  }, [coords?.lat, coords?.lng, hazards, showHazards, passPrompt, user?.handle]);
+  }, [coords?.lat, coords?.lng, hazards, showHazards, passPrompt, showReport, user?.handle]);
 
   // Clear the pass-by auto-dismiss timer on unmount so we don't leak.
   useEffect(() => () => { if (passPromptTimer.current) clearTimeout(passPromptTimer.current); }, []);
@@ -4462,6 +4462,9 @@ export default function MapScreen() {
     // fixes, so after a turn with no course it would reject a real hazard ahead or accept one behind. null → no cone.
     const course = coords.course ?? null;
     const announced = announcedHazardsRef.current;
+    // One still-there card per run (Codex r4): the first eligible pin takes it; the rest are NOT marked prompted, so the
+    // 120 m pass-by below still gets to ask about them.
+    let promptTaken = !!passPrompt || showReport;
     for (const h of hazards) {
       if (!h || !h.id) continue;
       const dM = distanceKm(coords.lat, coords.lng, h.lat, h.lng) * 1000;
@@ -4472,7 +4475,8 @@ export default function MapScreen() {
       // Jeff, 2026-09-25: "when driving approaching the hazard … it should pop up a window asking if it's still there.
       // Maybe make it pop up when scout mentions it." → the still-there card rides the call: someone else's pin, once per
       // hazard, 15 s on screen, and it yields to a tapped pin. The 120 m pass-by below stays as the fallback (no course).
-      if (!(user?.handle && h.reporter_handle === user.handle) && !promptedHazardsRef.current.has(h.id) && !passPrompt) {
+      if (!promptTaken && !(user?.handle && h.reporter_handle === user.handle) && !promptedHazardsRef.current.has(h.id)) {
+        promptTaken = true;
         promptedHazardsRef.current.add(h.id);
         setPassPrompt(h);
         if (passPromptTimer.current) clearTimeout(passPromptTimer.current);
@@ -4482,7 +4486,7 @@ export default function MapScreen() {
       if (!navMuted) { try { spoke = announce(hazardAheadLine(h.kind, dM, settings.speedUnit === "mph" ? "mi" : "km")); } catch {} }
       try { logEvent(`hazard-ahead kind=${h.kind} d=${Math.round(dM)} lead=${Math.round(leadM)} kmh=${Math.round(kmh)} spoke=${spoke ? 1 : 0}`); } catch {}
     }
-  }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted, settings.speedUnit, passPrompt, user?.handle]);
+  }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted, settings.speedUnit, passPrompt, showReport, user?.handle]);
 
   // ----- DriveBC road-event proximity voice alert (Nova) -----
   // Official incidents from the Open511 feed. Same distance/re-arm shape as the
@@ -5478,6 +5482,13 @@ export default function MapScreen() {
             )}
           </View>
         )}
+        {/* …and when the search bar is hidden (a destination is set, turn-by-turn) the pill still shows: under the turn
+            banner during guidance, at the top otherwise (Codex r4 — the old bottom toast lived outside this block). */}
+        {!searchVisible && (
+          <View pointerEvents="none" style={{ marginTop: navMode === "turn-by-turn" ? 100 : 8 }}>
+            <ReportPill kind={alertConfirm} />
+          </View>
+        )}
       </View>
 
       {/* Top-right logo — absolutely positioned at the SAME screen spot as the
@@ -5886,7 +5897,7 @@ export default function MapScreen() {
         onStillThere={() => { if (selected) confirmHazard(selected); }}
       />
       <HazardCard
-        hazard={selected ? null : passPrompt}
+        hazard={selected || showReport ? null : passPrompt}   // never a second Modal over the Report sheet (Codex r4)
         mode="passby"
         mine={false}
         anchorBottom={controlsBottom + fabStackH}

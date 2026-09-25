@@ -26,6 +26,8 @@ import { useAppSkin } from "../appSkin";
 import { haptics } from "../haptics";
 import { logEvent } from "../crashBreadcrumb";
 import { HAZARD_TILES, HAZARD_PANEL_AUTO_CLOSE_MS, type HazardKind, type HazardGlyph } from "../carplay/hazardPanel";
+import { hazardPaint } from "../hazardPalette";
+import { NEON_TONE } from "./NeonPin";
 import type { VisualTier } from "../tierTheme";
 
 /** The report glyphs per metal — the same PNGs the head unit bakes into carButtonIcons.ts. */
@@ -126,6 +128,10 @@ export default function HazardSheet({ visible, onClose, onReport, onCompass, dis
   const tile = Math.min(TILE_MAX, Math.floor((cardW - PAD_H * 2 - TILE_GAP * 4) / 5));
   const tileRadius = Math.round(tile * 0.28);
   const glyphPt = Math.round(tile * 0.62);
+  // The neon border (Jeff, 2026-09-25: "Put the neon border around the hazard panel square glyphs"): each report tile is rimmed
+  // in its kind's category colour — the pin's colour — with a soft glow of the same; the Compass tile wears the metal's neon
+  // rim (NeonPin's tone table), so the five faces read as one family with the pins.
+  const neonFor = (kind: HazardKind | null): string => (kind ? hazardPaint(kind).bright : NEON_TONE[metal].rim);
   // Above the stack — unless that would push the card into the top bar (short phone, Drive drawer up): then it stops
   // TOP_CLEAR from the top and may touch the compass FAB, never the Hazards button below it.
   const bottom = Math.min(anchorBottom + GAP_ABOVE_STACK, Math.max(0, winH - TOP_CLEAR - cardH));
@@ -170,7 +176,7 @@ export default function HazardSheet({ visible, onClose, onReport, onCompass, dis
                 Promise.resolve(onReport(t.kind)).catch(() => {}).finally(() => { _reportBusy = false; });
               }}
             >
-              <View style={[styles.tileFace, { width: tile, height: tile, borderRadius: tileRadius }]}>
+              <View style={[styles.tileFace, { width: tile, height: tile, borderRadius: tileRadius, borderColor: neonFor(t.kind), shadowColor: neonFor(t.kind) }]}>
                 <Image source={HAZARD_ART[t.glyph][metal]} style={{ width: glyphPt, height: glyphPt }} resizeMode="contain" />
               </View>
               <Text maxFontSizeMultiplier={1.2} style={styles.label}>{t.title}</Text>
@@ -207,8 +213,10 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", gap: TILE_GAP },
   tile: { flex: 1, alignItems: "center", gap: 6 },
   tileFace: {
-    backgroundColor: "rgba(255,255,255,0.07)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1.5,
     alignItems: "center", justifyContent: "center",
+    // the glow: iOS only (Android's elevation shadow is not coloured); the rim alone carries it there
+    ...Platform.select({ ios: { shadowOpacity: 0.55, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } } }),
   },
   label: { color: "#E5E5EA", fontSize: 13, fontWeight: "600" },
   hint: { color: "#8E8E93", fontSize: 11.5, textAlign: "center", marginTop: 10 },

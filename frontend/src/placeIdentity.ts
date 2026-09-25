@@ -14,6 +14,7 @@
 // Cost: one Places Nearby (New) call per plotted destination, Enterprise field mask (open-now +
 // editorial summary) ≈ US$0.04. The destination coordinate already goes to Google for search.
 import { GOOGLE_MAPS_KEY, api } from "./api";
+import { getSettings } from "./settings";
 
 import {
   type ArrivalPlace, type PlaceCandidate, PLACE_SEARCH_RADIUS_M, pickArrivalPlace, validQuip,
@@ -21,7 +22,10 @@ import {
 export * from "./placeIdentityCore";
 
 const _cache = new Map<string, Promise<ArrivalPlace | null>>();
-const cacheKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
+// The quip is written in the persona that was on when it was asked for, so the process cache is keyed by
+// the Unfiltered Scout switch too — flipping it and re-plotting the same destination re-resolves (one
+// more Nearby call, ~US$0.04) rather than ever speaking the other persona's line.
+const cacheKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}|${getSettings().scoutEdgy === true ? "e" : "c"}`;
 
 async function nearby(lat: number, lng: number): Promise<PlaceCandidate[]> {
   const res = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
@@ -51,6 +55,7 @@ async function fetchQuip(place: ArrivalPlace): Promise<string | null> {
   try {
     const { data } = await api.post("/scout/arrival-quip", {
       name: place.name, primaryType: place.primaryType, types: place.types.slice(0, 6), summary: place.summary,
+      edgy: getSettings().scoutEdgy === true,   // Unfiltered Scout (Jeff, 2026-09-24): its own server cache key
     }, { timeout: 8000 });
     return validQuip(data?.quip);
   } catch { return null; }

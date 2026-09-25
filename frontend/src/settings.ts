@@ -95,6 +95,15 @@ novaVoiceName?: string;
 // to switch?") and listens for a spoken yes/no so you never tap while driving. The
 // on-screen card is always the fallback. undefined → on. See src/askScout.ts.
 scoutHandsFree?: boolean;
+// UNFILTERED SCOUT (Jeff, 2026-09-24: "can we switch on NSFW too" → the edgy-personality version). Opt-in
+// adult-humour persona: Scout swears, roasts the driver and the crew, keeps the jokes for grown-ups. It
+// reaches every surface where Scout speaks as a PERSONALITY — the voice agent, the route greeting and the
+// arrival quip (backend `edgy` flag on those three calls) and the local drive check-in bank
+// (src/scoutCheckIn.ts CHECKIN_BANK_EDGY) — and NOTHING that carries a safety or navigation fact:
+// turn prompts, speed and road heads-ups, hands-free prompts and convoy alerts stay clean. Language only:
+// never sexual or explicit (App Store 1.1.4 bans that outright, no age rating unlocks it) and never a slur;
+// the swearing alone moves the store rating to 17+ / Mature. undefined → OFF: opt-in, never migrated on.
+scoutEdgy?: boolean;
 // Convoy alerts — Scout speaks up when the crew is spreading out (a live peer falls
 // well behind). Only with 2+ live peers; edge-triggered + hushed. undefined → on.
 convoyAlerts?: boolean;
@@ -315,6 +324,7 @@ novaMuted: false,
 novaVoice: true,
 novaVoiceName: "nova",
 scoutHandsFree: true,
+scoutEdgy: false,     // Unfiltered Scout OFF at first launch — opt-in only (Jeff, 2026-09-24)
 convoyAlerts: true,
 adaptiveSpeedAlerts: true,
 departureIQ: false,   // Departure IQ OFF at first launch (Jeff, 2026-09-17)

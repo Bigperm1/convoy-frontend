@@ -87,7 +87,8 @@ export type CheckInContext = {
   destinationLabel: string;
   crewCount: number;       // cars in the convoy including the driver
   recentKinds: CheckInKind[];
-  recentTexts: string[];
+  recentTexts: string[];      // bank LINES already spoken (pickCheckIn().line), not the spoken text
+  edgy?: boolean;             // Unfiltered Scout (settings.scoutEdgy): pick from CHECKIN_BANK_EDGY instead
 };
 
 const FATIGUE = [
@@ -138,6 +139,56 @@ export const CHECKIN_BANK: Record<CheckInKind, string[]> = {
   fatigue: FATIGUE, stretch: STRETCH, hydrate: HYDRATE, joke: JOKES, crew: CREW, destination: DESTINATION,
 };
 
+// ── UNFILTERED SCOUT (Jeff, 2026-09-24: "can we switch on NSFW too") ───────────────────────────
+// The same six kinds with the customer-service voice off: swearing, roasting, adult humour. Rules the
+// gate holds them to (tools/sim-qc/scout_checkin_test.mts G): never mixed with the clean bank, ≤ 150
+// chars, no markdown; and by hand — nothing sexual or explicit, no slurs, nothing about race, religion,
+// disability, gender or sexuality, and the safety advice in a fatigue line stays real underneath the
+// language. Opt-in only (settings.scoutEdgy), off = CHECKIN_BANK.
+const FATIGUE_EDGY = [
+  "Honest question: are you driving the car, or is the car driving you? If it's the second one, next exit, out of the bloody thing.",
+  "You've been staring at that road like it owes you money. Blink, sit up, and find somewhere to stop before you become a statistic.",
+  "Yawning, drifting, missing signs? That's not fine, that's fatigue, and fatigue doesn't give a shit how good a driver you are.",
+  "Coffee won't fix this one, mate. Fifteen minutes out of the car at the next town. No arguments.",
+  "Crack a window and get some real air in here. Your brain's running at half speed and the car smells like a gym bag.",
+];
+const STRETCH_EDGY = [
+  "Shoulders down from your ears. You've been hunched like a scared cat for an hour. Squeeze the blades, five seconds, twice.",
+  "Unclench your jaw and unclench your arse. Both have been locked since the last merge.",
+  "Flex the pedal foot before it goes on strike. Toes up, toes down. Don't overthink it.",
+  "Next stop, stand up straight and reach for the sky like a normal human. Your spine's filing a complaint.",
+];
+const HYDRATE_EDGY = [
+  "Drink some water. Coffee is not water, energy drinks are definitely not water, and you bloody well know it.",
+  "Dry car, long drive, and you're turning into a raisin. Sip something.",
+  "Dehydrated drivers make dumb decisions. Don't be a dumb decision. Drink.",
+];
+const JOKES_EDGY = [
+  "Why did the manual driver get dumped? Couldn't find the right gear. Twice. In a parking lot.",
+  "I'd tell you a joke about your parking, but it wouldn't fit in the space either.",
+  "Your check-engine light called. It says it's not angry, just disappointed. Like everyone else.",
+  "What's the difference between you and a GPS? The GPS admits when it's fucked up.",
+  "Two tires walk into a bar. Bartender says, you two look flat. They say, long day, mate. Relatable.",
+  "I'd ask how the drive's going, but I've watched your lane discipline for ninety minutes. I know.",
+  "You drive like your ex texts. Slow, unpredictable, and somehow always in the way.",
+  "Cop pulls a bloke over doing thirty on the highway. Why so slow? The sign said thirty! That's the highway number, you muppet.",
+  "Fun fact: the left lane is for passing. I know, shocking. Tell your mates.",
+];
+const CREW_EDGY = [
+  "How's the crew? Somebody back there is definitely doing twenty under and holding up the whole bloody parade.",
+  "Check the Comms tab at the next stop. If someone's gone quiet they're lost or asleep, and both are your problem now.",
+  "The last car sets the pace, so if it's slow, that's who you roast at the next light. Wave first, then roast.",
+];
+const DESTINATION_EDGY = [
+  "About {eta} to {dest}. Nearly there. Don't cock it up on the last stretch, that's where people relax and hit things.",
+  "{dest} is {eta} out. Start thinking about parking now, because we both know you'll circle the lot three times.",
+  "Roughly {eta} left to {dest}. Steady on. Nobody's impressed by a last-minute hero move.",
+];
+
+export const CHECKIN_BANK_EDGY: Record<CheckInKind, string[]> = {
+  fatigue: FATIGUE_EDGY, stretch: STRETCH_EDGY, hydrate: HYDRATE_EDGY, joke: JOKES_EDGY, crew: CREW_EDGY, destination: DESTINATION_EDGY,
+};
+
 const WEIGHTS: Record<CheckInKind, number> = { fatigue: 30, joke: 30, stretch: 15, hydrate: 10, crew: 8, destination: 12 };
 
 export function leadIn(minutesDriven: number): string {
@@ -159,7 +210,8 @@ export function fmtEta(seconds: number): string {
 }
 
 /** Choose the next line. `rng` is injectable so the gate can pin the picker. */
-export function pickCheckIn(ctx: CheckInContext, rng: () => number = Math.random): { kind: CheckInKind; text: string } {
+export function pickCheckIn(ctx: CheckInContext, rng: () => number = Math.random): { kind: CheckInKind; text: string; line: string } {
+  const bankAll = ctx.edgy ? CHECKIN_BANK_EDGY : CHECKIN_BANK;
   const eligible: CheckInKind[] = (Object.keys(WEIGHTS) as CheckInKind[]).filter((k) => {
     if (k === "crew" && ctx.crewCount < 2) return false;
     if (k === "destination" && !(ctx.navigating && ctx.etaSeconds > 0 && ctx.destinationLabel)) return false;
@@ -172,11 +224,14 @@ export function pickCheckIn(ctx: CheckInContext, rng: () => number = Math.random
   let r = rng() * total;
   let kind: CheckInKind = pool[pool.length - 1];
   for (const k of pool) { r -= WEIGHTS[k]; if (r < 0) { kind = k; break; } }
-  const lines = CHECKIN_BANK[kind].filter((t) => !ctx.recentTexts.includes(t));
-  const bank = lines.length ? lines : CHECKIN_BANK[kind];
-  let text = bank[Math.min(bank.length - 1, Math.floor(rng() * bank.length))];
+  const lines = bankAll[kind].filter((t) => !ctx.recentTexts.includes(t));
+  const bank = lines.length ? lines : bankAll[kind];
+  const line = bank[Math.min(bank.length - 1, Math.floor(rng() * bank.length))];
+  let text = line;
   if (kind === "destination") {
     text = text.replace("{eta}", fmtEta(ctx.etaSeconds)).replace("{dest}", ctx.destinationLabel);
   }
-  return { kind, text: `${leadIn(ctx.minutesDriven)} ${text}` };
+  // `line` is the bank entry (pre-template) so the caller can remember what was said without
+  // having to peel the lead-in back off the spoken text.
+  return { kind, text: `${leadIn(ctx.minutesDriven)} ${text}`, line };
 }

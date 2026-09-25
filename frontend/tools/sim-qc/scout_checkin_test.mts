@@ -5,7 +5,7 @@
 // count, the picker never repeats a kind back to back, crew/destination lines only when they apply,
 // every line short enough to be spoken, and the QA interval override.
 import {
-  CHECKIN_BANK, CHECKIN_DEFAULTS, checkInConsume, checkInStart, checkInTick, fmtEta, leadIn, pickCheckIn,
+  CHECKIN_BANK, CHECKIN_BANK_EDGY, CHECKIN_DEFAULTS, checkInConsume, checkInStart, checkInTick, fmtEta, leadIn, pickCheckIn,
   type CheckInKind, type CheckInState,
 } from "../../src/scoutCheckIn.ts";
 
@@ -114,6 +114,37 @@ function drive(s: CheckInState, t0: number, minutes: number, speed: number, cfg 
   ok("F10 eta formats", fmtEta(2400) === "40 minutes" && fmtEta(3600) === "an hour" && fmtEta(4500) === "an hour and 15 minutes", `${fmtEta(4500)}`);
   const p = pickCheckIn({ ...ctx, recentTexts: CHECKIN_BANK.joke.slice(0, -1), recentKinds: ["fatigue", "stretch"] }, () => 0.5);
   ok("F11 recent texts are avoided while any fresh one remains", p.kind !== "joke" || p.text.endsWith(CHECKIN_BANK.joke[CHECKIN_BANK.joke.length - 1]));
+}
+
+// G — Unfiltered Scout (Jeff, 2026-09-24: "can we switch on NSFW too"): an opt-in bank, never mixed with
+// the clean one, same spoken-line rules; and `line` is the bank entry so the runtime's no-repeat memory
+// matches (it used to store the text minus the lead-in's first word, which matched nothing).
+{
+  const kinds = Object.keys(CHECKIN_BANK) as CheckInKind[];
+  ok("G1 the unfiltered bank covers every kind (3+ lines each)", kinds.every((k) => (CHECKIN_BANK_EDGY[k] ?? []).length >= 3));
+  const elen = kinds.flatMap((k) => CHECKIN_BANK_EDGY[k].map((t) => t.length));
+  ok("G2 every unfiltered line is short enough to be spoken (≤ 150 chars)", Math.max(...elen) <= 150, `max=${Math.max(...elen)}`);
+  const ebad = kinds.flatMap((k) => CHECKIN_BANK_EDGY[k]).filter((t) => /[*#_`\n]/.test(t));
+  ok("G3 no markdown or line breaks in any unfiltered line", ebad.length === 0);
+  const edgyAll = new Set(kinds.flatMap((k) => CHECKIN_BANK_EDGY[k]));
+  const cleanAll = new Set(kinds.flatMap((k) => CHECKIN_BANK[k]));
+  ok("G4 the two banks share no line", [...edgyAll].every((t) => !cleanAll.has(t)));
+  const ctxE = { minutesDriven: 90, navigating: true, etaSeconds: 2400, destinationLabel: "Whistler", crewCount: 3, recentKinds: [] as CheckInKind[], recentTexts: [] as string[] };
+  let seed = 7; const rng = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
+  let crossed = 0; let destE = ""; const kindsE = new Set<CheckInKind>();
+  for (let i = 0; i < 300; i++) { const p = pickCheckIn({ ...ctxE, edgy: true }, rng); kindsE.add(p.kind); if (!edgyAll.has(p.line)) crossed++; if (p.kind === "destination") destE = p.text; }
+  ok("G5 unfiltered ON picks only unfiltered lines, every kind reachable", crossed === 0 && kindsE.size === 6, `crossed=${crossed} kinds=${[...kindsE].join(",")}`);
+  ok("G6 …and templates the destination line", destE.includes("40 minutes") && destE.includes("Whistler"), destE);
+  let leaked = 0;
+  for (let i = 0; i < 300; i++) { const p = pickCheckIn({ ...ctxE, edgy: false }, rng); if (edgyAll.has(p.line)) leaked++; }
+  for (let i = 0; i < 300; i++) { const p = pickCheckIn(ctxE, rng); if (edgyAll.has(p.line)) leaked++; }
+  ok("G7 unfiltered OFF (or unset) never speaks an unfiltered line", leaked === 0, `leaked=${leaked}`);
+  const sweary = kinds.flatMap((k) => CHECKIN_BANK_EDGY[k]).filter((t) => /\b(fuck|fucked|shit|bloody|arse|damn|hell)\b/i.test(t)).length;
+  ok("G8 the unfiltered bank actually is unfiltered (5+ lines swear)", sweary >= 5, `sweary=${sweary}`);
+  const p = pickCheckIn({ ...ctxE, edgy: false, crewCount: 1, navigating: false }, () => 0.3);
+  ok("G9 line is the bank entry and text is lead-in + line", cleanAll.has(p.line) && p.text === `${leadIn(90)} ${p.line}`, p.line);
+  const pE = pickCheckIn({ ...ctxE, edgy: true, recentKinds: ["fatigue", "stretch"], recentTexts: CHECKIN_BANK_EDGY.joke.slice(0, -1) }, () => 0.5);
+  ok("G10 recent LINES are avoided in the unfiltered bank too", pE.kind !== "joke" || pE.line === CHECKIN_BANK_EDGY.joke[CHECKIN_BANK_EDGY.joke.length - 1], pE.line);
 }
 
 console.log(fails === 0 ? "\nPASS scout_checkin" : `\nFAIL scout_checkin (${fails})`);

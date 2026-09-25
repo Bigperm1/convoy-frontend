@@ -73,6 +73,17 @@ export default function ScoutVoicePage() {
         <ToggleRow icon="cafe" iconColor="#FF9F0A" title="Drive check-ins" subtitle="Every hour and a half on the road, Scout checks in — a fatigue check, a stretch, a joke, a word on the crew or the destination. A 15-minute stop resets the clock" value={settings.scoutCheckIns !== false} onChange={(v) => setSettings({ scoutCheckIns: v })} />
       </SettingsCard>
 
+      {/* UNFILTERED SCOUT (Jeff, 2026-09-24: "can we switch on NSFW too"). Opt-in, OFF by default: the same
+          Scout with the customer-service voice off — swears, roasts, adult humour. Language only: never
+          sexual or explicit (App Store 1.1.4 bans that outright, no rating unlocks it), never a slur. It
+          applies where Scout speaks as a PERSONALITY — voice replies, the route greeting, the arrival line,
+          drive check-ins (src/settings.ts scoutEdgy); turn-by-turn, speed and road alerts stay clean.
+          Store paperwork: the rating moves to 17+ (Apple) / Mature (Google) with this switch in the build. */}
+      <SectionLabel>PERSONALITY</SectionLabel>
+      <SettingsCard>
+        <ToggleRow icon="flame" iconColor="#FF453A" title="Unfiltered Scout" subtitle="Adult humour and language (NSFW). Scout swears, roasts you and the crew, and keeps the jokes for grown-ups. Directions and alerts stay clean. Off = the family version" value={settings.scoutEdgy === true} onChange={(v) => setSettings({ scoutEdgy: v })} />
+      </SettingsCard>
+
       <SectionLabel>SPEED ALERT</SectionLabel>
       <SettingsCard>
         <RadioRow icon="speedometer" iconColor="#FF453A" title="Scout" subtitle="Scout speaks up once when you're well over the limit (~21 over), once more if you push past ~41 — then stays quiet until you've been back near the limit for a bit" selected={getSpeedAlertMode(settings) === "nova"} onSelect={() => setSettings({ speedAlertMode: "nova", novaSpeeding: true })} />

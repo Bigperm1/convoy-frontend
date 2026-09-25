@@ -138,6 +138,7 @@ export function prepareRouteGreeting(ctx: GreetingContext, key: string): void {
         traffic: trafficLevel(ctx.route),
         weather: weatherWord(ctx.weatherKind),
         temperature: ctx.temperature || undefined,
+        edgy: s.scoutEdgy === true,   // Unfiltered Scout (Jeff, 2026-09-24) — the backend appends the persona
       });
       const text = (data?.text || "").toString().trim();
       // Receipt (2026-09-10, Jeff: "can you tell me what it said to me this morning" — nothing had recorded

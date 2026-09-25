@@ -53,11 +53,15 @@ function deliver(): void {
     crewCount: (st.peers?.length || 0) + 1,
     recentKinds: _recentKinds,
     recentTexts: _recentTexts,
+    edgy: getSettings().scoutEdgy === true,   // Unfiltered Scout (Jeff, 2026-09-24)
   });
   const spoke = announce(pick.text);
   _recentKinds = [..._recentKinds, pick.kind].slice(-RECENT_KINDS_MAX);
-  _recentTexts = [..._recentTexts, pick.text.slice(pick.text.indexOf(" ") + 1)].slice(-RECENT_TEXTS_MAX);
-  try { logEvent(`scout-checkin kind=${pick.kind} min=${minutes} n=${_state.fired + 1} spoke=${spoke ? 1 : 0}`); } catch {}
+  // The bank LINE, not the spoken text: the old `text.slice(indexOf(" ") + 1)` cut inside the lead-in
+  // ("Ninety minutes in." → "minutes in. …"), so nothing ever matched a bank line and the no-repeat rule
+  // was dead in the field (found 2026-09-24 while adding the unfiltered bank).
+  _recentTexts = [..._recentTexts, pick.line].slice(-RECENT_TEXTS_MAX);
+  try { logEvent(`scout-checkin kind=${pick.kind} min=${minutes} n=${_state.fired + 1} spoke=${spoke ? 1 : 0} edgy=${getSettings().scoutEdgy === true ? 1 : 0}`); } catch {}
 }
 
 export function startScoutCheckIns(): () => void {

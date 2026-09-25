@@ -11,6 +11,7 @@ import { setIdleAudioMode, setRecordingAudioMode } from "./audioMode";
 import { acquireMic, type MicLease } from "./micArbiter";
 import { announce } from "./nav";
 import { setListeningGlow } from "./components/ListeningEdgeGlow";
+import { getSettings } from "./settings";
 
 export type VoiceResult = { text: string; intent: string | null; query?: string };
 
@@ -193,7 +194,9 @@ export function useVoice(tier: ProximityTier = "far") {
         if (p) { lat = p.coords.latitude; lng = p.coords.longitude; }
       } catch {}
       try {
-        const { data } = await api.post("/voice/agent", { audio_b64: b64, mime: "audio/m4a", lat, lng });
+        // `edgy` = Unfiltered Scout (settings.scoutEdgy, Jeff 2026-09-24): the backend appends the adult-humour
+        // persona to the agent's system prompt; an older backend ignores the field.
+        const { data } = await api.post("/voice/agent", { audio_b64: b64, mime: "audio/m4a", lat, lng, edgy: getSettings().scoutEdgy === true });
         const actions: { intent: string | null; query?: string }[] = Array.isArray(data?.actions) ? data.actions : [];
         if (data?.speech) announce(String(data.speech));
         if (actions.length > 0) {

@@ -10,6 +10,10 @@
 import { isOverviewZoom } from "./overviewSize.ts";
 
 export const CREW_RETURN_MS = 7000;
+/** The head unit's crewFit easeTo into the overview (CarMapView 🔒 car-gesture-crewfit; was the literal 600). While it
+ *  runs, a lockstep 'none' push cannot take the camera back on iOS — MapboxMap.setCamera(to:) "does not cancel existing
+ *  animations" — so a return inside this window goes by a short fly, which does (CarMapView getCam, 2026-09-25). */
+export const CREW_FIT_EASE_MS = 600;
 
 /**
  * The head unit's crew-hold EXPIRY EDGE, evaluated on every camera push (CarMapView getCam → SelfCarModel.pushCam).

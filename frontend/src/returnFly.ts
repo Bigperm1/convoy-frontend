@@ -11,7 +11,8 @@
 
 export const RETURN_FLY_MS = 1800;
 
-/** The camera's return-fly state: -1 = armed (fly on the next push), 0 = idle, > 0 = flying until this epoch ms. */
+/** The camera's return-fly state: -1 = armed (fly on the next push, RETURN_FLY_MS), < -1 = armed as a RE-AIM lasting
+ *  −state ms (returnFlyReaim), 0 = idle, > 0 = flying until this epoch ms. */
 export type ReturnFlyState = -1 | 0 | number;
 
 /** Where the car will be after `ms` at this heading and speed (planar, fine for a few seconds). */
@@ -26,12 +27,34 @@ export function predictAhead(lat: number, lng: number, headingDeg: number | unde
   return { lat: lat + dLat, lng: lng + dLng };
 }
 
-/** What pushCam should do this tick given the fly state: run the fly, wait for it, or push normally. */
-export function returnFlyStep(state: ReturnFlyState, now: number): { action: "fly" | "wait" | "push"; next: ReturnFlyState; landed: boolean } {
-  if (state === -1) return { action: "fly", next: now + RETURN_FLY_MS, landed: false };
-  if (state > 0) {
-    if (now < state) return { action: "wait", next: state, landed: false };
-    return { action: "push", next: 0, landed: true };   // the fly just ended: this push lands the frame
+/** What pushCam should do this tick given the fly state: run the fly (for `ms`), wait for it, or push normally. */
+export function returnFlyStep(state: ReturnFlyState, now: number): { action: "fly" | "wait" | "push"; next: ReturnFlyState; landed: boolean; ms: number } {
+  if (state < 0) {
+    const ms = state === -1 ? RETURN_FLY_MS : -state;
+    return { action: "fly", next: now + ms, landed: false, ms };
   }
-  return { action: "push", next: 0, landed: false };
+  if (state > 0) {
+    if (now < state) return { action: "wait", next: state, landed: false, ms: 0 };
+    return { action: "push", next: 0, landed: true, ms: 0 };   // the fly just ended: this push lands the frame
+  }
+  return { action: "push", next: 0, landed: false, ms: 0 };
+}
+
+/** A fly armed or in flight: the per-tick pushes stand down and the native flyTo owns the camera. */
+export function returnFlyInFlight(state: ReturnFlyState, now: number): boolean {
+  return state < 0 || (state > 0 && now < state);
+}
+
+/**
+ * RE-AIM a fly in flight (2026-09-25): the driver pressed +/- while the head unit was flying home from the Crew
+ * overview. The press must answer at once and must not cut — the old path started a zoom ease the fly's pushes never
+ * applied, then cut up to 4 levels at touchdown (review, 25ad00e1). A setCamera 'none' cannot stop an iOS fly
+ * (MapboxMap.setCamera "does not cancel existing animations"; a new camera.fly(to:) does), and cancelling it would cut
+ * the centre, pitch and heading anyway. So the next push flies AGAIN, from wherever the camera is now, to the chase
+ * frame at the new framing, over the fly's remaining time (at least minMs). Armed or idle states are returned unchanged
+ * (an armed fly reads the new framing when it starts). Never returns -1 (that means the full RETURN_FLY_MS).
+ */
+export function returnFlyReaim(state: ReturnFlyState, now: number, minMs: number): ReturnFlyState {
+  if (state > 0 && now < state) return -Math.max(2, minMs, state - now);
+  return state;
 }

@@ -1,6 +1,6 @@
 // return_fly_test — the crew-overview return fly (src/returnFly.ts). Jeff, 2026-09-24: "can it do a cool animation
 // where it like swivels and zooms down to where I'm driving?" The state machine pushCam follows and the aim point.
-import { RETURN_FLY_MS, predictAhead, returnFlyStep } from "../../src/returnFly.ts";
+import { RETURN_FLY_MS, predictAhead, returnFlyStep, returnFlyReaim, returnFlyInFlight } from "../../src/returnFly.ts";
 
 let fails = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -19,6 +19,14 @@ const ok = (name: string, cond: boolean, detail = "") => {
   const d = returnFlyStep(0, t0 + 5000);
   ok("A4 idle → push, not landed", d.action === "push" && d.next === 0 && !d.landed);
   ok("A5 the fly is short enough to feel like one move (≤ 2.5 s) and long enough to read (≥ 1 s)", RETURN_FLY_MS >= 1000 && RETURN_FLY_MS <= 2500);
+  // 2026-09-25: a head-unit +/- press mid-fly RE-AIMS it (the next push flies again, from where the camera is, to the
+  // new framing, over the remaining time) — the phone only ever arms -1, which still means exactly RETURN_FLY_MS.
+  ok("A6 -1 flies for RETURN_FLY_MS (ms reported), unchanged for the phone", a.ms === RETURN_FLY_MS);
+  const r = returnFlyReaim(a.next, t0 + 600, 280);
+  const rs = returnFlyStep(r, t0 + 600);
+  ok("A7 a re-aim 600 ms in → one fly for the remaining 1200 ms", r === -(RETURN_FLY_MS - 600) && rs.action === "fly" && rs.ms === RETURN_FLY_MS - 600 && rs.next === t0 + RETURN_FLY_MS);
+  ok("A8 a re-aim is never shorter than its floor, and leaves armed / idle / landed states alone", returnFlyReaim(a.next, t0 + RETURN_FLY_MS - 10, 280) === -280 && returnFlyReaim(-1, t0, 280) === -1 && returnFlyReaim(0, t0, 280) === 0 && returnFlyReaim(t0, t0 + 1, 280) === t0);
+  ok("A9 in flight = armed (any negative) or before the deadline", returnFlyInFlight(-1, t0) && returnFlyInFlight(-900, t0) && returnFlyInFlight(t0 + 5, t0) && !returnFlyInFlight(t0, t0) && !returnFlyInFlight(0, t0));
 }
 
 // B — the aim point: where the car will be when the fly lands

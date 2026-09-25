@@ -20,8 +20,9 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { overviewSizePt } from '../overviewSize';
-import { CREW_RETURN_MS, crewReturnEdge, crewReturnDue } from '../crewReturn';
-import { carZoomPress, carZoomRelease, carZoomDest, carZoomRest, carZoomHoldLapsed, carZoomJobOwed, carZoomLogGate, newCarZoomChannel, newCarZoomLog, CAR_ZOOM_MOVING_PUSH_MS } from '../carZoomStep';
+import { CREW_RETURN_MS, CREW_FIT_EASE_MS, crewReturnEdge, crewReturnDue } from '../crewReturn';
+import { carZoomPress, carZoomRelease, carZoomDest, carZoomRest, carZoomNow, carZoomHoldLapsed, carZoomJobOwed, carZoomLogGate, newCarZoomChannel, newCarZoomLog, CAR_ZOOM_MOVING_PUSH_MS, CAR_ZOOM_STEP_MS } from '../carZoomStep';
+import { returnFlyInFlight, returnFlyReaim } from '../returnFly';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, rfPredict, rfFix, rfPose, type RfState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
@@ -1175,6 +1176,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // fitBounds over the whole crew isn't overwritten on the next rAF tick. Expires
   // on its own — no cleanup path can strand the chase cam off.
   const camHoldUntilRef = useRef(0);
+  // When crewFit's native easeTo into the overview ends (epoch ms) — a return inside it must fly, not push (getCam).
+  const crewEaseUntilRef = useRef(0);
   // Crew overview → return fly (2026-09-24, src/returnFly.ts): crewFit sets the flag; the hold's expiry edge in getCam
   // arms ONE flyTo that pushCam (SelfCarModel) runs instead of the one-frame snap.
   const crewOverviewRef = useRef(false);
@@ -1398,12 +1401,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     const zc = zoomChRef.current;
     const via = now - zc.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park';
     const prevDest = carZoomDest(manualZoomRef.current, fz, userZoomRef.current, lo, CAR_ZOOM_MAX);
-    const from = carZoomRelease(zc, now, prevDest, carZoomRest(now, zc.pushAt, camZoomRef.current, carLiveZoomRef.current, prevDest));
+    const liveDest = carZoomDest(null, fz, 0, lo, CAR_ZOOM_MAX);
+    const from = carZoomRelease(zc, now, prevDest, carZoomRest(now, zc.pushAt, camZoomRef.current, carLiveZoomRef.current, prevDest), liveDest);
     zoomHoldUntilRef.current = 0;
     userZoomRef.current = 0;
     zoomBaseRef.current = 0;
     manualZoomRef.current = null;
-    zoomLog(now, `car-zoom op=release z=${from.toFixed(2)} to=${carZoomDest(null, fz, 0, lo, CAR_ZOOM_MAX).toFixed(2)} fz=${fz.toFixed(2)} via=${via} held=0`);
+    zoomLog(now, `car-zoom op=release z=${from.toFixed(2)} to=${liveDest.toFixed(2)} fz=${fz.toFixed(2)} via=${via} held=0`);
   };
   // ── ONE CAMERA OWNER, PARKED TOO (2026-09-25) ────────────────────────────────────────────────────────────────
   // SelfCarModel asks this on every PARKED tick (its bgTick — the 33 ms watchdog and, on iOS, the CarPlay screen's own
@@ -1418,10 +1422,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const carCamJob = useRef((): boolean => {
     const now = Date.now();
     zoomLog(now, null);
+    // A fly IN FLIGHT owns the camera (pushes stand down until it lands): nothing to pump — no 60 Hz no-op pushes.
+    if (returnFlyRef.current > 0 && now < returnFlyRef.current) return false;
     const crewDue = crewReturnDue(camHoldWasActiveRef.current, camHoldUntilRef.current, now);
-    // An ARMED fly (-1) is owed too: getCam also runs outside a push (the re-assert and cold-start snap read its
-    // padding), and an edge it consumed there must not wait for the car to move before the fly starts.
-    const flyArmed = returnFlyRef.current === -1;
+    // An ARMED fly (-1, or a re-aim < -1) is owed too: getCam also runs outside a push (the re-assert and cold-start
+    // snap read its padding), and an edge it consumed there must not wait for the car to move before the fly starts.
+    const flyArmed = returnFlyRef.current < 0;
     if ((crewDue || flyArmed) && !lockReadyRef.current && paintedRef.current && aaLiveRef.current.hasFix &&
         now >= camHoldUntilRef.current) lockReadyRef.current = true;
     if (!lockReadyRef.current) return false;   // nothing can push yet (overview still on, no paint, no fix): never spin
@@ -1467,9 +1473,16 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       zoomSnapRef.current = true;
       // Receipt, once per Crew press: why it came home, how late after the deadline, fly or cut, parked or moving.
       const until = camHoldUntilRef.current;
-      try { logEvent(`crew-home surf=car why=${until > 0 ? 'deadline' : 'ended'} late=${until > 0 ? nowC - until : 0} fly=${edge.fly ? 1 : 0} via=${nowC - zoomChRef.current.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park'}`); } catch {}
+      try { logEvent(`crew-home surf=car why=${until > 0 ? 'deadline' : 'ended'} late=${until > 0 ? nowC - until : 0} fly=${edge.fly ? 1 : nowC < crewEaseUntilRef.current ? 'short' : 0} via=${nowC - zoomChRef.current.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park'}`); } catch {}
     }
-    if (edge.fly) returnFlyRef.current = -1;
+    // The fly carries the zoom too: a +/- press that ended the overview set the framing (getCam's zoomLevel, which the
+    // fly aims at), so its ease is dropped — no ease left owed through the fly, no cut at touchdown.
+    if (edge.fly) { returnFlyRef.current = -1; zoomChRef.current.ease = null; }
+    // The overview ended (a press, recenter or compass) while crewFit's own native easeTo is STILL RUNNING: the snap's
+    // 'none' pushes cannot stop it on iOS (MapboxMap.setCamera does not cancel animations), so the lockstep would be
+    // invisible until it ended and then cut. Take the camera back with one short fly instead — it cancels the easeTo and
+    // starts from where the camera is. Carries the zoom too (same as the long fly).
+    else if (edge.snap && nowC < crewEaseUntilRef.current) { returnFlyRef.current = -CAR_ZOOM_STEP_MS; zoomChRef.current.ease = null; }
     crewOverviewRef.current = edge.overview;
     camHoldWasActiveRef.current = edge.wasActive;
     camHdgOverrideRef.current = (carNorthUpRef.current || Date.now() < camHoldUntilRef.current)
@@ -1627,10 +1640,21 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     const zc = zoomChRef.current;
     const via = now - zc.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park';
     const prevDest = carZoomDest(manualZoomRef.current, fz, userZoomRef.current, lo, CAR_ZOOM_MAX);
-    const rest = carZoomRest(now, zc.pushAt, camZoomRef.current, carLiveZoomRef.current, prevDest);
-    // fromChase: a press that ends a Crew overview (on, or lapsed with its way home still owed) steps from the chase
-    // framing — the overview's wide zoom is not where the driver is zooming from.
-    const r = carZoomPress(zc, now, delta, { manual: manualZoomRef.current, followZoom: fz, bias: userZoomRef.current, lo, hi: CAR_ZOOM_MAX, rest, fromChase: camHoldWasActiveRef.current }, clampBias);
+    // A Crew overview (on, or lapsed with its way home still owed) or a return fly is moving the map natively: the
+    // lockstep's camZoomRef is then the overview's TARGET or a stale chase zoom, so the ease starts from the VISIBLE
+    // zoom (carLiveZoomRef), and the step is taken from the chase framing — the overview's wide zoom is not where the
+    // driver is zooming from (a '+' mid-fly used to aim OUTWARD from it and cut up to 4 levels at touchdown).
+    const overview = camHoldWasActiveRef.current;
+    const flying = returnFlyInFlight(returnFlyRef.current, now);
+    const rest = carZoomRest(now, zc.pushAt, camZoomRef.current, carLiveZoomRef.current, prevDest, !(overview || flying));
+    const r = carZoomPress(zc, now, delta, { manual: manualZoomRef.current, followZoom: fz, bias: userZoomRef.current, lo, hi: CAR_ZOOM_MAX, rest, fromChase: overview || flying }, clampBias);
+    if (flying) {
+      // DURING THE RETURN FLY the fly carries the new framing: pushCam (the one owner) re-aims it from where the camera
+      // IS to the chase frame at r.to over the fly's remaining time (returnFlyReaim) — no ease that the fly's pushes
+      // would never apply, no 60 Hz no-op pushes, no touchdown cut. Presses during it re-aim again and accumulate.
+      zc.ease = null;
+      returnFlyRef.current = returnFlyReaim(returnFlyRef.current, now, CAR_ZOOM_STEP_MS);
+    }
     manualZoomRef.current = r.to;
     userZoomRef.current = 0;                     // the framing is absolute now; a later pinch starts from it (zoomBegin)
     zoomBaseRef.current = 0;
@@ -1661,10 +1685,20 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // 🔒 NAV-LOCK begin car-gesture-zoom-compass — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         case 'zoomBegin':
           pinchActiveRef.current = true;
-          // A pinch takes over from a +/- framing: it starts FROM it (carried as the pinch's bias) and ends the ease.
-          if (manualZoomRef.current != null) userZoomRef.current = clampBias(manualZoomRef.current - camInputsRef.current.followZoom);
-          manualZoomRef.current = null;
-          zoomChRef.current.ease = null;
+          // A pinch takes over from a +/- framing or an ease: it starts from the zoom pushCam is APPLYING now (mid-ease,
+          // mid-release — not the ease's destination, not the bare follow zoom), carried as the pinch's bias, and ends
+          // the ease — so its first (scale ≈ 1) update does not jump.
+          {
+            const nowB = Date.now();
+            const { followZoom: fzB, previewMulti: pvB } = camInputsRef.current;
+            const loB = pvB ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN;
+            const zcB = zoomChRef.current;
+            const destB = carZoomDest(manualZoomRef.current, fzB, userZoomRef.current, loB, CAR_ZOOM_MAX);
+            const applied = carZoomNow(zcB, nowB, destB, carZoomRest(nowB, zcB.pushAt, camZoomRef.current, carLiveZoomRef.current, destB, !camHoldWasActiveRef.current && !returnFlyInFlight(returnFlyRef.current, nowB)));
+            userZoomRef.current = clampBias(applied - fzB);
+            manualZoomRef.current = null;
+            zcB.ease = null;
+          }
           zoomBaseRef.current = userZoomRef.current;
           break;
         case 'zoomEnd':
@@ -1796,6 +1830,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             zoomHoldUntilRef.current = 0;
             manualZoomRef.current = null;
             zoomChRef.current.ease = null;
+            // camZoomRef is about to hold the fit TARGET (below) while the map animates there: the lockstep's last push
+            // is no longer what is on screen, so no press may start from it (carZoomRest falls to the live zoom).
+            zoomChRef.current.pushAt = 0;
             // The expiry edge lives in getCam, which pushCam skips while the lockstep stands down — so on a plain
             // crew hold nothing would ever record the hold as active and the edge (snap + fly) would be missed
             // (Codex, 2026-09-24). Record it here.
@@ -1842,6 +1879,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // "hard-starts on the car / overlaps weirdly" report. The camera's target
             // zoom IS known right here — publish it to the ref the trim reads.
             camZoomRef.current = zoom;
+            crewEaseUntilRef.current = Date.now() + CREW_FIT_EASE_MS;   // the native easeTo below runs until then
             // Pitch goes top-down for the overview too (pitch: 0 below) — publish it
             // the same way, else camPitchRef holds a stale pre-hold chase pitch for
             // the whole hold and the trim's pitch compensation inflates the lead
@@ -1849,7 +1887,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             camPitchRef.current = 0;
             cameraRef.current?.setCamera({
               centerCoordinate: [cLng, cLat], zoomLevel: zoom,
-              pitch: 0, heading: 0, animationDuration: 600, animationMode: 'easeTo',
+              pitch: 0, heading: 0, animationDuration: CREW_FIT_EASE_MS, animationMode: 'easeTo',
             });
           } catch {}
           break;

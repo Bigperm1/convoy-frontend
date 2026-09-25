@@ -37,10 +37,15 @@ export const CAR_ZOOM_REST_FRESH_MS = 500;
 export const CAR_ZOOM_MOVING_PUSH_MS = 100;
 /** Receipt rate floor: at most one `car-zoom` row per this, plus the burst's last row once the floor allows. */
 export const CAR_ZOOM_LOG_MS = 2000;
+/** How fast the eased release's TARGET may follow the live speed zoom (levels/s) — the automatic framing's own pace
+ *  (ConvoyMapbox CAM_ZOOM_SLEW_PER_S, 0.5). A step in followZoom mid-release (a step advance, nav start) used to pass
+ *  straight into the camera as a one-frame cut of up to 1.4 levels (review of 25ad00e1). */
+export const CAR_ZOOM_RELEASE_SLEW_PER_S = 0.5;
 
-/** A zoom curve: cubic Hermite from (from, v0) to (dest, 0) over dur. dest is supplied when evaluated — fixed for a
- *  press (the driver's framing), the LIVE follow zoom for a release — so the release lands exactly on a moving target. */
-export type CarZoomEase = { kind: "step" | "release"; from: number; v0: number; start: number; dur: number };
+/** A zoom curve: cubic Hermite from (from, v0) to (dest, 0) over dur. dest is supplied when evaluated: fixed for a
+ *  press (the driver's framing). A release carries its own target `to`, which follows the live follow zoom at no more
+ *  than CAR_ZOOM_RELEASE_SLEW_PER_S (advanced by carZoomApply at `toAt`), so it lands on a moving target smoothly. */
+export type CarZoomEase = { kind: "step" | "release"; from: number; v0: number; start: number; dur: number; to?: number; toAt?: number };
 /** Shared by CarMapView (writes eases) and pushCam (applies them, stamps pushAt). */
 export type CarZoomChannel = { ease: CarZoomEase | null; pushAt: number };
 export type CarZoomLog = { at: number; pending: string | null; n: number };
@@ -70,6 +75,9 @@ export function carZoomEaseVel(e: CarZoomEase, now: number, dest: number): numbe
 
 export function carZoomEaseDone(e: CarZoomEase, now: number): boolean { return now >= e.start + e.dur; }
 
+/** The destination an ease is heading for: a release's own (rate-limited) target, else the caller's. */
+function easeDest(e: CarZoomEase, dest: number): number { return e.kind === "release" && typeof e.to === "number" ? e.to : dest; }
+
 /** What getCam returns as zoomLevel: the driver's absolute framing while a press hold is on (so speed no longer pulls
  *  it — Jeff: "the map stays exactly where he put it"), else the speed zoom plus any pinch bias. Clamped to the range. */
 export function carZoomDest(manual: number | null, followZoom: number, bias: number, lo: number, hi: number): number {
@@ -77,12 +85,20 @@ export function carZoomDest(manual: number | null, followZoom: number, bias: num
   return Math.max(lo, Math.min(hi, want));
 }
 
-/** The zoom the camera is at when no ease is running: pushCam's last push if fresh, else the map's reported zoom. */
-export function carZoomRest(now: number, pushAt: number, camZoom: number | null | undefined, liveZoom: number | null | undefined, fallback: number): number {
-  if (typeof camZoom === "number" && Number.isFinite(camZoom) && now - pushAt < CAR_ZOOM_REST_FRESH_MS) return camZoom;
+/** The zoom the camera is at when no ease is running: pushCam's last push if fresh AND the lockstep owns the camera,
+ *  else the map's reported zoom. lockstepOwns is false while a Crew overview or a return fly moves the map natively —
+ *  then camZoomRef holds the overview's TARGET or a stale chase zoom, never what is on screen (review of 25ad00e1: a
+ *  press within 500 ms of a Crew tap cut 0.7–6.7 levels from it). */
+export function carZoomRest(now: number, pushAt: number, camZoom: number | null | undefined, liveZoom: number | null | undefined, fallback: number, lockstepOwns = true): number {
+  if (lockstepOwns && typeof camZoom === "number" && Number.isFinite(camZoom) && now - pushAt < CAR_ZOOM_REST_FRESH_MS) return camZoom;
   if (typeof liveZoom === "number" && Number.isFinite(liveZoom) && liveZoom > 0) return liveZoom;
   if (typeof camZoom === "number" && Number.isFinite(camZoom)) return camZoom;
   return fallback;
+}
+
+/** The zoom pushCam would apply right now: the running ease's value, else the resting camera zoom. */
+export function carZoomNow(zc: CarZoomChannel, now: number, dest: number, rest: number): number {
+  return zc.ease ? carZoomEaseAt(zc.ease, now, easeDest(zc.ease, dest)) : rest;
 }
 
 /** fromChase: the press ends a Crew overview — step from the chase framing, not from the overview's wide zoom. */
@@ -100,14 +116,14 @@ export type CarZoomPressIn = { manual: number | null; followZoom: number; bias: 
 export function carZoomPress(zc: CarZoomChannel, now: number, delta: number, p: CarZoomPressIn, clampBias: (want: number) => number): { to: number; from: number; clamped: boolean } {
   const prevDest = carZoomDest(p.manual, p.followZoom, p.bias, p.lo, p.hi);
   const prev = zc.ease;
-  const from = prev ? carZoomEaseAt(prev, now, prevDest) : p.rest;
+  const from = prev ? carZoomEaseAt(prev, now, easeDest(prev, prevDest)) : p.rest;
   const base = p.manual != null || p.fromChase ? prevDest : from;
   const want = base + delta;
   const to = p.followZoom + clampBias(want - p.followZoom);
   const d = to - from;
   let v0 = (CAR_ZOOM_STEP_LAUNCH * d) / CAR_ZOOM_STEP_MS;
   if (prev && !carZoomEaseDone(prev, now)) {
-    const vc = carZoomEaseVel(prev, now, prevDest);
+    const vc = carZoomEaseVel(prev, now, easeDest(prev, prevDest));
     if (vc * d > 0) v0 = vc;   // same direction: keep the speed it already has (velocity-continuous re-aim)
   }
   const vMax = (3 * Math.abs(d)) / CAR_ZOOM_STEP_MS;   // 3 = easeOutCubic's launch; faster would overshoot the framing
@@ -121,21 +137,31 @@ export function carZoomHoldLapsed(holdUntil: number, now: number, pinchActive: b
   return holdUntil !== 0 && !pinchActive && now >= holdUntil;
 }
 
-/** The eased way home: from wherever the camera is to the LIVE follow zoom (dest at evaluation), starting at rest. */
-export function carZoomRelease(zc: CarZoomChannel, now: number, prevDest: number, rest: number): number {
-  const from = zc.ease ? carZoomEaseAt(zc.ease, now, prevDest) : rest;
-  zc.ease = { kind: "release", from, v0: 0, start: now, dur: CAR_ZOOM_RELEASE_MS };
+/** The eased way home: from wherever the camera is to the live follow zoom (liveDest now; its target then follows the
+ *  live value at CAR_ZOOM_RELEASE_SLEW_PER_S — carZoomApply), starting at rest. */
+export function carZoomRelease(zc: CarZoomChannel, now: number, prevDest: number, rest: number, liveDest: number): number {
+  const from = zc.ease ? carZoomEaseAt(zc.ease, now, easeDest(zc.ease, prevDest)) : rest;
+  zc.ease = { kind: "release", from, v0: 0, start: now, dur: CAR_ZOOM_RELEASE_MS, to: liveDest, toAt: now };
   return from;
 }
 
 /** pushCam, every push that reaches the camera: stamp the push, and if a driver ease is on, the zoom to push this frame
- *  (null → pushCam's own glide decides). The push that lands an ease retires it; the glide carries on from there. */
+ *  (null → pushCam's own glide decides). The push that lands an ease retires it (a release: once its rate-limited target
+ *  has reached the live follow zoom); the glide carries on from there. */
 export function carZoomApply(zc: CarZoomChannel, now: number, dest: number): number | null {
   zc.pushAt = now;
   const e = zc.ease;
   if (!e) return null;
-  const z = carZoomEaseAt(e, now, dest);
-  if (carZoomEaseDone(e, now)) zc.ease = null;
+  if (e.kind === "release" && typeof e.to === "number") {
+    // The release's target walks toward the live follow zoom at a bounded rate (a followZoom step is no longer a cut).
+    const step = (CAR_ZOOM_RELEASE_SLEW_PER_S * Math.max(0, Math.min(200, now - (e.toAt ?? now)))) / 1000;
+    e.to = e.to + Math.max(-step, Math.min(step, dest - e.to));
+    e.toAt = now;
+  }
+  const z = carZoomEaseAt(e, now, easeDest(e, dest));
+  // Retire once landed — a release only when its target has also REACHED the live follow zoom (so a parked car, whose
+  // automatic glide is off, still finishes on the chase framing after a mid-release step instead of stopping short).
+  if (carZoomEaseDone(e, now) && (e.kind !== "release" || typeof e.to !== "number" || e.to === dest)) zc.ease = null;
   return z;
 }
 

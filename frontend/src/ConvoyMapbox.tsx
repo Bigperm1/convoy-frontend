@@ -33,7 +33,7 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { overviewSizePt, isOverviewZoom } from "./overviewSize";
-import { RETURN_FLY_MS, predictAhead, returnFlyStep } from "./returnFly";
+import { predictAhead, returnFlyStep } from "./returnFly";
 import { carZoomApply, type CarZoomChannel } from "./carZoomStep";
 import { reportDraw, reportPoseFix, resetPoseFixBudget, reportCamApply } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
@@ -1616,11 +1616,13 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         // Live speed, not the mount-time prop: the head unit's bgTick → pushCam path is installed by effects with
         // empty deps and would otherwise predict with the speed the surface mounted at (Codex, 2026-09-24).
         const liveSpeed = typeof speedRef.current === 'number' ? speedRef.current : speedMs;
-        const aim = predictAhead(la, ln, flyCarHdg, liveSpeed, RETURN_FLY_MS);
+        // st.ms: RETURN_FLY_MS for the return itself; the fly's remaining time when a head-unit +/- press RE-AIMED it
+        // mid-flight (returnFlyReaim — the new framing, flown from wherever the camera is; 2026-09-25). -1 → RETURN_FLY_MS.
+        const aim = predictAhead(la, ln, flyCarHdg, liveSpeed, st.ms);
         const flyHeading = (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : flyCarHdg;
         flyDestRef.current = { zoom: c.zoomLevel, pitch: c.pitch, heading: typeof flyHeading === 'number' ? flyHeading : undefined };
         try {
-          logEvent(`cam-return-fly surf=${probeRole} ms=${RETURN_FLY_MS} z=${Number(c.zoomLevel).toFixed(2)} pitch=${Math.round(c.pitch)} hdg=${typeof flyHeading === 'number' ? Math.round(flyHeading) : 'null'} spd=${(typeof speedMs === 'number' ? speedMs : 0).toFixed(1)}`);
+          logEvent(`cam-return-fly surf=${probeRole} ms=${st.ms} z=${Number(c.zoomLevel).toFixed(2)} pitch=${Math.round(c.pitch)} hdg=${typeof flyHeading === 'number' ? Math.round(flyHeading) : 'null'} spd=${(typeof speedMs === 'number' ? speedMs : 0).toFixed(1)}`);
         } catch {}
         try {
           cameraRef.current.setCamera({
@@ -1629,7 +1631,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
             zoomLevel: c.zoomLevel,
             pitch: c.pitch,
             padding: c.padding,
-            animationDuration: RETURN_FLY_MS,
+            animationDuration: st.ms,
             animationMode: 'flyTo',
           });
         } catch {}

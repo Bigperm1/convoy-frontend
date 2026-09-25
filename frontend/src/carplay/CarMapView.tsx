@@ -1664,6 +1664,30 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     zoomLog(now, `car-zoom op=step src=${src} z=${r.from.toFixed(2)} to=${r.to.toFixed(2)} fz=${fz.toFixed(2)} via=${via} held=${CAR_ZOOM_HOLD_MS} clamp=${r.clamped ? 1 : 0}`);
   };
 
+  // ── AN INSTANT GESTURE WHILE A NATIVE ANIMATION OWNS THE CAMERA (2026-09-25, Codex second pass [high]) ─────────
+  // Pinch, recenter, compass and the AppState re-assert write the camera INSTANTLY (applyZoomNow / a direct 'none'
+  // setCamera). While a return fly (the Crew way home, or one a +/- press re-aimed) is in flight, that write cannot
+  // win: on iOS MapboxMap.setCamera(to:) "does not cancel existing animations", so the fly flew on past a pinch (15.46
+  // → 17.30); on Android it does cancel, but the fly's deadline and landing seed survived and cut 1.9 levels when the
+  // car moved. So the gesture goes through the camera owner instead: pushCam RE-AIMS the fly (one flyTo from where the
+  // camera is, to the chase frame at the gesture's framing, over the remaining time, ≥ CAR_ZOOM_STEP_MS) — which
+  // retires the old deadline and landing seed. Inside crewFit's own easeTo (CREW_FIT_EASE_MS) the gesture ends the
+  // overview and getCam's edge takes the camera back by a short fly. Otherwise false: the caller's instant path runs.
+  const takeOverNativeCam = (now: number): boolean => {
+    if (returnFlyInFlight(returnFlyRef.current, now)) {
+      returnFlyRef.current = returnFlyReaim(returnFlyRef.current, now, CAR_ZOOM_STEP_MS);
+      zoomChRef.current.ease = null;             // the fly carries the zoom
+      selfRefreshRef.current?.();                // a parked car's pump flies it on the next frame
+      return true;
+    }
+    if (camHoldWasActiveRef.current && now < crewEaseUntilRef.current) {
+      camHoldUntilRef.current = 0;               // end the overview: the edge flies home short (see getCam)
+      selfRefreshRef.current?.();
+      return true;
+    }
+    return false;
+  };
+
   // ── APPLY THE CANVAS CORRECTION THE MOMENT IT IS KNOWN (2026-07-31) ─────────
   // mapW arrives from onLayout, i.e. one render AFTER the first — so aaZoomOutFor
   // changes followZoom late. On THIS surface a changed followZoom does not reach the
@@ -1698,6 +1722,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             userZoomRef.current = clampBias(applied - fzB);
             manualZoomRef.current = null;
             zcB.ease = null;
+            // A pinch is a deliberate zoom: like tap-zoom and +/- it ends a Crew overview, and during a fly it takes the
+            // fly over (re-aimed onto the pinch's framing) instead of writing past it.
+            camHoldUntilRef.current = 0;
+            takeOverNativeCam(nowB);
           }
           zoomBaseRef.current = userZoomRef.current;
           break;
@@ -1720,7 +1748,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           userZoomRef.current = clampBias(zoomBaseRef.current + delta);
           // Pushed out on every update, so the 15 s runs from the END of the pinch.
           zoomHoldUntilRef.current = Date.now() + CAR_ZOOM_HOLD_MS;
-          applyZoomNow();   // don't wait for an ease that a parked car will never arm
+          // During a fly each update re-aims it (the fly follows the fingers); otherwise the instant 1:1 path.
+          if (!takeOverNativeCam(Date.now())) applyZoomNow();   // don't wait for an ease that a parked car will never arm
           break;
         }
         case 'zoomStep': {
@@ -1740,10 +1769,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           zoomHoldUntilRef.current = 0;
           manualZoomRef.current = null;       // no +/- framing or ease survives a recenter
           zoomChRef.current.ease = null;
-          applyZoomNow();   // same reason as 'zoom' — parked, nothing else will push it
           // A recenter also cancels any crew-overview hold — the driver asked to
           // come home, so the chase cam takes back over immediately.
           camHoldUntilRef.current = 0;
+          // Mid-fly / inside crewFit's easeTo the camera owner takes it home (takeOverNativeCam); otherwise instant.
+          if (!takeOverNativeCam(Date.now())) applyZoomNow();   // same reason as 'zoom' — parked, nothing else will push it
           break;
         case 'compass': {
           // Mirror the PHONE compass (Jeff's ask): recenter on the car AND face
@@ -1773,14 +1803,18 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           manualZoomRef.current = null;       // no +/- framing or ease survives the compass
           zoomChRef.current.ease = null;
           camHoldUntilRef.current = 0;
-          applyZoomNow();
-          try {
-            cameraRef.current?.setCamera({
-              heading: nextNorthUp ? 0 : drawHdgRef.current,
-              animationDuration: 0,
-              animationMode: 'none',
-            });
-          } catch {}
+          // Mid-fly / inside crewFit's easeTo the camera owner flies it home (the fly takes the north-up override as
+          // its heading); an instant 'none' write would lose to the fly on iOS or strand its landing on Android.
+          if (!takeOverNativeCam(Date.now())) {
+            applyZoomNow();
+            try {
+              cameraRef.current?.setCamera({
+                heading: nextNorthUp ? 0 : drawHdgRef.current,
+                animationDuration: 0,
+                animationMode: 'none',
+              });
+            } catch {}
+          }
           setCarNorthUp(nextNorthUp);
           break;
         }
@@ -1823,6 +1857,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // kept pushing frames over the overview and it never landed.
             camHoldUntilRef.current = Date.now() + CREW_RETURN_MS;
             crewOverviewRef.current = true;
+            // Its easeTo below cancels any fly in progress natively (ease cancels the fly's animations): retire that
+            // fly's deadline and landing seed too, or its touchdown would land a stale frame later (2026-09-25).
+            returnFlyRef.current = 0;
             // A Crew tap ends any driver zoom (2026-09-25): no +/- framing, ease, hold or pinch bias survives it, so the
             // way home (7 s later, parked or moving — carCamJob) lands on the plain speed zoom, not a stale framing.
             userZoomRef.current = 0;
@@ -1972,7 +2009,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     zoomChRef.current.ease = null;
     camHoldUntilRef.current = 0; // release any crew-overview hold too
     const live = aaLiveRef.current; // never the render-#1 closure — see the Codex receipt above
-    if (paintedRef.current && live.hasFix && cameraRef.current) {
+    // A fly (or crewFit's easeTo) owns the camera: the camera owner re-aims it home instead of an instant write that
+    // would lose to it on iOS or leave its landing stale on Android (takeOverNativeCam, 2026-09-25).
+    const took = takeOverNativeCam(Date.now());
+    if (took) { /* pushCam flies it home on the next frame */ }
+    else if (paintedRef.current && live.hasFix && cameraRef.current) {
       try {
         cameraRef.current.setCamera({
           centerCoordinate: [live.lng, live.lat],
@@ -1990,7 +2031,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       // `[painted, hasFix]` effect below fire it the instant a real fix lands.
       aaPendingRecenterRef.current = true;
     }
-    applyZoomNow(); // push the released zoom immediately — a parked car arms no ease
+    if (!took) applyZoomNow(); // push the released zoom immediately — a parked car arms no ease
     const now = Date.now();
     if (now - aaRecenterLogAtRef.current >= 5000) {
       aaRecenterLogAtRef.current = now;

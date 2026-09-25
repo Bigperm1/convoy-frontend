@@ -100,7 +100,8 @@ const ref = <T,>(v: T) => ({ current: v });
 export type Opts = { android?: boolean; rafAlive?: boolean; carFramePump?: boolean; followZoom?: number; followPitch?: number;
   /** CarMapView render cadence (store ticks; 83 ms while navigating — the trim ticker). followZoom is a render value. */
   renderMs?: number };
-export type Frame = { t: number; zoom: number; pitch: number; sizeZoom: number | null; animating: boolean };
+/** animStep: this vsync's camera came from a native animation's update (fly / ease motion, not a cut). */
+export type Frame = { t: number; zoom: number; pitch: number; sizeZoom: number | null; animating: boolean; animStep: boolean };
 
 export function makeHeadUnit(src: Src, o: Opts = {}) {
   const T0 = 1_000_000_000;
@@ -164,6 +165,8 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   };
   const CP = scopeProxy(C, unresolved);
   for (const n of ["clampBias", "zoomLog", "zoomHoldRelease", "carCamJob", "getCam", "applyZoomNow", "applyZoomEased", "reassertAaFollow"]) C[n] = bind(liftVar(csf, "CarMapView", n), CP);
+  // Present since 2026-09-25 round 3 (an older revision replayed as a negative control has no such closure).
+  for (const n of ["takeOverNativeCam"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
   const gesture = bind(liftCallArg(csf, "CarMapView", "subscribeCarGesture", () => true), CP);
   const onCameraChanged = bind(liftJsxAttr(csf, "CarMapView", "onCameraChanged"), CP);
   const lockLine = /^\s*(lockReadyRef\.current = [^\n]+;)\s*$/m.exec(region(src.carMapView, "car-cam-northup-lockready"))![1];
@@ -236,14 +239,16 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
       if (vs !== lastVsync) {
         lastVsync = vs;
         // native animation → camera, then onCameraChanged
+        let animStep = false;
         if (anim) {
+          animStep = true;
           const s = Math.min(1, (now - anim.t0) / anim.dur), e = s * s * (3 - 2 * s);
           for (const k of ["zoom", "pitch", "heading", "lat", "lng"] as const) (cam as any)[k] = (anim.from as any)[k] + ((anim.to as any)[k] - (anim.from as any)[k]) * e;
           camMoved = true;
           if (s >= 1) anim = null;
         }
         if (camMoved) { camMoved = false; turn(() => onCameraChanged({ properties: { zoom: cam.zoom } })); }
-        frames.push({ t: now - T0, zoom: cam.zoom, pitch: cam.pitch, sizeZoom, animating: !!anim });
+        frames.push({ t: now - T0, zoom: cam.zoom, pitch: cam.pitch, sizeZoom, animating: !!anim, animStep });
         // rAF callbacks due at this vsync
         const due = timers.filter((x) => x.raf && x.at <= now); for (const t of due) { timers.splice(timers.indexOf(t), 1); turn(t.fn); }
         if (o.carFramePump !== false && !o.android) turn(S.bgTick);   // iOS onCarFrame → bgTick
@@ -272,6 +277,8 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     reassert() { turn(() => C.reassertAaFollow("appstate")); },
     /** largest vsync-to-vsync zoom change in [a, b] ms (harness time) */
     maxStep(a: number, b: number) { let m = 0, at = 0; for (let i = 1; i < frames.length; i++) if (frames[i].t >= a && frames[i].t <= b) { const d = Math.abs(frames[i].zoom - frames[i - 1].zoom); if (d > m) { m = d; at = frames[i].t; } } return { m, at }; },
+    /** largest vsync-to-vsync zoom change in [a, b] that NO native animation produced — a cut (fly motion excepted) */
+    maxCut(a: number, b: number) { let m = 0, at = 0; for (let i = 1; i < frames.length; i++) if (frames[i].t >= a && frames[i].t <= b && !frames[i].animStep) { const d = Math.abs(frames[i].zoom - frames[i - 1].zoom); if (d > m) { m = d; at = frames[i].t; } } return { m, at }; },
     /** largest |self-car size zoom − visible zoom| at vsync in [a, b] (a size pop is the car drawn for the wrong zoom) */
     maxSizeLag(a: number, b: number) { let m = 0, at = 0; for (const f of frames) if (f.t >= a && f.t <= b && f.sizeZoom != null) { const d = Math.abs(f.sizeZoom - f.zoom); if (d > m) { m = d; at = f.t; } } return { m, at }; },
     zoomAt(t: number) { let best = frames[0]; for (const f of frames) if (Math.abs(f.t - t) < Math.abs(best.t - t)) best = f; return best.zoom; },

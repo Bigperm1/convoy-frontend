@@ -178,6 +178,12 @@ console.log("S — static: the wiring the harness exercises");
   const clears = (a: string, b: string) => { const t = code(between(cmv, a, b)); return /manualZoomRef\.current = null/.test(t) && /zoomChRef\.current\.ease = null/.test(t); };
   ok("S13 recenter, compass, Crew and the AA re-assert clear the framing and the ease", clears("case 'recenter':", "case 'compass':") && clears("case 'compass': {", "case 'crewFit': {") && clears("case 'crewFit': {", "setCarState({ crewViewUntil") && clears("const reassertAaFollow = (", "const now = Date.now();"));
   ok("S14 src/carZoomStep.ts is pure (no imports at all)", !/^\s*import\s/m.test(czs));
+  const tk = code(between(cmv, "const takeOverNativeCam = (", "\n  };"));
+  ok("S16 an instant gesture during a native animation goes through the camera owner: takeOverNativeCam re-aims a fly in flight, or ends the overview inside crewFit's easeTo", /returnFlyRef\.current = returnFlyReaim\(returnFlyRef\.current, now, CAR_ZOOM_STEP_MS\)/.test(tk) && /camHoldWasActiveRef\.current && now < crewEaseUntilRef\.current/.test(tk) && !/setCamera/.test(tk));
+  const pinchUpd = code(between(cmv, "const delta = Math.log2(", "case 'zoomStep':"));
+  ok("S17 pinch begin, pinch update, recenter, compass and the AppState re-assert all ask it first; crewFit retires any fly", /takeOverNativeCam\(nowB\)/.test(zb) && /if \(!takeOverNativeCam\(Date\.now\(\)\)\) applyZoomNow\(\)/.test(pinchUpd) && /if \(!takeOverNativeCam\(Date\.now\(\)\)\) applyZoomNow\(\)/.test(code(between(cmv, "case 'recenter':", "case 'compass':"))) && /if \(!takeOverNativeCam\(Date\.now\(\)\)\) \{/.test(code(between(cmv, "case 'compass': {", "case 'crewFit': {"))) && /const took = takeOverNativeCam\(Date\.now\(\)\);/.test(code(between(cmv, "const reassertAaFollow = (", "const now = Date.now();"))) && /returnFlyRef\.current = 0;/.test(code(between(cmv, "case 'crewFit': {", "setCarState({ crewViewUntil"))));
+  const pure = ["carZoomStep", "crewReturn", "returnFly"].map((m) => readFileSync(new URL(`../../src/${m}.ts`, import.meta.url), "utf8"));
+  ok("S18 disconnect / remount starts clean: the pure modules hold no module-level state (all state is per-mount refs)", pure.every((t) => !/^(let|var)\s/m.test(t)));
   ok("S15 pushCam re-arms a due crew hold before its readiness bail (a moving car comes home on the first frame)", /if \(camJob && !\(readyRef\?\.current\)\) camJob\(\);\s*\n\s*if \(!cameraRef\?\.current \|\| !getCam \|\| !\(readyRef\?\.current\)\) return;/.test(mbx));
 }
 

@@ -266,6 +266,77 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
     ok(id, `followZoom ${from} → ${to} ${into} ms into the release (${moving ? "moving" : "parked — nav start"}): no cut, lands on it`, st.m <= 0.08 && Math.abs(h.cam.zoom - to) < 0.26, `(max vsync step ${f3(st.m)}; z ${f3(h.cam.zoom)})`);
   }
 
+  // ── X: EVERY gesture that can start while a native animation owns the camera (Codex second pass, 2026-09-25) ─────
+  // Contexts: 300 ms into the Crew return FLY; 300 ms after a '+' RE-AIMED it; 200 ms into crewFit's own 600 ms EASE.
+  // Each gesture, iOS and Android, parked (then the car pulls away). Asserted: it takes effect within one vsync (the
+  // camera owner flies / crewFit eases); no cut above X_CUT (a zoom change no native animation made); no fly or
+  // landing state left stale; the parked pump stops; pulling away lands on the right framing without a cut.
+  const X_CUT = 0.12;
+  type Ctx = "fly" | "reaimed" | "crewEase";
+  type Gest = { key: string; act: (h: ReturnType<typeof makeHeadUnit>) => void; effect: "owner" | "crew" | "auto";
+    want: (ctx: Ctx, zg: number) => number | null; fz0?: number; settle?: number; recover?: number };
+  const FZ = 16.8;
+  // A pinch frames what is on screen, within the (value-locked) press limit: followZoom ± 4, floor 10.5 (clampBias).
+  const pinchFrame = (z: number) => FZ + Math.max(Math.max(-4, 10.5 - FZ), Math.min(Math.min(4, 20 - FZ), z - FZ));
+  const G: Gest[] = [
+    { key: "pinch (begin · scale 1 · end)", effect: "owner", want: (_c, zg) => pinchFrame(zg),
+      act: (h) => { h.gesture({ kind: "zoomBegin" }); h.gesture({ kind: "zoom", scale: 1, velocity: 0 }); h.gesture({ kind: "zoomEnd" }); } },
+    { key: "pinch out-in (begin · scale 1.3)", effect: "owner", want: (_c, zg) => pinchFrame(pinchFrame(zg) + Math.log2(1.3)),
+      act: (h) => { h.gesture({ kind: "zoomBegin" }); h.gesture({ kind: "zoom", scale: 1.3, velocity: 0 }); } },
+    { key: "tap-zoom in (double tap)", effect: "owner", want: (c) => (c === "reaimed" ? FZ + 0.5 : FZ) + 1,
+      act: (h) => h.gesture({ kind: "zoom", scale: 1, velocity: 1 }) },
+    { key: "+ press", effect: "owner", want: (c) => (c === "reaimed" ? FZ + 0.5 : FZ) + 0.5, act: (h) => h.press(0.5) },
+    { key: "− press", effect: "owner", want: (c) => (c === "reaimed" ? FZ + 0.5 : FZ) - 0.5, act: (h) => h.press(-0.5) },
+    { key: "recenter", effect: "owner", want: () => FZ, act: (h) => h.gesture({ kind: "recenter" }) },
+    { key: "compass", effect: "owner", want: () => FZ, act: (h) => h.gesture({ kind: "compass" }) },
+    { key: "AppState re-assert", effect: "owner", want: () => FZ, act: (h) => h.reassert() },
+    { key: "Crew re-press", effect: "crew", want: () => FZ, act: (h) => h.crew(), settle: 7000 + 1800 + 800 },
+    // Automatic framing: the new speed zoom is reached by the locked glide (0.5 level/s) once the car moves — 2.2 levels.
+    { key: "nav start (followZoom 14.6 → 16.8)", effect: "auto", fz0: 14.6, recover: 8000, want: (c) => (c === "reaimed" ? 14.6 + 0.5 : 16.8), act: (h) => h.setFollowZoom(16.8) },
+    { key: "nav stop (followZoom 16.8 → 14.6)", effect: "auto", recover: 8000, want: (c) => (c === "reaimed" ? FZ + 0.5 : 14.6), act: (h) => h.setFollowZoom(14.6) },
+  ];
+  const sweepOne = (ctx: Ctx, g: Gest, android: boolean, moving: boolean): { pass: boolean; detail: string } => {
+    const h = unit({ android, followZoom: g.fz0 ?? FZ });
+    if (!moving) park(h);
+    const tap = h.now + 100; at(h, tap); h.crew();
+    let tg: number;
+    if (ctx === "crewEase") tg = tap + 200;
+    else {
+      at(h, tap + 7000 + 40);
+      const f0 = flies(h, tap)[0];
+      if (!f0) return { pass: false, detail: "(the return fly never started)" };
+      if (ctx === "reaimed") { at(h, f0.t + 100); h.press(0.5); tg = h.now + 300; } else tg = f0.t + 300;
+    }
+    at(h, tg);
+    const zg = h.cam.zoom, ease0 = h.counts.setEase;
+    g.act(h);
+    at(h, tg + 20);
+    const acted = g.effect === "owner" ? flies(h, tg).some((r) => r.t - tg <= 18) : g.effect === "crew" ? h.counts.setEase > ease0 : true;
+    at(h, tg + (g.settle ?? 3500));
+    const cut = h.maxCut(tg, h.now);
+    const n0 = h.counts.noteCam; at(h, h.now + 3000);
+    const idle = moving || h.counts.noteCam === n0;
+    const rf = h.C.returnFlyRef.current, fd = h.S.flyDestRef.current;
+    const stale = returnFlyLive(rf, h.abs) ? "fly still in flight" : rf > 0 && fd && Math.abs(fd.zoom - h.cam.zoom) > 0.02 ? `landing seed ${f3(fd.zoom)} ≠ camera ${f3(h.cam.zoom)}` : "";
+    const zParked = h.cam.zoom;
+    const tr = h.now; h.setMoving(true); at(h, tr + (g.recover ?? 3000));
+    const cutR = h.maxCut(tr, h.now);
+    const want = g.want(ctx, zg);
+    const lands = want == null || Math.abs(h.cam.zoom - Math.max(10.5, Math.min(20, want))) <= 0.26;
+    const pass = acted && cut.m <= X_CUT && idle && !stale && cutR.m <= X_CUT && lands;
+    return { pass, detail: `(acted ${acted ? "≤1 vsync" : "NO"}; cut ${f3(cut.m)}; pump ${idle ? "idle" : "RUNNING"}; ${stale || "no stale fly"}; parked ${f3(zParked)} → moving ${f3(h.cam.zoom)} want ${want == null ? "-" : f3(want)}, cut ${f3(cutR.m)})` };
+  };
+  const returnFlyLive = (rf: number, abs: number) => rf < 0 || (rf > 0 && abs < rf);
+  let xi = 0;
+  for (const ctx of ["fly", "reaimed", "crewEase"] as Ctx[]) for (const g of G) for (const android of [false, true]) {
+    const r = sweepOne(ctx, g, android, false);
+    ok(`X${++xi}`, `${g.key} during the ${ctx === "fly" ? "return fly" : ctx === "reaimed" ? "re-aimed fly" : "crewFit easeTo"} (${android ? "Android" : "iOS"})`, r.pass, r.detail);
+  }
+  for (const key of ["pinch (begin · scale 1 · end)", "recenter"]) for (const android of [false, true]) {
+    const r = sweepOne("fly", G.find((g) => g.key === key)!, android, true);
+    ok(`X${++xi}`, `${key} during the return fly, MOVING (${android ? "Android" : "iOS"})`, r.pass, r.detail);
+  }
+
   // ── the harness itself: every identifier the lifted production code read resolved ─────────────────────────────
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);
   ok("Z1", "the lifted production code resolved every identifier it read", unres.size === 0, unres.size ? `(unresolved: ${[...unres].join(", ")})` : "");

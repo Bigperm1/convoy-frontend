@@ -1569,17 +1569,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // 🔒 NAV-LOCK begin car-cam-coldstart-snap — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   useEffect(() => {
     if (!painted || !hasFix || !cameraRef.current) return;
-    try {
-      cameraRef.current.setCamera({
-        centerCoordinate: [lng, lat],
-        heading: camHdgRef.current,
-        zoomLevel: followZoom,
-        pitch: followPitch,
-        padding: getCam().padding,
-        animationDuration: 0,
-        animationMode: 'none',
-      });
-    } catch {}
+    // Through the camera owner (2026-09-25): a fix regained mid-fly / mid-overview / mid-ease is reconciled, and the
+    // zoom is the owner's framing, never raw followZoom (ownerSetPose).
+    ownerSetPose('system', { centerCoordinate: [lng, lat], heading: camHdgRef.current, pitch: followPitch, padding: getCam().padding });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painted, hasFix]);
   // 🔒 NAV-LOCK end car-cam-coldstart-snap
@@ -1613,19 +1605,46 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Was the crew-overview hold active on the previous frame? (expiry-edge detector)
   const camHoldWasActiveRef = useRef(false);
   // 🔒 NAV-LOCK begin car-zoom-apply-now — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
-  const applyZoomNow = () => {
+  // ── THE CAMERA OWNER'S TWO INSTANT WRITERS (2026-09-25, Codex fourth pass — close the class) ─────────────────
+  // Every head-unit camera write outside SelfCarModel.pushCam goes through these two (the one exception is crewFit's
+  // overview easeTo, which reconciles itself — it retires any fly and clears the zoom state). Both ask the owner FIRST
+  // (takeOverNativeCam): a finished-but-unlanded fly is retired, a fly in flight is re-aimed onto the new framing, a
+  // Crew overview is ended (a 'gesture') or left alone (a 'system' correction), a running +/- ease keeps the zoom — and
+  // only then, if nothing owns the camera, write instantly. The zoom written is always the owner's framing
+  // (carZoomDest — the same number getCam returns), never raw followZoom. tools/sim-qc/car_zoom_step_test.mts S20 fails
+  // if a direct camera write appears anywhere else in this file. true = written now.
+  const applyZoomNow = (kind: 'gesture' | 'system' = 'gesture'): boolean => {
+    if (takeOverNativeCam(Date.now(), kind)) return false;
     zoomSnapRef.current = true;
     try {
       const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
       cameraRef.current?.setCamera({
         // The SAME destination getCam returns (carZoomDest), so the two still "can never disagree" with a +/- framing
-        // on (the layout correction below can land mid-hold). Pinch, recenter, compass and the AA re-assert clear the
-        // framing first, so for them this is exactly the old followZoom + bias, clamped. Still instant.
+        // on. Pinch, recenter, compass and the AA re-assert clear the framing first, so for them this is exactly the old
+        // followZoom + bias, clamped. Still instant.
         zoomLevel: carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX),
         animationDuration: 0,
         animationMode: 'none',
       });
     } catch {}
+    return true;
+  };
+  /** The owner's instant FULL-pose write (cold-start snap, pending re-centre, style-load seed, AppState re-assert,
+   *  compass heading): the same reconciliation first; the zoom is the owner's framing. zoomSnapRef makes the next push
+   *  re-seed pushCam from the targets, as applyZoomNow does. */
+  const ownerSetPose = (kind: 'gesture' | 'system', pose: { centerCoordinate?: number[]; heading?: number; pitch?: number; padding?: any }): boolean => {
+    if (takeOverNativeCam(Date.now(), kind)) return false;
+    zoomSnapRef.current = true;
+    try {
+      const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
+      cameraRef.current?.setCamera({
+        ...pose,
+        zoomLevel: carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX),
+        animationDuration: 0,
+        animationMode: 'none',
+      } as any);
+    } catch {}
+    return true;
   };
 
   // ── THE SEPARATE EASED ENTRY (2026-09-25) — the +/- buttons and the two tap-zoom gestures ONLY ──────────────
@@ -1678,7 +1697,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // camera is, to the chase frame at the gesture's framing, over the remaining time, ≥ CAR_ZOOM_STEP_MS) — which
   // retires the old deadline and landing seed. While a Crew overview is on (inside crewFit's own easeTo or after it) the
   // gesture ends it and getCam's edge takes the camera home by a fly. Otherwise false: the caller's instant path runs.
-  const takeOverNativeCam = (now: number): boolean => {
+  const takeOverNativeCam = (now: number, kind: 'gesture' | 'system' = 'gesture'): boolean => {
     // A fly that has finished but whose landing is still pending is RETIRED first (belt and braces — carCamJob lands it
     // at its deadline): the caller's instant write sets zoomSnapRef, so the next push re-seeds from the current targets
     // and no old landing seed can override the framing this gesture sets.
@@ -1692,11 +1711,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // A Crew overview is on (or its way home is still owed): the gesture ends it and getCam's edge takes the camera
     // home — the 1.8 s fly from a wide overview, a short fly inside crewFit's own easeTo — instead of an instant write
     // that would cut the overview's zoom to the chase framing on the spot (and, inside the easeTo, lose to it on iOS).
+    // A 'system' correction (layout, a regained fix, a style reload) leaves the overview on: it ends on its own clock and
+    // its way home uses the corrected framing.
     if (camHoldWasActiveRef.current) {
-      camHoldUntilRef.current = 0;
-      selfRefreshRef.current?.();
+      if (kind === 'gesture') { camHoldUntilRef.current = 0; selfRefreshRef.current?.(); }
       return true;
     }
+    // A +/- / tap ease or the eased release is writing the zoom every frame (pushCam, or the parked pump) and reads the
+    // framing live — an instant write here would fight it (the review's "reconcile any active zoom tween").
+    if (zoomChRef.current.ease) return true;
     return false;
   };
 
@@ -1711,7 +1734,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // and the next eased frame pushes the identical value.
   useEffect(() => {
     if (!painted || mapW <= 0) return;
-    applyZoomNow();
+    // A 'system' correction through the owner (Codex fourth pass): mid-fly the fly is re-aimed onto the corrected
+    // framing, a finished landing is retired, an overview or a +/- ease keeps the camera — never a stale seed left behind.
+    applyZoomNow('system');
   }, [painted, mapW]);   // eslint-disable-line react-hooks/exhaustive-deps
   // 🔒 NAV-LOCK end car-zoom-apply-now
 
@@ -1761,7 +1786,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           // Pushed out on every update, so the 15 s runs from the END of the pinch.
           zoomHoldUntilRef.current = Date.now() + CAR_ZOOM_HOLD_MS;
           // During a fly each update re-aims it (the fly follows the fingers); otherwise the instant 1:1 path.
-          if (!takeOverNativeCam(Date.now())) applyZoomNow();   // don't wait for an ease that a parked car will never arm
+          applyZoomNow('gesture');   // the owner re-aims a fly first; otherwise instant — don't wait for an ease a parked car never arms
           break;
         }
         case 'zoomStep': {
@@ -1785,7 +1810,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           // come home, so the chase cam takes back over immediately.
           camHoldUntilRef.current = 0;
           // Mid-fly / inside crewFit's easeTo the camera owner takes it home (takeOverNativeCam); otherwise instant.
-          if (!takeOverNativeCam(Date.now())) applyZoomNow();   // same reason as 'zoom' — parked, nothing else will push it
+          applyZoomNow('gesture');   // same reason as 'zoom' — parked, nothing else will push it (the owner reconciles first)
           break;
         case 'compass': {
           // Mirror the PHONE compass (Jeff's ask): recenter on the car AND face
@@ -1817,16 +1842,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           camHoldUntilRef.current = 0;
           // Mid-fly / inside crewFit's easeTo the camera owner flies it home (the fly takes the north-up override as
           // its heading); an instant 'none' write would lose to the fly on iOS or strand its landing on Android.
-          if (!takeOverNativeCam(Date.now())) {
-            applyZoomNow();
-            try {
-              cameraRef.current?.setCamera({
-                heading: nextNorthUp ? 0 : drawHdgRef.current,
-                animationDuration: 0,
-                animationMode: 'none',
-              });
-            } catch {}
-          }
+          ownerSetPose('gesture', { heading: nextNorthUp ? 0 : drawHdgRef.current });
           setCarNorthUp(nextNorthUp);
           break;
         }
@@ -2023,27 +2039,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     const live = aaLiveRef.current; // never the render-#1 closure — see the Codex receipt above
     // A fly (or crewFit's easeTo) owns the camera: the camera owner re-aims it home instead of an instant write that
     // would lose to it on iOS or leave its landing stale on Android (takeOverNativeCam, 2026-09-25).
-    const took = takeOverNativeCam(Date.now());
-    if (took) { /* pushCam flies it home on the next frame */ }
-    else if (paintedRef.current && live.hasFix && cameraRef.current) {
-      try {
-        cameraRef.current.setCamera({
-          centerCoordinate: [live.lng, live.lat],
-          heading: camHdgRef.current,
-          zoomLevel: live.followZoom,
-          pitch: live.followPitch,
-          padding: getCam().padding,
-          animationDuration: 0,
-          animationMode: 'none',
-        });
-      } catch {}
-    } else if (!live.hasFix) {
+    if (paintedRef.current && live.hasFix && cameraRef.current) {
+      ownerSetPose('gesture', { centerCoordinate: [live.lng, live.lat], heading: camHdgRef.current, pitch: live.followPitch, padding: getCam().padding });
+    } else {
       // No fix yet (cold GPS after a long screen-off gap) — don't snap the centre
       // to the (0,0) hasFix-false fallback. Arm the one-shot recentre and let the
       // `[painted, hasFix]` effect below fire it the instant a real fix lands.
-      aaPendingRecenterRef.current = true;
+      if (!live.hasFix) aaPendingRecenterRef.current = true;
+      applyZoomNow('gesture'); // push the released zoom immediately — a parked car arms no ease (owner first)
     }
-    if (!took) applyZoomNow(); // push the released zoom immediately — a parked car arms no ease
     const now = Date.now();
     if (now - aaRecenterLogAtRef.current >= 5000) {
       aaRecenterLogAtRef.current = now;
@@ -2077,18 +2081,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   useEffect(() => {
     if (!aaPendingRecenterRef.current || !painted || !hasFix || !cameraRef.current) return;
     aaPendingRecenterRef.current = false;
-    try {
-      cameraRef.current.setCamera({
-        centerCoordinate: [lng, lat],
-        heading: camHdgRef.current,
-        zoomLevel: followZoom,
-        pitch: followPitch,
-        padding: getCam().padding,
-        animationDuration: 0,
-        animationMode: 'none',
-      });
-    } catch {}
-    applyZoomNow();
+    ownerSetPose('gesture', { centerCoordinate: [lng, lat], heading: camHdgRef.current, pitch: followPitch, padding: getCam().padding });
     const now = Date.now();
     if (now - aaPendingRecenterLogAtRef.current >= 2000) {
       aaPendingRecenterLogAtRef.current = now;
@@ -2619,16 +2612,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // pitched at the driver if nothing has painted yet.
         setStyleGen((g) => g + 1);
         if (!paintedRef.current && hasFix) {
-          try {
-            cameraRef.current?.setCamera({
-              centerCoordinate: [lng, lat],
-              zoomLevel: followZoom,
-              pitch: followPitch,
-              heading: followHeadingDeg,
-              animationMode: 'none',
-              animationDuration: 0,
-            } as any);
-          } catch {}
+          ownerSetPose('system', { centerCoordinate: [lng, lat], pitch: followPitch, heading: followHeadingDeg });   // through the owner (zoom = its framing)
         }
         // 🔒 NAV-LOCK end car-cam-style-load-seed
       }}

@@ -390,6 +390,42 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
       `(${stale || "no stale fly"}; framing ${f3(framing)}, parked ${f3(h.frames.find((f) => f.t >= tr)!.zoom)} → moving ${f3(h.cam.zoom)}; 2nd gesture ${g2ok ? "ok" : `WRONG (want ${f3(want2)})`}; cut parked ${f3(cutP.m)} / on resume ${f3(cutR.m)}; pump ${idle ? "idle" : "RUNNING"})`);
   }
 
+  // ── L: SYSTEM corrections through the camera owner (Codex fourth pass, 2026-09-25) ───────────────────────────────
+  // A head-unit RELAYOUT (the [painted, mapW] effect — followZoom 16.8 → 17.8, as aaZoomOutFor does when mapW arrives
+  // late) and a fix LOST AND REGAINED (the [painted, hasFix] effects — the cold-start snap and the pending re-centre) are
+  // camera writes too. They used to bypass the owner: mid-fly on Android the instant write cancelled the fly while its
+  // deadline + landing survived, and the parked landing then overwrote the corrected framing (a 1.0-level cut, stuck at
+  // 16.8). Each correction during the return fly · right after it landed · during a +/- ease · during the release ·
+  // during a Crew overview (still, and inside crewFit's easeTo) — iOS and Android — then the car pulls away. Asserted:
+  // no cut after the correction (a landed, idle camera takes the relayout instantly by design — that one step excepted),
+  // no fly or landing left stale, the pump idle, the camera ends on the corrected framing, and pulling away does not cut.
+  const sysCase = (id: string, name: string, android: boolean, run: (h: ReturnType<typeof makeHeadUnit>) => { t: number; instant: boolean; want: number; settle: number }) => {
+    const h = park(unit({ android }));
+    const r = run(h);
+    at(h, r.t + r.settle);
+    const cut = h.maxCut(r.t + (r.instant ? 40 : 0), h.now);
+    const rf = h.C.returnFlyRef.current;
+    const stale = rf < 0 || (rf > 0 && h.abs < rf) ? "a fly still in flight" : rf > 0 ? "a LANDING still pending" : "";
+    const shows = Math.abs(h.cam.zoom - r.want) < 0.02;
+    const n0 = h.counts.noteCam; at(h, h.now + 3000); const idle = h.counts.noteCam === n0;
+    const tr = h.now; h.setMoving(true); at(h, tr + 3000);
+    const cutR = h.maxCut(tr, h.now), lands = Math.abs(h.cam.zoom - r.want) <= 0.02;
+    ok(`${id}${android ? "a" : ""}`, `${name} (${android ? "Android" : "iOS"})`, cut.m <= X_CUT && !stale && shows && idle && cutR.m <= X_CUT && lands,
+      `(cut after ${f3(cut.m)}${cut.m > X_CUT ? ` at +${Math.round(cut.at - r.t)} ms` : ""}; ${stale || "no stale fly"}; parked ${f3(h.frames.find((f) => f.t >= tr)!.zoom)} want ${f3(r.want)}; pump ${idle ? "idle" : "RUNNING"}; moving ${f3(h.cam.zoom)}, cut ${f3(cutR.m)})`);
+  };
+  const flyStart = (h: ReturnType<typeof makeHeadUnit>) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 7000 + 40); return flies(h, tap)[0]?.t ?? NaN; };
+  for (const android of [false, true]) {
+    sysCase("L1", "relayout 300 ms into the return fly → the fly is re-aimed onto the corrected framing", android, (h) => { const f = flyStart(h); at(h, f + 300); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: 3000 }; });
+    sysCase("L2", "relayout right after the fly landed (parked) → instant, and no old landing overwrites it", android, (h) => { const f = flyStart(h); at(h, f + RETURN_FLY + 50); h.relayout(17.8); return { t: h.now, instant: true, want: 17.8, settle: 3000 }; });
+    sysCase("L3", "relayout during a +/- ease → the ease keeps the zoom; after the hold it eases home to the corrected zoom", android, (h) => { const t0 = h.now + 100; at(h, t0); h.press(-0.5); at(h, t0 + 100); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: lapse + 4000 }; });
+    sysCase("L4", "relayout during the 1.2 s release → the release follows the corrected zoom (no cut)", android, (h) => { const t0 = h.now + 100; at(h, t0); h.press(-0.5); at(h, t0 + lapse + 400); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: 5000 }; });
+    sysCase("L5", "relayout during a still Crew overview → the overview is kept; its way home lands on the corrected zoom", android, (h) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 3000); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: 4000 + 1800 + 1000 }; });
+    sysCase("L6", "relayout inside crewFit's 600 ms easeTo → kept; the way home lands on the corrected zoom", android, (h) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 200); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: 6800 + 1800 + 1000 }; });
+    sysCase("L7", "fix lost and regained during the return fly (cold-start snap + pending re-centre) → re-aimed, no cut", android, (h) => { const f = flyStart(h); at(h, f + 300); h.fixRegained(); return { t: h.now, instant: false, want: 16.8, settle: 3000 }; });
+    sysCase("L8", "fix lost and regained during a +/- ease → the ease keeps the zoom (held framing)", android, (h) => { const t0 = h.now + 100; at(h, t0); h.press(-0.5); at(h, t0 + 100); h.fixRegained(); return { t: h.now, instant: false, want: 16.3, settle: 3000 }; });
+    sysCase("L9", "fix lost and regained during a still Crew overview → kept; home at 7 s", android, (h) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 3000); h.fixRegained(); return { t: h.now, instant: false, want: 16.8, settle: 4000 + 1800 + 1000 }; });
+  }
+
   // ── the harness itself: every identifier the lifted production code read resolved ─────────────────────────────
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);
   ok("Z1", "the lifted production code resolved every identifier it read", unres.size === 0, unres.size ? `(unresolved: ${[...unres].join(", ")})` : "");

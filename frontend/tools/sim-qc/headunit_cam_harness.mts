@@ -152,7 +152,8 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     CREW_FIT_MAX_KM: cmConst("CREW_FIT_MAX_KM"), CAR_BANNER_STACK_BOTTOM: cmConst("CAR_BANNER_STACK_BOTTOM"),
     CAR_BANNER_GAP_SCALABLE: cmConst("CAR_BANNER_GAP_SCALABLE"), CAR_LOWER_PAD_FRAC: cmConst("CAR_LOWER_PAD_FRAC"), CAR_LEFT_PAD_FRAC: cmConst("CAR_LEFT_PAD_FRAC"),
     ZOOM_TAP_STEP: Number(/const ZOOM_TAP_STEP = ([\d.]+);/.exec(src.carMapView)![1]),
-    cameraRef, mapW: 800, mapH: 480, hasFix: true,
+    cameraRef, mapW: 800, mapH: 480, hasFix: true, painted: true, lng: cam.lng, lat: cam.lat,
+    followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, followHeadingDeg: 90, markPainted: () => {}, setStyleGen: () => {},
     camInputsRef: ref({ followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, mapH: 480, mapW: 800, previewMulti: false, uiScale: 1, mapScale: 1 }),
     paintedRef: ref(true), lockReadyRef: ref(true), aaLiveRef: ref({ hasFix: true, lat: cam.lat, lng: cam.lng, followZoom: o.followZoom ?? 16.8, followPitch: 45 }),
     camHoldUntilRef: ref(0), crewEaseUntilRef: ref(0), camHoldWasActiveRef: ref(false), crewOverviewRef: ref(false), returnFlyRef: ref(0), zoomSnapRef: ref(false),
@@ -166,7 +167,11 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   const CP = scopeProxy(C, unresolved);
   for (const n of ["clampBias", "zoomLog", "zoomHoldRelease", "carCamJob", "getCam", "applyZoomNow", "applyZoomEased", "reassertAaFollow"]) C[n] = bind(liftVar(csf, "CarMapView", n), CP);
   // Present since 2026-09-25 round 3 (an older revision replayed as a negative control has no such closure).
-  for (const n of ["takeOverNativeCam"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
+  for (const n of ["takeOverNativeCam", "ownerSetPose"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
+  // The render-time EFFECTS that write the camera (they run after a render whose deps changed):
+  const layoutEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| mapW <= 0\) return;/.test(t)), CP);        // 🔒 car-zoom-apply-now
+  const coldStartEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| !hasFix \|\| !cameraRef\.current\) return;/.test(t)), CP);   // 🔒 car-cam-coldstart-snap
+  const pendingEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!aaPendingRecenterRef\.current \|\| !painted/.test(t)), CP);  // 🔒 car-aa-follow-reassert
   const gesture = bind(liftCallArg(csf, "CarMapView", "subscribeCarGesture", () => true), CP);
   const onCameraChanged = bind(liftJsxAttr(csf, "CarMapView", "onCameraChanged"), CP);
   const lockLine = /^\s*(lockReadyRef\.current = [^\n]+;)\s*$/m.exec(region(src.carMapView, "car-cam-northup-lockready"))![1];
@@ -263,7 +268,13 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   };
   const api = {
     get now() { return now - T0; }, get abs() { return now; }, cam, C, S, log, counts, frames, unresolved,
-    setFollowZoom(z: number) { C.camInputsRef.current = { ...C.camInputsRef.current, followZoom: z }; C.aaLiveRef.current = { ...C.aaLiveRef.current, followZoom: z }; },
+    setFollowZoom(z: number) { C.followZoom = z; C.camInputsRef.current = { ...C.camInputsRef.current, followZoom: z }; C.aaLiveRef.current = { ...C.aaLiveRef.current, followZoom: z }; },
+    /** A head-unit RELAYOUT: onLayout delivers a new mapW, followZoom changes with it (aaZoomOutFor), the render runs
+     *  the [painted, mapW] layout-correction effect — the production effect body. */
+    relayout(fz: number) { turn(() => { api.setFollowZoom(fz); C.mapW += 2; C.camInputsRef.current = { ...C.camInputsRef.current, mapW: C.mapW }; carRender(); selfDirty = true; }); turn(() => layoutEffect()); },
+    /** The fix is lost and regained: the [painted, hasFix] effects re-run (the cold-start snap, the pending re-centre). */
+    fixRegained() { turn(() => { C.hasFix = false; C.aaLiveRef.current = { ...C.aaLiveRef.current, hasFix: false }; carRender(); });
+      turn(() => { C.hasFix = true; C.aaLiveRef.current = { ...C.aaLiveRef.current, hasFix: true }; carRender(); selfDirty = true; }); turn(() => { coldStartEffect(); pendingEffect(); }); },
     setMoving(m: boolean) { moving = m; if (m) nextFix = now; },
     /** followZoom as a function of harness time, applied at each CarMapView render (null = hold the last value). */
     followZoomAt(f: ((t: number) => number) | null) { followZoomAt = f; },
@@ -286,4 +297,39 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   // warm-up: a moving car for 3 s (the lockstep seeds itself), then whatever the scenario does
   api.setMoving(true); advance(3000);
   return api;
+}
+
+// ── static: every camera WRITE site, with its owner (car_zoom_step_test S20–S22) ───────────────────────────────────
+const CAMERA_METHODS = /^(setCamera|fitBounds|flyTo|easeTo|zoomTo|moveTo|setCameraBounds|setVisibleCoordinateBounds)$/;
+/** Every call of a camera method inside fnName, with the enclosing owner: the named function it sits in, or the
+ *  `case …` of the gesture switch. A write whose owner is not on a caller's allow-list is a writer that bypasses the
+ *  camera owner (the class Codex found three times: pinch, the stale landing, the layout correction). */
+export function cameraWriteSites(src: string, fnName: string): { line: number; owner: string; call: string }[] {
+  const sf = sfOf(src);
+  const out: { line: number; owner: string; call: string }[] = [];
+  inFn(sf, fnName, (n) => {
+    if (!(ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && CAMERA_METHODS.test(n.expression.name.text))) return;
+    let p = n.parent, owner = "(unowned)";
+    while (p) {
+      if (ts.isCaseClause(p)) { owner = `case ${p.expression.getText(sf)}`; break; }
+      if (ts.isVariableDeclaration(p) && p.initializer && (ts.isArrowFunction(p.initializer) || ts.isFunctionExpression(p.initializer))) { owner = p.name.getText(sf); break; }
+      if (ts.isFunctionDeclaration(p)) { owner = `function ${p.name?.text}`; break; }
+      p = p.parent;
+    }
+    out.push({ line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, owner, call: n.expression.getText(sf) });
+  });
+  return out;
+}
+/** The props of every <Camera …/> in fnName (an animated camera prop would be a second, declarative writer). */
+export function cameraJsxProps(src: string, fnName: string): Record<string, string>[] {
+  const sf = sfOf(src);
+  const out: Record<string, string>[] = [];
+  inFn(sf, fnName, (n) => {
+    if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(sf) === "Camera") {
+      const props: Record<string, string> = {};
+      for (const a of n.attributes.properties) if (ts.isJsxAttribute(a)) props[a.name.getText(sf)] = a.initializer ? a.initializer.getText(sf) : "true";
+      out.push(props);
+    }
+  });
+  return out;
 }

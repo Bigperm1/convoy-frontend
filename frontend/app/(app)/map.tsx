@@ -6074,8 +6074,8 @@ export default function MapScreen() {
           }}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          {/* 30 pt, a tad over the crew glyph's 26 (Jeff, 2026-09-25: "MAKE THE TRIANGLE JUST A TAD BIGGER"). */}
-          <SkinFade render={(t) => <Image source={HAZARD_FAB_ART[t]} style={{ width: 30, height: 30 }} resizeMode="contain" />} />
+          {/* 34 pt candy triangle (Jeff, 2026-09-25: "a tad bigger", then "the same type of effect as the 3d or crew glyphs"). */}
+          <SkinFade render={(t) => <Image source={HAZARD_FAB_ART[t]} style={{ width: 34, height: 34 }} resizeMode="contain" />} />
           <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Hazards</Text>
         </PressableScale>
         {/* 2D / 3D VIEW TOGGLE (Jeff, 2026-08-14) — sits directly ABOVE Crew, exactly
@@ -6122,7 +6122,7 @@ export default function MapScreen() {
           <SkinFade render={(t) => (
             <Image
               source={view2D ? VIEW3D_ART[t] : VIEW2D_ART[t]}
-              style={{ width: 34, height: 34 }}
+              style={{ width: 42, height: 42 }}   // 42 pt (Jeff, 2026-09-25: "make the 3d/2d glyph bigger … the phone is too small")
               resizeMode="contain"
             />
           )} />

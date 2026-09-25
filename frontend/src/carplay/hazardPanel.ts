@@ -17,7 +17,7 @@ export type HazardKind = 'police' | 'accident' | 'road' | 'traffic';
 /** Exactly the kinds the backend accepts on POST /hazards, in its own order. */
 export const HAZARD_REPORT_KINDS: readonly HazardKind[] = ['police', 'road', 'accident', 'traffic'];
 
-export type HazardGlyph = 'hz_police' | 'hz_crash' | 'hz_hazard' | 'hz_traffic' | 'hz_camera' | 'hz_compass';
+export type HazardGlyph = 'hz_police' | 'hz_crash' | 'hz_hazard' | 'hz_traffic' | 'hz_camera' | 'hz_compass' | 'hz_hazard_candy';
 export type HazardTile = {
   id: string;
   kind: HazardKind | null;   // null = not a report (the compass)
@@ -36,7 +36,7 @@ export const HAZARD_TILES: readonly HazardTile[] = [
 
 export const HAZARD_BUTTON_ID = 'car-hazards';       // the map button (replaces car-compass in the column)
 export const HAZARD_BUTTON_LABEL = 'Hazards';        // its tap-receipt pill ("Hazards ✓")
-export const HAZARD_BUTTON_GLYPH: HazardGlyph = 'hz_hazard';
+export const HAZARD_BUTTON_GLYPH: HazardGlyph = 'hz_hazard_candy';   // the candy finish, like the crew / view buttons (2026-09-25); the grid tile stays flat
 export const HAZARD_TEMPLATE_ID = 'hairpin-car-hazards';
 export const HAZARD_PANEL_TITLE = 'Report';
 /** CPGridTemplate shows at most 8 buttons (CPGridTemplateMaximumItems); androidx's grid list defaults to 6. */

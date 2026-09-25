@@ -6,7 +6,7 @@
 import { POI_PALETTE, type PoiCategory, type PoiColors } from "./poiPalette";
 import type { HazardGlyph } from "./carplay/hazardPanel";
 
-export type HazardPaintGlyph = Exclude<HazardGlyph, "hz_camera">;
+export type HazardPaintGlyph = Exclude<HazardGlyph, "hz_camera" | "hz_hazard_candy">;
 export type HazardPaint = { kind: string; cat: PoiCategory; label: string; glyph: HazardPaintGlyph } & PoiColors;
 
 const MAP: Record<string, { cat: PoiCategory; label: string; glyph: HazardPaintGlyph }> = {

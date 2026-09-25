@@ -31,15 +31,21 @@ import { NEON_TONE } from "./NeonPin";
 import type { VisualTier } from "../tierTheme";
 
 /** The report glyphs per metal — the same PNGs the head unit bakes into carButtonIcons.ts. */
-export const HAZARD_ART: Record<Exclude<HazardGlyph, "hz_camera">, Record<VisualTier, number>> = {
+export const HAZARD_ART: Record<Exclude<HazardGlyph, "hz_camera" | "hz_hazard_candy">, Record<VisualTier, number>> = {
   hz_police:  { brand: require("../../assets/carplay-glyphs/report/police_green.png"),  premium: require("../../assets/carplay-glyphs/report/police_silver.png"),  ultra: require("../../assets/carplay-glyphs/report/police_gold.png"),  diamond: require("../../assets/carplay-glyphs/report/police_diamond.png") },
   hz_crash:   { brand: require("../../assets/carplay-glyphs/report/crash_green.png"),   premium: require("../../assets/carplay-glyphs/report/crash_silver.png"),   ultra: require("../../assets/carplay-glyphs/report/crash_gold.png"),   diamond: require("../../assets/carplay-glyphs/report/crash_diamond.png") },
   hz_hazard:  { brand: require("../../assets/carplay-glyphs/report/hazard_green.png"),  premium: require("../../assets/carplay-glyphs/report/hazard_silver.png"),  ultra: require("../../assets/carplay-glyphs/report/hazard_gold.png"),  diamond: require("../../assets/carplay-glyphs/report/hazard_diamond.png") },
   hz_traffic: { brand: require("../../assets/carplay-glyphs/report/traffic_green.png"), premium: require("../../assets/carplay-glyphs/report/traffic_silver.png"), ultra: require("../../assets/carplay-glyphs/report/traffic_gold.png"), diamond: require("../../assets/carplay-glyphs/report/traffic_diamond.png") },
   hz_compass: { brand: require("../../assets/carplay-glyphs/report/compass_green.png"), premium: require("../../assets/carplay-glyphs/report/compass_silver.png"), ultra: require("../../assets/carplay-glyphs/report/compass_gold.png"), diamond: require("../../assets/carplay-glyphs/report/compass_diamond.png") },
 };
-/** The map button's own art: the hazard triangle in the metal (the head unit's car-hazards button). */
-export const HAZARD_FAB_ART = HAZARD_ART.hz_hazard;
+/** The map button's own art: the triangle in the CANDY finish the crew / 2D/3D buttons wear (Jeff, 2026-09-25) — the same
+ *  PNGs the CarPlay car-hazards button carries (tools/poi-pins/bake_hazard_candy.py). */
+export const HAZARD_FAB_ART: Record<VisualTier, number> = {
+  brand:   require("../../assets/images/premium/hazard_candy.png"),
+  premium: require("../../assets/images/premium/hazard_candy_silver.png"),
+  ultra:   require("../../assets/images/premium/hazard_candy_gold.png"),
+  diamond: require("../../assets/images/premium/hazard_candy_diamond.png"),
+};
 
 // ALL FIVE tiles now, the compass included (Jeff, 2026-09-25: the phone's compass FAB became the 2D/3D button, so the
 // compass rides inside the panel exactly as it does on the head units).

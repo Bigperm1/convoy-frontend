@@ -1428,10 +1428,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // An ARMED fly (-1, or a re-aim < -1) is owed too: getCam also runs outside a push (the re-assert and cold-start
     // snap read its padding), and an edge it consumed there must not wait for the car to move before the fly starts.
     const flyArmed = returnFlyRef.current < 0;
+    // A fly whose time is UP but whose landing has not been pushed (Codex third pass, 2026-09-25): a parked car used to
+    // keep that landing seed until it moved, and pushCam then preferred it over any framing set since — a 1.0-level
+    // cut on pulling away after a pinch. The landing is owed now: one push lands it (a no-op on screen — it is the
+    // frame the fly ended on) and retires the deadline and the seed. A landing seed never outlives its fly.
+    const landingDue = returnFlyRef.current > 0 && now >= returnFlyRef.current;
     if ((crewDue || flyArmed) && !lockReadyRef.current && paintedRef.current && aaLiveRef.current.hasFix &&
         now >= camHoldUntilRef.current) lockReadyRef.current = true;
     if (!lockReadyRef.current) return false;   // nothing can push yet (overview still on, no paint, no fix): never spin
-    return crewDue || flyArmed || carZoomJobOwed(zoomChRef.current, zoomHoldUntilRef.current, now, pinchActiveRef.current);
+    return crewDue || flyArmed || landingDue || carZoomJobOwed(zoomChRef.current, zoomHoldUntilRef.current, now, pinchActiveRef.current);
   }).current;
   const getCam = useRef(() => {
     const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv, uiScale: us, mapScale: ms } = camInputsRef.current;
@@ -1671,17 +1676,24 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // → 17.30); on Android it does cancel, but the fly's deadline and landing seed survived and cut 1.9 levels when the
   // car moved. So the gesture goes through the camera owner instead: pushCam RE-AIMS the fly (one flyTo from where the
   // camera is, to the chase frame at the gesture's framing, over the remaining time, ≥ CAR_ZOOM_STEP_MS) — which
-  // retires the old deadline and landing seed. Inside crewFit's own easeTo (CREW_FIT_EASE_MS) the gesture ends the
-  // overview and getCam's edge takes the camera back by a short fly. Otherwise false: the caller's instant path runs.
+  // retires the old deadline and landing seed. While a Crew overview is on (inside crewFit's own easeTo or after it) the
+  // gesture ends it and getCam's edge takes the camera home by a fly. Otherwise false: the caller's instant path runs.
   const takeOverNativeCam = (now: number): boolean => {
+    // A fly that has finished but whose landing is still pending is RETIRED first (belt and braces — carCamJob lands it
+    // at its deadline): the caller's instant write sets zoomSnapRef, so the next push re-seeds from the current targets
+    // and no old landing seed can override the framing this gesture sets.
+    if (returnFlyRef.current > 0 && now >= returnFlyRef.current) returnFlyRef.current = 0;
     if (returnFlyInFlight(returnFlyRef.current, now)) {
       returnFlyRef.current = returnFlyReaim(returnFlyRef.current, now, CAR_ZOOM_STEP_MS);
       zoomChRef.current.ease = null;             // the fly carries the zoom
       selfRefreshRef.current?.();                // a parked car's pump flies it on the next frame
       return true;
     }
-    if (camHoldWasActiveRef.current && now < crewEaseUntilRef.current) {
-      camHoldUntilRef.current = 0;               // end the overview: the edge flies home short (see getCam)
+    // A Crew overview is on (or its way home is still owed): the gesture ends it and getCam's edge takes the camera
+    // home — the 1.8 s fly from a wide overview, a short fly inside crewFit's own easeTo — instead of an instant write
+    // that would cut the overview's zoom to the chase framing on the spot (and, inside the easeTo, lose to it on iOS).
+    if (camHoldWasActiveRef.current) {
+      camHoldUntilRef.current = 0;
       selfRefreshRef.current?.();
       return true;
     }

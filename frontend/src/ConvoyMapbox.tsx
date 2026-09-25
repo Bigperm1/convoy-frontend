@@ -1652,8 +1652,14 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     if (snap || userZoomed || landedSnap || camZoom.current == null || camPitch.current == null) {
       camZoom.current = landSeed ? landSeed.zoom : c.zoomLevel;
       camPitch.current = landSeed ? landSeed.pitch : c.pitch;
-      camZoomGoal.current = c.zoomLevel;
-      camPitchGoal.current = c.pitch;
+      // HEAD UNIT (zoomCh): a landing can now be pushed by the PARKED pump the moment the fly's time is up (2026-09-25 —
+      // a seed must never outlive its fly), long before the next moving push. Start the glide's goals AT the landed frame
+      // so a target that moved during the fly (nav start, a speed change) is walked to at the glide's own slew rate once
+      // the car moves — a goal left at the target made that first moving push (dt clamped to 200 ms) jump 13 % of the gap
+      // (0.29 of a level for a nav start). The phone passes no zoomCh: its landing is unchanged.
+      const carLand = !!landSeed && !!c.zoomCh;
+      camZoomGoal.current = carLand ? landSeed!.zoom : c.zoomLevel;
+      camPitchGoal.current = carLand ? landSeed!.pitch : c.pitch;
     } else {
       // 1) The GOAL walks toward the raw target at a bounded rate, ignoring twitches
       //    smaller than the dead-band. 2) The applied value low-passes toward the goal.

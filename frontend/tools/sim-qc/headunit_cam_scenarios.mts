@@ -274,7 +274,7 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
   const X_CUT = 0.12;
   type Ctx = "fly" | "reaimed" | "crewEase";
   type Gest = { key: string; act: (h: ReturnType<typeof makeHeadUnit>) => void; effect: "owner" | "crew" | "auto";
-    want: (ctx: Ctx, zg: number) => number | null; fz0?: number; settle?: number; recover?: number };
+    want: (ctx: Ctx, zg: number) => number | null; fz0?: number; settle?: number; recover?: (ctx: Ctx) => number };
   const FZ = 16.8;
   // A pinch frames what is on screen, within the (value-locked) press limit: followZoom ± 4, floor 10.5 (clampBias).
   const pinchFrame = (z: number) => FZ + Math.max(Math.max(-4, 10.5 - FZ), Math.min(Math.min(4, 20 - FZ), z - FZ));
@@ -291,9 +291,10 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
     { key: "compass", effect: "owner", want: () => FZ, act: (h) => h.gesture({ kind: "compass" }) },
     { key: "AppState re-assert", effect: "owner", want: () => FZ, act: (h) => h.reassert() },
     { key: "Crew re-press", effect: "crew", want: () => FZ, act: (h) => h.crew(), settle: 7000 + 1800 + 800 },
-    // Automatic framing: the new speed zoom is reached by the locked glide (0.5 level/s) once the car moves — 2.2 levels.
-    { key: "nav start (followZoom 14.6 → 16.8)", effect: "auto", fz0: 14.6, recover: 8000, want: (c) => (c === "reaimed" ? 14.6 + 0.5 : 16.8), act: (h) => h.setFollowZoom(16.8) },
-    { key: "nav stop (followZoom 16.8 → 14.6)", effect: "auto", recover: 8000, want: (c) => (c === "reaimed" ? FZ + 0.5 : 14.6), act: (h) => h.setFollowZoom(14.6) },
+    // Automatic framing: the new speed zoom is reached by the locked glide once the car moves — 2.2 levels at 0.5 level/s,
+    // then its 1.4 s low-pass; it rests within the 0.25 dead-band of the target.
+    { key: "nav start (followZoom 14.6 → 16.8)", effect: "auto", fz0: 14.6, recover: (c) => (c === "reaimed" ? 3000 : 12000), want: (c) => (c === "reaimed" ? 14.6 + 0.5 : 16.8), act: (h) => h.setFollowZoom(16.8) },
+    { key: "nav stop (followZoom 16.8 → 14.6)", effect: "auto", recover: (c) => (c === "reaimed" ? 3000 : 12000), want: (c) => (c === "reaimed" ? FZ + 0.5 : 14.6), act: (h) => h.setFollowZoom(14.6) },
   ];
   const sweepOne = (ctx: Ctx, g: Gest, android: boolean, moving: boolean): { pass: boolean; detail: string } => {
     const h = unit({ android, followZoom: g.fz0 ?? FZ });
@@ -319,7 +320,7 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
     const rf = h.C.returnFlyRef.current, fd = h.S.flyDestRef.current;
     const stale = returnFlyLive(rf, h.abs) ? "fly still in flight" : rf > 0 && fd && Math.abs(fd.zoom - h.cam.zoom) > 0.02 ? `landing seed ${f3(fd.zoom)} ≠ camera ${f3(h.cam.zoom)}` : "";
     const zParked = h.cam.zoom;
-    const tr = h.now; h.setMoving(true); at(h, tr + (g.recover ?? 3000));
+    const tr = h.now; h.setMoving(true); at(h, tr + (g.recover ? g.recover(ctx) : 3000));
     const cutR = h.maxCut(tr, h.now);
     const want = g.want(ctx, zg);
     const lands = want == null || Math.abs(h.cam.zoom - Math.max(10.5, Math.min(20, want))) <= 0.26;
@@ -335,6 +336,58 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
   for (const key of ["pinch (begin · scale 1 · end)", "recenter"]) for (const android of [false, true]) {
     const r = sweepOne("fly", G.find((g) => g.key === key)!, android, true);
     ok(`X${++xi}`, `${key} during the return fly, MOVING (${android ? "Android" : "iOS"})`, r.pass, r.detail);
+  }
+
+  // ── Y: the AFTER-THE-FLY axis (Codex third pass, 2026-09-25) ─────────────────────────────────────────────────────
+  // A parked fly used to FINISH without its landing being pushed, so its seed waited for the car to move and then beat
+  // any framing set since (Crew → pinch in the return → settle → pinch again → a 1.0-level cut on pulling away). Each
+  // X gesture at three times — DURING the return fly · right after it LANDED (parked) · landed + 10 s LATER — then a
+  // SECOND gesture (a pinch ramped to ×2, or a '−' press), then the car pulls away. iOS and Android. Asserted: no cut
+  // above X_CUT from the first gesture to the end, no fly in flight or landing left pending once parked, the parked
+  // camera shows the framing, the parked pump is idle, and pulling away lands on that framing without a cut.
+  const pinchRamp = (to: number, n: number) => (h: ReturnType<typeof makeHeadUnit>) => {
+    h.gesture({ kind: "zoomBegin" });
+    for (let k = 1; k <= n; k++) { h.gesture({ kind: "zoom", scale: Math.pow(to, k / n), velocity: 0 }); if (k < n) h.advance(33); }
+    h.gesture({ kind: "zoomEnd" });
+  };
+  const G1: Gest[] = G.map((g) => (g.key.startsWith("pinch out-in") ? { ...g, key: "pinch ramp to ×1.3", act: pinchRamp(1.3, 4) } : g));
+  const G2 = [
+    { key: "a pinch ramped to ×2", act: pinchRamp(2, 10), pinch: true },
+    { key: "a '−' press", act: (h: ReturnType<typeof makeHeadUnit>) => h.press(-0.5), pinch: false },
+  ];
+  const RETURN_FLY = (src.mods.RETURN_FLY_MS as number) ?? 1800;
+  let yi = 0;
+  for (const tm of ["during", "landed", "later"] as const) for (const g1 of G1) for (const g2 of G2) for (const android of [false, true]) {
+    const id = `Y${++yi}`, name = `${g1.key} ${tm === "during" ? "during the return fly" : tm === "landed" ? "right after the fly landed (parked)" : "10 s after the fly landed (parked)"}, then ${g2.key}, then pull away (${android ? "Android" : "iOS"})`;
+    const h = unit({ android, followZoom: g1.fz0 ?? FZ });
+    park(h);
+    const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 7000 + 40);
+    const f0 = flies(h, tap)[0];
+    if (!f0) { ok(id, name, false, "(the return fly never started)"); continue; }
+    const t1 = tm === "during" ? f0.t + 300 : tm === "landed" ? f0.t + RETURN_FLY + 50 : f0.t + RETURN_FLY + 10000;
+    at(h, t1); g1.act(h);
+    at(h, t1 + 2500);
+    const zb = h.cam.zoom, t2 = h.now;
+    const overviewBefore = h.C.camHoldWasActiveRef.current, manualBefore = h.C.manualZoomRef.current;
+    g2.act(h);
+    at(h, t2 + 3000);
+    const rf = h.C.returnFlyRef.current;
+    const stale = rf < 0 || (rf > 0 && h.abs < rf) ? "a fly still in flight" : rf > 0 ? "a LANDING still pending (stale seed)" : "";
+    const C = h.C, fz = C.camInputsRef.current.followZoom;
+    const framing = src.mods.carZoomDest(C.manualZoomRef.current, fz, C.userZoomRef.current, 10.5, 20);
+    const shows = Math.abs(h.cam.zoom - framing) < 0.02;
+    // What the 2nd gesture must frame (the production rules, clampBias's press limit): a pinch — what was on screen,
+    // +1 level; a '−' — from the chase framing if it ended an overview, else from the held framing, else from the screen.
+    const lim = (z: number) => fz + Math.max(Math.max(-4, 10.5 - fz), Math.min(Math.min(4, 20 - fz), z - fz));
+    const want2 = g2.pinch ? lim(lim(zb) + 1) : lim((overviewBefore ? fz : manualBefore ?? zb) - 0.5);
+    const g2ok = Math.abs(framing - want2) < 0.02;
+    const n0 = h.counts.noteCam; at(h, h.now + 3000); const idle = h.counts.noteCam === n0;
+    const cutP = h.maxCut(t1, h.now);
+    const tr = h.now; h.setMoving(true); at(h, tr + 3000);
+    const cutR = h.maxCut(tr, h.now);
+    const lands = Math.abs(h.cam.zoom - framing) <= 0.02;
+    ok(id, name, !stale && shows && g2ok && idle && cutP.m <= X_CUT && cutR.m <= X_CUT && lands,
+      `(${stale || "no stale fly"}; framing ${f3(framing)}, parked ${f3(h.frames.find((f) => f.t >= tr)!.zoom)} → moving ${f3(h.cam.zoom)}; 2nd gesture ${g2ok ? "ok" : `WRONG (want ${f3(want2)})`}; cut parked ${f3(cutP.m)} / on resume ${f3(cutR.m)}; pump ${idle ? "idle" : "RUNNING"})`);
   }
 
   // ── the harness itself: every identifier the lifted production code read resolved ─────────────────────────────

@@ -29,7 +29,7 @@ votes delete it for everyone. Reports expire by kind (§5).
 | CarPlay map buttons | `src/carplay/carActions.ts` `carMapButtonConfig()` (used by `carPlayBootstrap.ts` cold, `ConvoyCarPlay.tsx` warm) | Array: `car-comms` · `car-hazards` · `car-view` · `car-crew` = top → bottom. Panning mode hides from the END, so the mic and Hazards survive a pan. |
 | CarPlay grid | `openHazardPanel` → `getHazardTemplateIOS` (`GridTemplate`, id `hairpin-car-hazards`, title "Report") | The same five tiles (`hazardGridButtons`). One template instance per session. |
 | Android Auto map strip | `aaMapButtons()` (used by `ConvoyCarPlay.tsx`, `AndroidAutoRoot.tsx`) | `car-zoom-in` · `car-zoom-out` · `car-hazards` · `car-crew` — Hazards above Crew. The action strip (`AA_ACTION_STRIP`: End · Search · view · comms) has no Hazards. |
-| Android Auto grid | `openHazardPanel` → `bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(...))` + `pushTemplate` | The same five tiles, `headerAction: { type: 'back' }`. androidx tints grid and map-strip icons white (no native tint patch yet). |
+| Android Auto grid | `openHazardPanel` → `bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(...))` + `pushTemplate` | The same five tiles, `headerAction: { type: 'back' }`. androidx tints map-strip icons white (code comment; no native tint patch). HYPOTHESIS, never seen on a unit: grid tile art is tinted white too (CARPLAY.md §4). |
 | Voice | `map.tsx` `voiceBus.subscribe` | Intents `report_police` / `report_accident` / `report_road` / `report_traffic` → `reportHazard(kind, { fromVoice: true })` (spoken acknowledgement). The backend emits them from the agent tool `report_hazard` and a keyword fallback. |
 
 Dispatch: warm CarPlay `onMapButtonPressed` → `handleCarMapButton(id, 'warm')`; cold → `handleCarMapButton(id, 'cold')`;
@@ -55,16 +55,18 @@ Backend kinds: `server.py` `create_hazard` rejects anything outside `("police", 
   `{ kind, cat, label, glyph, bright, deep }`; an unknown kind draws as `road`.
 - Phone tiles are rimmed 1.5 pt **and** glyph-tinted in the kind's bright colour (`HazardSheet` `neonFor`); the card's
   glyph tile too. The Compass tile keeps its metal art and rim (`NEON_TONE[metal].rim`).
-- Every `hz_*` glyph exists in four metals (brand green / Silver / Gold / Diamond): phone `HazardSheet.tsx`
-  `HAZARD_ART`, head units `src/carplay/carButtonIcons.ts` `CAR_ICON_BY_SKIN`.
+- Metals (brand green / Silver / Gold / Diamond): head units carry every `hz_*` glyph × four metals in
+  `src/carplay/carButtonIcons.ts` `CAR_ICON_BY_SKIN` (incl. `hz_camera` and `hz_hazard_candy`); the phone's
+  `HazardSheet.tsx` `HAZARD_ART` holds the five tile glyphs (no `hz_camera`) and `HAZARD_FAB_ART` the candy triangle.
 - The Hazards **map button** wears the **candy** triangle (`HAZARD_BUTTON_GLYPH = 'hz_hazard_candy'`; phone
   `HAZARD_FAB_ART`, 34 pt) — the finish of the crew and 2D/3D buttons. The grid tile keeps the flat glyph. The static,
   value-locked `CAR_MAP_BUTTON_CONFIG` / `AA_MAP_BUTTONS` still reference the flat `CAR_ICON_HAZARDS`; the live builders
   (`carMapButtonConfig()`, `aaMapButtons()`) are what the templates use.
 - **No speed-camera tile.** `hz_camera` art exists but the backend has no such kind (gate A4). Adding it = backend kind +
   pin + peers first.
-- Label drift for `accident`: tile/card "Crash", Scout's call "a crash", the voice acknowledgement "Accident", the 🔒
-  reroute prompt "an accident".
+- Label drift for `accident`: tile/card "Crash"; Scout's call picks at random from `HAZARD_AHEAD_OPENERS.accident`
+  ("Crash reported" / "Heads up, accident reported" / "There's a crash" / "Collision reported"); the voice acknowledgement
+  "Accident"; the 🔒 reroute prompt "an accident".
 
 ## 4 · Data path
 
@@ -133,6 +135,11 @@ Re-arms at lead + 500 m. Line: `hazardAheadLine(kind, dM, 'km'|'mi')`, e.g. "Hea
 1 kilometer ahead." Muted by `navMuted`. Fires for every kind, idle or navigating, own pins included (only the prompt
 skips your own).
 
+**C · Scout's agent tool (backend)** — `server.py` `get_nearby_hazards` → `_agent_tool_nearby_hazards`: live Mongo hazards
+within `radius_km` (default 25), all four kinds INCLUDING police, nearest first, max 12, no forward cone, no disputes
+filter. Questions that reach the agent answer from this; the on-phone Q&A answers from `nearestHazardAhead` (no police) —
+so "any police ahead?" can get two different answers.
+
 **B · The reroute-worthy prompt** — 🔒 regions `map-reroute-hazard-kinds` / `map-reroute-hazard-ahead`:
 `REROUTE_HAZARD_KINDS` = accident / road / traffic (never police); `nearestHazardAhead` = nearest qualifying hazard
 within 3 km that is closer to the destination than the car. Feeds the 60 s faster-route check (🔒
@@ -162,7 +169,9 @@ State: `passPrompt`, `promptedHazardsRef` (once per hazard per map mount), `pass
 
 Phone: `phone-tap:hazards` · `hazard-panel op=open surf=phone anchor= winH=` · `hazard-panel layout x= y= w= h= win=` ·
 `hazard-panel op=close surf=phone why=nav|auto|back|tap` · `hazard-panel pick surf=phone id=hz-<kind> kind=<kind>` ·
-`hazard-panel pick surf=phone id=hz-compass kind=compass` + `phone-tap:compass hold=0|1` · `hazard-ahead kind= d= lead=
+`hazard-panel pick surf=phone id=hz-compass kind=compass` + `phone-tap:compass hold=0|1` (⚠ the phone's `id=` is
+`hz-<backend kind>` — `hz-accident` / `hz-road` — not the tile id the head units log, `hz-crash` / `hz-hazard`; join
+cross-surface queries on `kind=`) · `hazard-ahead kind= d= lead=
 kmh= spoke=0|1` · `crew-return ms=7000`. **`reportHazard` logs nothing on success or failure** (failure is an
 `Alert`), so a report is only visible as a `hazards` row.
 Head units: `carplay-tap:car-hazards` (pill "Hazards ✓") · `hazard-panel op=push surf=carplay|aa` · `hazard-panel op=pop
@@ -176,7 +185,8 @@ those from field conclusions.
 - `tools/sim-qc/hazard_panel_test.mts` — A (tiles vs `server.py` kinds, no camera tile, grid limits, map button id /
   label / candy glyph) · B (grid shapes on both head units) · C (four metals per glyph) · D (phone panel: tiles from
   `HAZARD_TILES`, FAB order, nav-transition close, one report in flight, transparent Modal on `PANEL_FLOOR`, centred above
-  `fabStackH`, **no entrance animation**, **no BackHandler**, 8 s auto-close on all surfaces, candy FAB 34 pt, 2D/3D 42 pt)
+  `fabStackH`, **no entrance animation**, **no BackHandler**, an auto-close between 5 and 12 s armed on all surfaces — the 8 s value itself is not pinned —, candy
+  FAB 34 pt, 2D/3D 42 pt)
   · E (both head units' button arrays) · G (compass tile runs the 🔒 toggle, palette mapping, baked pins on both renderers,
   the card is the panel's twin, pill placement, prompt on Scout's call, neon rims + tinted glyphs, Remove without a
   confirm, crew-return wiring, Codex r4 guards).
@@ -207,8 +217,9 @@ those from field conclusions.
   glyphs i mentioned…" and "On both surfaces let's do this order: Right side Top - mic, Second from top - hazards, Second
   from bottom - 2D/3D, Bottom - crew…").
 - Not locked: `hazardPanel.ts`, `hazardAhead.ts`, `hazardPalette.ts`, `HazardSheet.tsx`, `HazardCard.tsx`,
-  `crewReturn.ts`, `panelFloor.ts`. A NEW module-scope constant in `map.tsx` / `carActions.ts` / `ConvoyCarPlay.tsx` fails
-  the lock — put new constants in a pure module (that is why these exist).
+  `crewReturn.ts`, `panelFloor.ts`. A NEW module-scope constant in any `watchNew` file fails the lock — for hazards that
+  means `map.tsx`, `carActions.ts`, `ConvoyCarPlay.tsx`, `ConvoyMapbox.tsx`, `CarMapView.tsx`, `carStore.ts` (full list:
+  `nav-lock.json` `watchNew`). Put new constants in a pure module (that is why these exist).
 
 ## 14 · Open issues, not field-verified, traps
 
@@ -218,23 +229,33 @@ those from field conclusions.
 - The Supabase `hazards` table's RLS lets role `public` INSERT and UPDATE (`hazards_insert` with_check true,
   `hazards_update` using/with_check true, measured from `pg_policies` 2026-09-25) — with the shipped anon key anyone can
   create or edit hazard rows directly.
-- `confirm_hazard` / `dispute_hazard` broadcast the full document including `reporter_id`, `confirmed_by`,
-  `disputed_by`; `create_hazard` deliberately strips `reporter_id`.
+- **Privacy regression:** `GET /hazards` (`list_hazards`, projection only `{"_id": 0}`) returns `reporter_id`,
+  `confirmed_by` and `disputed_by` for every live hazard to any signed-in user; the confirm / dispute broadcasts and HTTP
+  responses carry the full document too. Only `create_hazard` strips `reporter_id`. This undoes the 09-06 fix recorded in
+  memory `location-privacy-single-gate`.
+- Supabase `hazards_read` is public SELECT (`pg_policies`, 2026-09-25) and expired rows are never deleted (60 rows kept),
+  so the anon key reads a permanent log of reporter handle + position + time. Decide a retention rule.
 
 **Correctness:**
 - **Codex r3 finding NOT fixed:** a hazard with non-finite coordinates passes both alert gates — `map.tsx` computes `dM`
   with no `Number.isFinite` check and `hazardAhead.ts` `isAheadOf` accepts a NaN angle — so Scout could say "about NaN
   kilometers". Whether the backend ever sends such a row is unchecked.
-- HYPOTHESIS: the Supabase mirror is written on create and delete only (the upsert has no `confirms` / `disputes`, and
-  confirm never touches Supabase `expires_at`). Clients read Supabase first, so a confirmed hazard may still drop at its
-  original expiry and vote counts may reset on each poll. Check: confirm one hazard, compare `GET /hazards` with the
-  Supabase row.
+- **The Supabase mirror is written only by create** (upsert without `confirms` / `disputes` / a refreshed expiry) and
+  deleted by dispute ≥ 2 / DELETE (VERIFIED from `server.py`: the only `supa.*("hazards"` calls). The live table has **no
+  `disputes` column** and `confirms` defaults to 1 (`information_schema`, 2026-09-25). Clients read Supabase first, so a
+  Supabase-sourced pin always shows 1 confirm / 0 disputes, loses a WebSocket-merged dispute count on every 30 s poll, and
+  expires at its ORIGINAL time even after a confirm — the `isHazardVisible` disputes backstop only holds between a
+  `hazard_update` and the next poll. The field effect is unmeasured.
 - `toHazard` drops `created_at`, so the pass-by 20 s freshness skip only works for REST / WebSocket rows.
 - The hazard-ahead call does not skip `disputes >= 2`; the Q&A "any police ahead?" answers from `nearestHazardAhead`,
   which never counts police.
 - A car-only drive (cold head unit, phone app not open) has pins but no Scout hazard call, no prompt and no voting — the
   call lives only in `map.tsx`. HYPOTHESIS from the code.
 - The report pill's 4 s timer is never cleared, so a second report within 4 s is hidden early (read from code).
+
+**Android phone — never run.** No emulator or device covered BZ → CE: the panel, card, pill, More panel and floor are
+unverified on Android, including layering (`HazardSheet` / `HazardCard` `elevation: 10` in a Modal, `ReportPill` `zIndex: 5`
+with no elevation, CategoryPills `zIndex 40 / elevation 40`). Use the `verify-android` skill.
 
 **Never seen in the field (as of 2026-09-25 08:30 PDT):** any head-unit panel receipt (`carplay-tap:car-hazards`,
 `hazard-panel op=push`, `surf=carplay|aa`), the new pins on a head unit, `hazard-ahead` from a real drive, the
@@ -244,15 +265,24 @@ OTA-BV, which predates the panel.
 **Bench paint flake — NOT root-caused:** on the shared iPhone 16 Pro simulator the phone panel sometimes opens in state
 (open + layout + auto-close crumbs) and paints nothing — 11 of 25 cold launches painted across nine variants. A
 `BackHandler` listener was blamed for an hour and cleared. Shipped mitigation: a transparent `Modal` with a static card
-(gates D8/D9) and the `hazard-panel layout` crumb. Jeff's phone painted every open on OTA-CA (layout x 39, y 438,
-352 × 190). Memory `backhandler-listener-unpaints-overlay-2026-09-25`.
+(gates D8/D9) and the `hazard-panel layout` crumb. On OTA-CA Jeff's phone logged 21 opens, all with a layout crumb (x 39, y 438, 352 × 190); 3 ended in a report pick,
+which proves those painted. Crumbs cannot tell whether the rest did — only Jeff's eyes can. Memory
+`backhandler-listener-unpaints-overlay-2026-09-25`.
 
 **Bench traps:** the panel auto-closes in 8 s — tap a tile within two tool calls of opening it. A static simulator
 location never pushes the camera, so the crew-return fly needs a `simctl location start` stream (started BEFORE launch).
-Report tiles post REAL hazards as Jeff — test from a remote spot (e.g. 51.55, −121.30) and expire the row afterwards.
+Report tiles post REAL hazards as Jeff, broadcast at once to every connected tester — test from a remote spot (e.g.
+51.55, −121.30) and clean up with the pin card's **Remove my alert** (DELETE clears Mongo + Supabase and broadcasts
+`hazard_removed`). Expiring the Supabase row by SQL leaves the Mongo copy live for `GET /hazards` and Scout's agent tool.
 
-**Dead or stale code:** `handleHazardLongPress` (no caller since the card's Remove went direct), `reportAlert` /
-`onReportPolice`, `hazardColor` / `hazardIcon` in `map.tsx`, the exported-but-unused `ReportToast`. The `showHazards`
-"layer toggle" has no setter. The backend comments on `dispute_hazard` ("new clients call DELETE") and `confirm_hazard`
-("30-min expiry") are stale. An older setup doc lives at the repo root, `../HAZARDS_SUPABASE_SETUP.md` (its schema has no
-`disputes` column).
+**Dead or stale code:** `handleHazardLongPress` is still passed as `onHazardLongPress`, but `ConvoyMapbox` declares that
+prop and never reads it (dropped in `15fd7e18`); `HazardMarker`'s `onLongPress` (no caller passes it); `reportAlert` /
+`onReportPolice` and `ConvoyCarPlay.tsx` `onReportPoliceRef` (assigned, never invoked); `hazardColor` / `hazardIcon` in
+`map.tsx`; `hazardAheadKindWord` (only the gate uses it); the exported-but-unused `ReportToast`. The `showHazards` "layer
+toggle" has no setter. Stale comments: `map.tsx` `reportHazard` "≈40m forward" (it posts the 5 s-ago position) and
+"(ReportToast)"; the WebSocket comment "hazard_removed (… or expiry)" (nothing broadcasts on expiry); `deleteHazard`
+"Backend already authorizes" and "long-press / right-click flow"; the crew FAB's "hazard long-press"; the hazard-ahead
+effect's "Hazards layer toggle"; `HazardMarker`'s "police.png … long-press"; the `AlertToast.tsx` header; backend
+`dispute_hazard` ("new clients call DELETE") and `confirm_hazard` ("30-min expiry"). An older setup doc lives at the repo
+root, `../HAZARDS_SUPABASE_SETUP.md`: its schema HAS a `disputes` column and a migration to add it, but the live table
+has none — the migration was never run.

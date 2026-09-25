@@ -229,7 +229,14 @@ export function hydrateLocationPrivacy(): Promise<void> {
   _hydrateAt = now;
   const attempt = _hydrateOnce().then((why) => {
     const ok = why === "spot" || why === "empty" || why === "late";
-    if (ok) { _hydrateDone = true; _signalHydrated(); }
+    if (ok) {
+      _hydrateDone = true;
+      // A latch left by fixes processed before this read (a head unit's, while reads failed) whose 90 s window ran out
+      // with no fix to expire it is cleared here too (shareablePosition already ignores it — Codex delta review 2).
+      const age = Date.now() - _lastDrivingAt;
+      if (_drivingLatched && !(_lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS)) { _drivingLatched = false; _latchProvisional = false; }
+      _signalHydrated();
+    }
     if (why !== "late" && _hydrateRows < 5) { _hydrateRows += 1; try { logEventReliable(`priv-hydrate ok=${ok ? 1 : 0} why=${why}`); } catch {} }
   });
   _hydrating = attempt;
@@ -694,7 +701,17 @@ export function shareablePosition(
   // walking-pace-and-above alone can no longer publish a live position.
   // …and only once the saved park is KNOWN (Codex delta review, 2026-09-25): a latch armed by a head unit's fixes while
   // hydration was failing proves nothing about a park it could not read. A head unit attached now still shares live.
-  const movingNow = _hydrateDone && _drivingLatched && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
+  // ── DECIDED HERE, AT CALL TIME (Codex delta review 2, 2026-09-25) ───────────────────────────────────────────────
+  // The latch's own 90 s expiry used to happen only inside noteFix, and callers that share without feeding a fix first
+  // (map.tsx's manual refresh, visitMonitor, shareablePositionAsync) read a latch no fix had expired: reads failing,
+  // Android Auto fixes arm it, 100 s pass with no fix and no disconnect, a read succeeds, and a 3.3 m/s walking
+  // position was returned LIVE while isParked() said parked (park_rearm_test HF9-0 on 7da32366). So the latch counts
+  // only while its last genuine driving evidence (`_lastDrivingAt`, which noteFix refreshes on every driving fix and
+  // which a restored latch carries from disk) is inside DRIVING_HYSTERESIS_MS of NOW — exactly the window noteFix
+  // expires it on, so a live drive is unaffected. A clock that moved backwards counts as expired (fail-closed).
+  const latchAge = Date.now() - _lastDrivingAt;
+  const latchFresh = _drivingLatched && _lastDrivingAt > 0 && latchAge >= 0 && latchAge < DRIVING_HYSTERESIS_MS;
+  const movingNow = _hydrateDone && latchFresh && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
   const inCar = carAttached() || movingNow;
   const status: "live" | "parked" = isParked() ? "parked" : "live";
 

@@ -59,7 +59,9 @@
 //      retry backoff; HF6 a hung read settling after the retry changes nothing; HF7 Android Auto's 90 s TTL lapsing
 //      (no disconnect heard) while reads fail — the head unit's latch never shares a walk (HF7-0 = 47db1aca sharing
 //      it; HF7b isolates shareablePosition's hydration check, HF7b-0 = without it); HF8 a caller awaiting a HUNG attempt is released when a retry succeeds, and within 10 s when none does
-//      (HF8-0 = 47db1aca never releasing it), and carDataService joins presence after the await, hydrated or not.
+//      (HF8-0 = 47db1aca never releasing it), and carDataService joins presence after the await, hydrated or not;
+//      HF9 / HF9b the share decision is self-sufficient: a latch whose last driving fix is 100 s old shares nothing,
+//      whether or not a fix ran since, through the async path too (HF9-0 / HF9b-0 = 7da32366 sharing the walk).
 //   W  the drive's latch still inside its 90 s window at the disconnect: a 12 km/h and a 26 km/h fix share the car
 //      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
@@ -933,9 +935,9 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
     };
     {
       const src = readFileSync(new URL("locationPrivacy.ts", SRC), "utf8");
-      const anchor = "const movingNow = _hydrateDone && _drivingLatched &&";
+      const anchor = "const movingNow = _hydrateDone && latchFresh &&";
       const d = mkdtempSync(join(tmpdir(), "park-rearm-hf7b-")); const f = join(d, "locationPrivacy.base.ts");
-      writeFileSync(f, src.replace(anchor, "const movingNow = _drivingLatched &&"));
+      writeFileSync(f, src.replace(anchor, "const movingNow = latchFresh &&"));
       const r0 = await walkInsideWindow(import(pathToFileURL(f).href + `?i=${++inst}`));
       ok("HF7b-0 NEGATIVE CONTROL (this module without the hydration check in shareablePosition): the walk inside the latch window is shared LIVE", src.includes(anchor) && !!r0 && r0.live.length > 0, JSON.stringify(r0 && { n: r0.live.length, latch: r0.latch }));
       rmSync(d, { recursive: true, force: true });
@@ -993,6 +995,69 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
       const src = readFileSync(new URL("carplay/carDataService.ts", SRC), "utf8");
       const m = /try \{ await hydrateLocationPrivacy\(\); \} catch \{\}\s*\n\s*if \(!_running\) return;[^\n]*\n\s*_privacyReady = true;[\s\S]{0,1200}?\n\s*joinPresence\(\);\n\s*\}\)\(\);/.exec(src);
       ok("HF8c carDataService: `await hydrateLocationPrivacy()` → `_privacyReady = true` → `joinPresence()`, gated only on the service still running", !!m);
+    }
+  }
+  {
+    // HF9 THE SHARE DECISION IS SELF-SUFFICIENT (Codex delta review 2 — its exact sequence): reads fail; Android Auto
+    // asserts and 60 s of driving fixes arm the latch; then 100 s with NO fix and no disconnect; then the reads recover
+    // and hydration succeeds; then shareablePositionAsync of a 3.3 m/s walking position (no noteFix first — map.tsx's
+    // manual refresh). HF9b the ordinary case: reads fine, a phone-only drive latched, 100 s with no fix, then a direct
+    // shareablePosition of a walking position. HF9-0 / HF9b-0 = 7da32366 returning the walk.
+    const hf9 = async (lpP: Promise<LP | null>) => {
+      const lp = await lpP; if (!lp) return null;
+      LOC_V.__os = "android"; LOC_V.__store = {}; LOC_V.__rows = [];
+      LOC_V.__getItem = () => Promise.reject(new Error("storage unavailable"));
+      clock = utc(21, 0, 0);
+      void lp.hydrateLocationPrivacy(); await tick();
+      lp.noteCarConnected(true, "androidauto");
+      let p = north(SPOT, -1500);
+      for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); await tick(); }
+      const latched = lp.privacyDebug().latch;
+      clock += 100 * S;                                              // no fix, no disconnect receipt
+      LOC_V.__getItem = undefined;                                   // the reads recover
+      await lp.hydrateLocationPrivacy(); await tick();
+      const w = north(p, 40);
+      const sh: any = await lp.shareablePositionAsync({ ...w, speed: 3.3, heading: 0 });
+      const out = { latched, live: !!(sh.share && sh.lat === w.lat && sh.lng === w.lng), sh, parked: lp.privacyDebug().parked, latchAfter: lp.privacyDebug().latch };
+      LOC_V.__os = undefined;
+      return out;
+    };
+    const hf9b = async (lpP: Promise<LP | null>) => {
+      const lp = await lpP; if (!lp) return null;
+      clock = utc(21, 20, 0);
+      let p = north(SPOT, -1500);
+      for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+      const drivingLive = (() => { const sh: any = lp.shareablePosition({ ...p, speed: 20, heading: 0 }); return !!(sh.share && sh.lat === p.lat); })();
+      clock += 100 * S;
+      const w = north(p, 40);
+      const sh: any = lp.shareablePosition({ ...w, speed: 3.3, heading: 0 });
+      return { drivingLive, live: !!(sh.share && sh.lat === w.lat && sh.lng === w.lng), sh, parked: lp.privacyDebug().parked };
+    };
+    const old = await lpAt("7da32366");
+    if (old) {
+      const r0 = await hf9(Promise.resolve(old.lp));
+      ok("HF9-0 NEGATIVE CONTROL (7da32366): the walking position is returned LIVE while isParked() says parked", !!r0 && r0.latched && r0.live && r0.parked, JSON.stringify(r0));
+      rmSync(old.dir, { recursive: true, force: true });
+      const old2 = await lpAt("7da32366");
+      LOC_V.__store = {}; await old2!.lp.hydrateLocationPrivacy();
+      const r0b = await hf9b(Promise.resolve(old2!.lp));
+      ok("HF9b-0 NEGATIVE CONTROL (7da32366): a latched phone-only drive, 100 s with no fix → the walk is returned LIVE", !!r0b && r0b.drivingLive && r0b.live, JSON.stringify(r0b));
+      rmSync(old2!.dir, { recursive: true, force: true });
+    } else console.log("  skip HF9-0 / HF9b-0 negative controls: 7da32366 unavailable");
+    const r = await hf9(fresh(false));
+    ok("HF9 failed reads → AA latch → 100 s with no fix → reads recover → shareablePositionAsync(walking) is NOT live, and the stale latch is cleared",
+      !!r && r.latched && !r.live && r.parked && r.latchAfter === false, JSON.stringify(r));
+    const rb = await hf9b(fresh());
+    ok("HF9b the same without any storage fault: a phone-only drive's latch 100 s old does not share a walk (the drive itself did)",
+      !!rb && rb.drivingLive && !rb.live && rb.parked, JSON.stringify(rb));
+    {
+      // HF9c a clock that moved BACKWARDS after a latched drive: the latch's age is negative — expired, not eternal.
+      const lp = await fresh(); clock = utc(21, 40, 0);
+      let p = north(SPOT, -1500);
+      for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+      clock -= 3600 * S;
+      const w = north(p, 40); const sh: any = lp.shareablePosition({ ...w, speed: 3.3, heading: 0 });
+      ok("HF9c after the clock moves back an hour, a walking position is not shared live on the drive's latch", !(sh.share && sh.lat === w.lat && sh.lng === w.lng), JSON.stringify(sh));
     }
   }
   {

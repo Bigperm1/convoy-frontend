@@ -12,13 +12,23 @@
 //
 // privacyNow() — ELAPSED time, for windows whose SAFE direction is "expire" (the head-unit TTL, driving-evidence
 // freshness, the re-arm windows, the hydrate backoff, the save throttles). It never goes backwards, so an expiry is
-// irreversible until a NEW event re-stamps it. Each call advances it by max(Δmonotonic, Δwall):
+// irreversible until a NEW event re-stamps it. It is max(the monotonic total, the wall clock's FORWARD total) plus
+// the rollback penalties:
 //   • performance.now() is monotonic but may PAUSE while the device sleeps (HYPOTHESIS for the RN/Hermes clock on each
 //     platform — unmeasured), and a window must not outlive a sleep, so the wall clock's forward steps count too;
 //   • a wall clock that jumps FORWARD therefore ages everything (safe: things expire sooner);
 //   • a wall clock that moves BACKWARDS by more than a second adds an hour — every window closes (safe: a live drive
-//     re-arms on its next vehicular fix; a rolled-back clock can never reopen a window).
+//     re-arms on its next vehicular fix; a rolled-back clock can never reopen a window) — and logs a bounded
+//     `priv-clock-back` row.
+// The two totals are kept SEPARATELY and compared, never maxed per call (privacy round 11: summing max(Δmono, Δwall)
+// on every call ran 1.70× fast at 0.3 ms spacing, because the two clocks tick at different granularities — at 1.25×
+// a real car's covered/claimed ratio falls to ~0.8 and a re-arm could never prove; park_rearm_test CLK1).
+// ⚠ Not covered (CARPLAY.md §6c residual): a rollback that happens while the device sleeps AND the monotonic clock is
+// paused — both clocks then agree on a short interval and JS cannot see it. The fix is native (build 80): a
+// boot-time clock that counts sleep (Android SystemClock.elapsedRealtime / CLOCK_BOOTTIME, iOS mach_continuous_time).
 // Starts at 1e9 ms so a restored stamp (now − age) stays positive, and 0 keeps meaning "never".
+
+import { logEventReliable } from "./crashBreadcrumb";
 
 function perfNow(): number {
   try {
@@ -28,21 +38,27 @@ function perfNow(): number {
   } catch { return NaN; }
 }
 
-let elapsed = 1e9;
+let monoTotal = 0;        // Σ forward monotonic steps
+let wallFwdTotal = 0;     // Σ forward wall-clock steps
+let penalties = 0;        // Σ rollback penalties
+let clockBackRows = 0;    // `priv-clock-back` rows this process (bounded)
 let lastMono: number | null = null;
 let lastWall: number | null = null;
 
-/** Elapsed ms for privacy windows: never decreases; advances by max(Δmonotonic, Δwall); a backward wall step > 1 s adds
- * an hour (every window closes). See the header. */
+/** Elapsed ms for privacy windows: never decreases; = 1e9 + max(Σ monotonic, Σ forward wall) + an hour per backward
+ * wall step > 1 s (every window closes). See the header. */
 export function privacyNow(): number {
   const m = perfNow();
   const w = Date.now();
-  if (lastWall === null) { lastMono = m; lastWall = w; return elapsed; }
-  const dm = Number.isFinite(m) && lastMono !== null && Number.isFinite(lastMono) ? Math.max(0, m - lastMono) : 0;
+  if (lastWall === null) { lastMono = m; lastWall = w; return 1e9; }
+  if (Number.isFinite(m) && lastMono !== null && Number.isFinite(lastMono) && m > lastMono) monoTotal += m - lastMono;
   const dw = Number.isFinite(w) ? w - lastWall : 0;
-  elapsed += dw < -1_000 ? dm + 3_600_000 : Math.max(dm, dw, 0);
+  if (dw < -1_000) {
+    penalties += 3_600_000;
+    if (clockBackRows < 5) { clockBackRows += 1; try { logEventReliable(`priv-clock-back by=${Math.round(-dw / 1000)}s n=${clockBackRows}`); } catch {} }
+  } else if (dw > 0) wallFwdTotal += dw;
   lastMono = Number.isFinite(m) ? m : lastMono;
   lastWall = Number.isFinite(w) ? w : lastWall;
-  return elapsed;
+  return 1e9 + Math.max(monoTotal, wallFwdTotal) + penalties;
 }
 

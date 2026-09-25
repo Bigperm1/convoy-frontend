@@ -316,23 +316,29 @@ async function _hydrateOnce(): Promise<string> {
           if (hdgOk) _hdgTrack = { obs: { deg: p.hdg, at: p.t, lat: p.lat, lng: p.lng }, creepM: 0, from: null, frozen: true, heldAt: null };
           _lastSpotMeta = { t: p.t, att: p.att === 1 ? 1 : 0, mv: typeof p.mv === "number" ? p.mv : 0 };
           _carSpotAt = p.t;
-          // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
-          // flag when the persisted spot was adopted. `hu` on disk can only have survived
-          // if nothing drove since the disconnect (drivers rewrite the key without it).
-          // 2026-09-25: never over a head unit that is attached NOW (a cold CarPlay connect can land before this
-          // read resolves — the connect already cleared yesterday's witness and must win), and adopting a witness
-          // applies the witness's own rules: the drive's latch drops (a fast fix that raced this read must not keep
-          // sharing live) and the re-arm proof starts from nothing (Jeff: "it should not follow me when i discconect
-          // from car play"). Gate: park_rearm_test K2/K3, S2.
-          if (p?.hu && !_carConnected) {
-            _parkWitnessed = true;
-            _drivingLatched = false;
-            _latchProvisional = false;
-            _parkRearm.reset();
-          }
         } else {
           _spotDrop = v.why;
         }
+      }
+      // ── THE WITNESS IS NOT THE PIN (privacy round 11, 2026-09-25) ─────────────────────────────────────────────────
+      // Jeff: "it should not follow me when i discconect from car play... fix it and lock it." The witnessed park used
+      // to be restored only when the PIN was adoptable, so a park older than SPOT_MAX_AGE_MS (24 h — or a device clock
+      // moved forward a day) came back with no witness: one 26 km/h walking fix armed the latch, the walk was shared
+      // live and written as the car spot (park_rearm_test HF10a/HF10b; reproduced by the lead on 8ffdd2ec). And a
+      // process that died while a head unit was attached left `att=1` and no `hu` — never witnessed, same leak (HF10c).
+      // Now the record's age, its speed and the driving stamp decide only whether the PIN is shown; whether the
+      // privacy guard applies is decided by the record alone, with no date in it: `hu=1` (a disconnect was heard) or
+      // `att=1` (the car feed was attached at the last save and no disconnect was ever seen) restores the witnessed
+      // park — the re-arm proof is required to go live again (it handles a missing spot: spotFar). Never over a head
+      // unit that is attached NOW (a cold connect can land before this read — it already cleared the witness and must
+      // win). Adopting a witness applies its own rules: the drive's latch drops and the proof starts from nothing.
+      // Cost, accepted: after such a relaunch a phone-only drive pays the ≥ 15 s / 300 m proof before it is live.
+      // Gate: park_rearm_test HF10a–d, K2/K3, S2.
+      if (p && typeof p === "object" && (p.hu === 1 || p.att === 1) && !_carConnected) {
+        _parkWitnessed = true;
+        _drivingLatched = false;
+        _latchProvisional = false;
+        _parkRearm.reset();
       }
     }
     // 🔒 NAV-LOCK end priv-hydrate-spot-adopt

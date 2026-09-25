@@ -64,7 +64,11 @@
 //      whether or not a fix ran since, through the async path too (HF9-0 / HF9b-0 = 7da32366 sharing the walk);
 //      HF9c / HF9d / HF9e clock jumps: back an hour with walking fixes through noteFix, forward and back, and a lost
 //      Android Auto disconnect whose TTL a backward jump would revive (HF9c-0 / HF9e-0 = 90dd1484); V8 the re-arm
-//      rule across clock jumps (V8b-0 = without its restart); HF9f a stale latch is expired before noteFix reads it —
+//      rule across clock jumps (V8b-0 = without its restart); HF10a–d the witness is restored from the record alone —
+//      a park 25 h old, a device clock +25 h, a process that died with CarPlay attached — and a drive after it still
+//      goes live (HF10a-0 / HF10c-0 = 36c17f1e); KF1 the paused-monotonic residual, pinned and bounded; CLK1 the privacy
+//      clock does not drift with dense calls (CLK1-0 = 36c17f1e), CLK2 a rollback logs a bounded row; HF9f a stale latch
+//      is expired before noteFix reads it —
 //      the first fast fix after it is not recorded as the car spot (HF9f-0 = 90dd1484); HF9g an expired Android Auto
 //      attachment stays expired when the device clock is set back into its window (HF9g-0 = b286ad9b); PT a property
 //      test — random device-clock jumps (±1 h, ±24 h, repeated) never produce a live walking share or a spot write
@@ -108,8 +112,8 @@ registerHooks({
 let clock = 0;
 let wallSkew = 0;
 Date.now = () => clock + wallSkew;
-let monoT = 0, monoLast = 0;
-(globalThis as any).performance.now = () => { if (clock > monoLast) monoT += clock - monoLast; monoLast = clock; return monoT; };
+let monoT = 0, monoLast = 0, monoPaused = false;   // monoPaused: the monotonic clock stops (a device sleep — KF1)
+(globalThis as any).performance.now = () => { if (!monoPaused && clock > monoLast) monoT += clock - monoLast; monoLast = clock; return monoT; };
 const utc = (h: number, m: number, s: number, ms = 0) => Date.UTC(2026, 8, 25, h, m, s, ms);
 const S = 1000;
 
@@ -1287,6 +1291,141 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
     const r = await walkAfterFailedRead(fresh(false), (k) => { if (k === SPOT_KEY) reads++; return Promise.reject(new Error("storage unavailable")); });
     ok("HF5 a read that never succeeds: fail-closed for 60 s, retried at most every 5 s, at most 5 rows", !!r && r.live.length === 0 && r.latch === false && r.spot == null && r.diskIntact && reads >= 2 && reads <= 13 && r.rows.length === 5,
       JSON.stringify(r && { live: r.live, reads, rows: r.rows.length, spot: r.spot }));
+  }
+  {
+    // ── HF10 · THE WITNESS IS NOT THE PIN (privacy round 11, the lead's reproductions on 8ffdd2ec) ─────────────────────
+    // A CarPlay drive ending at SPOT (process A), then a COLD START (process B) with A's disk: Jeff's 09-25 walk shape
+    // (1.4, 1.4, 2.8 m/s, 26 km/h, 12 km/h, 1.9 m/s, 12 km/h, 1.4 m/s; 4 s apart). Never live, never the car spot.
+    //   HF10a the park is 25 h old (the pin is past SPOT_MAX_AGE_MS: refused, `stale`) — the witness must survive;
+    //   HF10a+ control: 23 h — pinned and adopted, as before;
+    //   HF10b 10 min later, but the DEVICE clock moved +25 h (the wall-clock age gate calls it stale);
+    //   HF10c the process DIED while CarPlay was attached (no disconnect heard: att=1, no hu) — relaunch 5 min later;
+    //   HF10d …and a real phone-only drive-away after that relaunch still goes live (it pays the re-arm proof).
+    // HF10a-0 / HF10c-0 = 36c17f1e (the witness restored only with the pin) sharing the walk and writing the spot.
+    const parkA = async (lpP: Promise<LP | null>, witness: boolean) => {
+      const lp = await lpP; if (!lp) return null;
+      LOC_V.__store = {}; wallSkew = 0; clock = utc(9, 0, 0);
+      await lp.hydrateLocationPrivacy();
+      lp.noteCarConnected(true, "carplay");
+      let p = north(SPOT, -1200);
+      for (let i = 0; i < 60; i++) { clock += S; p = north(SPOT, -1200 + 20 * (i + 1)); lp.noteFix(p.lat, p.lng, 20, 0); }
+      for (let i = 0; i < 20; i++) { clock += S; lp.noteFix(SPOT.lat, SPOT.lng, 0, null); }
+      if (witness) lp.noteCarConnected(false, "carplay");      // else: the process dies here, attached
+      return { ...(LOC_V.__store as Record<string, string>) };
+    };
+    const coldWalk = async (lpP: Promise<LP | null>, disk: Record<string, string>) => {
+      const lp = await lpP; if (!lp) return null;
+      LOC_V.__store = { ...disk };
+      await lp.hydrateLocationPrivacy();
+      const hydrated = { hu: lp.parkEndedByHeadUnit(), spotDrop: lp.privacyDebug().spotDrop, pin: !!lp.carSpot() };
+      const seq = [1.4, 1.4, 2.8, kmh(26), kmh(12), 1.9, kmh(12), 1.4];
+      let p = north(SPOT, 20); const live: string[] = []; const spotWalker: string[] = [];
+      for (const v of seq) {
+        clock += 4 * S; p = north(p, 6);
+        lp.noteFix(p.lat, p.lng, v, null);
+        const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+        if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`${(v * 3.6).toFixed(0)}kmh`);
+        const sp = lp.carSpot(); if (sp && sp.lat === p.lat) spotWalker.push(`${(v * 3.6).toFixed(0)}kmh`);
+      }
+      const onDisk = LOC_V.__store[SPOT_KEY] ?? "";
+      return { hydrated, live, spotWalker, diskAtSpot: onDisk.includes(String(SPOT.lat)), lp };
+    };
+    const cases: [string, boolean, () => void][] = [
+      ["HF10a a witnessed park 25 h old", true, () => { clock += 25 * 3600 * S; }],
+      ["HF10b a witnessed park 10 min old, the device clock moved +25 h", true, () => { clock += 600 * S; wallSkew = 25 * 3600 * S; }],
+      ["HF10c the process died while CarPlay was attached (att=1, no hu), relaunch 5 min later", false, () => { clock += 300 * S; }],
+    ];
+    const base = await lpAt("36c17f1e");
+    if (base) {
+      for (const [name, witness, gap] of [cases[0], cases[2]]) {
+        const disk = await parkA(fresh(), witness); gap();
+        const b = await lpAt("36c17f1e");
+        const r0 = await coldWalk(Promise.resolve(b!.lp), disk!);
+        ok(`${name.slice(0, 5)}-0 NEGATIVE CONTROL (36c17f1e): no witness after the cold start — the walk is shared LIVE and becomes the car spot`, !!r0 && r0.hydrated.hu === false && r0.live.length > 0 && r0.spotWalker.length > 0, JSON.stringify(r0 && { h: r0.hydrated, live: r0.live, spotWalker: r0.spotWalker }));
+        rmSync(b!.dir, { recursive: true, force: true }); wallSkew = 0;
+      }
+      rmSync(base.dir, { recursive: true, force: true });
+    } else console.log("  skip HF10a-0 / HF10c-0 negative controls: 36c17f1e unavailable");
+    {
+      const disk = await parkA(fresh(), true); clock += 23 * 3600 * S;
+      const r = await coldWalk(fresh(false), disk!);
+      ok("HF10a+ control: a witnessed park 23 h old — witness AND pin restored, the walk never live, never the spot", !!r && r.hydrated.hu && r.hydrated.pin && r.live.length === 0 && r.spotWalker.length === 0, JSON.stringify(r && { h: r.hydrated, live: r.live, spotWalker: r.spotWalker }));
+    }
+    let hf10c: any = null;
+    for (const [name, witness, gap] of cases) {
+      const disk = await parkA(fresh(), witness); gap();
+      const r = await coldWalk(fresh(false), disk!);
+      ok(`${name}: the witness is restored without the pin; the walk is never live and never becomes the car spot`,
+        !!r && r.hydrated.hu === true && r.hydrated.pin === false && r.live.length === 0 && r.spotWalker.length === 0 && r.diskAtSpot,
+        JSON.stringify(r && { h: r.hydrated, live: r.live, spotWalker: r.spotWalker, diskAtSpot: r.diskAtSpot }));
+      if (!witness) hf10c = r;
+      wallSkew = 0;
+    }
+    if (hf10c) {
+      // HF10d the same relaunched process, 10 min later: a real drive-away (1 m/s² to 40 km/h), phone only.
+      const lp = hf10c.lp as LP; clock += 600 * S; let pos = north(SPOT, 70); let at: number | null = null;
+      for (let i = 0; i <= 90 && at == null; i++) { clock += S; const v = Math.min(i * 1.0, 11); pos = north(pos, v); lp.noteFix(pos.lat, pos.lng, v, 0); if (!lp.parkEndedByHeadUnit()) at = i; }
+      ok("HF10d after that relaunch a real phone-only drive-away re-arms (the accepted cost: the proof) within 40 s", at != null && at <= 40, `re-armed at +${at} s`);
+    }
+  }
+  {
+    // ── KF1 · KNOWN RESIDUAL (CARPLAY.md §6c #10): a paused monotonic clock AND a device-clock rollback inside the same
+    // sleep. Lost Android Auto disconnect; the device sleeps 2 h with performance.now() paused and its clock is set back
+    // 1 h 59 min 50 s during the sleep: both clocks now say ~10 s passed, and the attachment (asserted 60 s before the
+    // sleep) looks alive. JS cannot see this; the fix is native (a boot-time clock that counts sleep). This pins the
+    // residual — KF1a flags when it stops reproducing (update the docs) — and KF1b bounds it: the revived attachment
+    // ends within its remaining 90 s of counted time.
+    const lp = await fresh(); LOC_V.__os = "android"; wallSkew = 0; clock = utc(4, 0, 0);
+    lp.noteCarConnected(true, "androidauto");
+    let p = north(SPOT, -1200);
+    for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+    monoPaused = true; clock += 2 * 3600 * S; wallSkew -= (2 * 3600 - 10) * S; (globalThis as any).performance.now(); monoPaused = false;
+    const w = north(p, 40); lp.noteFix(w.lat, w.lng, 1.4, null);
+    const sh: any = lp.shareablePosition({ ...w, speed: 1.4, heading: 0 });
+    const revived = !!(sh.share && sh.lat === w.lat) && lp.headUnitAttachedNow();
+    let endedAfter: number | null = null; let q = w;
+    for (let i = 1; i <= 90 && endedAfter == null; i++) { clock += S; q = north(q, 1.4); lp.noteFix(q.lat, q.lng, 1.4, null); if (!lp.headUnitAttachedNow()) endedAfter = i; }
+    LOC_V.__os = undefined; wallSkew = 0;
+    ok("KF1a KNOWN RESIDUAL #10 still reproduces (paused monotonic + rollback in one sleep revives a lost AA attachment) — if this flips, update CARPLAY.md §6c", revived, JSON.stringify({ revived }));
+    ok("KF1b …and the revived attachment ends within its remaining counted 90 s", endedAfter != null && endedAfter <= 30, `ended after ${endedAfter} s of awake walking`);
+  }
+  {
+    // ── CLK · the privacy clock itself (fresh instances of src/privacyClock.ts, so the suite's shared one is untouched) ──
+    // CLK1 DRIFT: calls 0.3 ms and 1.7 ms apart (the monotonic clock sub-millisecond, the wall clock in whole ms) must not
+    // run the clock fast — summing max(Δmono, Δwall) per call ran 1.70× / 1.12× (CLK1-0 = 36c17f1e's clock).
+    // CLK2 a rollback of more than 1 s logs `priv-clock-back`, at most 5 rows per process.
+    const perf = (globalThis as any).performance; const harnessPerf = perf.now; const harnessDate = Date.now;
+    const drift = async (url: string, stepMs: number, n: number) => {
+      const C: any = await import(url);
+      let tt = 1_000_000; perf.now = () => tt; Date.now = () => Math.floor(tt);
+      const e0 = C.privacyNow(); for (let i = 0; i < n; i++) { tt += stepMs; C.privacyNow(); }
+      const ratio = (C.privacyNow() - e0) / (n * stepMs);
+      perf.now = harnessPerf; Date.now = harnessDate;
+      return ratio;
+    };
+    const cur = (k: string) => new URL(`privacyClock.ts?clk=${k}${++inst}`, SRC).href;
+    const r03 = await drift(cur("a"), 0.3, 20_000), r17 = await drift(cur("b"), 1.7, 5_000), r60 = await drift(cur("c"), 1000 / 60, 3_000);
+    let old: string | null = null;
+    try { old = execFileSync("git", ["show", "36c17f1e:frontend/src/privacyClock.ts"], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+    if (old) {
+      const d = mkdtempSync(join(tmpdir(), "privclock-old-")); const f = join(d, "privacyClock.old.ts"); writeFileSync(f, old);
+      const o03 = await drift(pathToFileURL(f).href, 0.3, 20_000);
+      ok("CLK1-0 NEGATIVE CONTROL (36c17f1e's clock): calls 0.3 ms apart run it fast", o03 >= 1.2, `×${o03.toFixed(3)}`);
+      rmSync(d, { recursive: true, force: true });
+    } else console.log("  skip CLK1-0 negative control: 36c17f1e unavailable");
+    ok("CLK1 the privacy clock does not drift with dense calls (0.3 ms, 1.7 ms, 60 Hz spacing: within 1 %)", Math.abs(r03 - 1) <= 0.01 && Math.abs(r17 - 1) <= 0.01 && Math.abs(r60 - 1) <= 0.01, `×${r03.toFixed(4)} ×${r17.toFixed(4)} ×${r60.toFixed(4)}`);
+    {
+      const C: any = await import(cur("d"));
+      let tt = 5_000_000, wall = 5_000_000; perf.now = () => tt; Date.now = () => wall;
+      LOC_V.__rows = [];
+      C.privacyNow(); const e0 = C.privacyNow();
+      tt += 1000; wall -= 2000; const e1 = C.privacyNow();     // the device clock set back 2 s
+      for (let i = 0; i < 9; i++) { tt += 1000; wall -= 5000; C.privacyNow(); }
+      tt += 1000; wall -= 500; C.privacyNow();                   // a half-second step back: no penalty, no row
+      perf.now = harnessPerf; Date.now = harnessDate;
+      const rows = (LOC_V.__rows as string[]).filter((r) => r.startsWith("priv-clock-back"));
+      ok("CLK2 a device-clock rollback closes every window (+1 h) and logs `priv-clock-back`, bounded at 5 rows", e1 - e0 >= 3_600_000 && rows.length === 5 && rows[0] === "priv-clock-back by=2s n=1", JSON.stringify({ jump: e1 - e0, rows }));
+    }
   }
 }
 

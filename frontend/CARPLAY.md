@@ -305,9 +305,11 @@ poi7m7-227888 `draw-cmp … latch=1 parked=1 hu=0` 282 s after `carplay-disconne
 **⏱ The privacy clock (Codex delta review 4 — the clock class, closed).** Every in-process privacy window — the Android
 head-unit TTL, driving-evidence freshness (`drivingEvidenceFresh`), the 90 s hysteresis, the re-arm proof's windows, the
 hydrate backoff, the save throttles — is measured on `src/privacyClock.ts` `privacyNow()`: elapsed time that never runs
-backwards and advances by max(Δmonotonic `performance.now()`, Δwall) per call (so a sleep still counts even if the
-monotonic clock pauses — HYPOTHESIS per platform, unmeasured); a wall clock that jumps forward ages everything, and one
-set BACK by more than a second adds an hour, closing every window. An expiry is therefore irreversible until a NEW event
+backwards, = max(Σ monotonic `performance.now()` steps, Σ forward wall-clock steps) — the two totals kept separately,
+never maxed per call (round 11: per-call max ran 1.70× fast at 0.3 ms call spacing; `park_rearm_test` CLK1) — so a sleep
+still counts even if the monotonic clock pauses (HYPOTHESIS per platform, unmeasured); a wall clock that jumps forward
+ages everything, and one set BACK by more than a second adds an hour, closing every window, and logs a bounded
+`priv-clock-back by=<s> n=<k>` row (5 per process; CLK2). An expiry is therefore irreversible until a NEW event
 (an assertion, a vehicular fix under the latch rules, a proven re-arm). The wall clock is kept only for what is written
 to disk (the spot's `t`, `LAST_DRIVING_KEY`), converted once at hydrate with future-dated or too-old stamps restoring
 nothing. The car-feed settle rule uses plain monotonic time (`carFeedOwner.settleNow`, and map.tsx's `subAt`), whose
@@ -318,6 +320,14 @@ random device-clock jumps ±1 h / ±24 h / ±1 min / −2 min / −30 s, sometim
 no spot write after a witnessed or a lost disconnect; a real drive stays live on every fix; PT-0 = b286ad9b leaking on
 5 of 30), PTd; `car_feed_leak_test` S1.
 
+**The witness is not the pin (round 11).** At hydrate the persisted record's age, its speed and the driving stamp decide
+only whether the PIN is shown; the witnessed park is restored from the record alone, with no date in the decision:
+`hu=1` (a disconnect was heard) or `att=1` (the car feed was attached at the last save and no disconnect was ever seen —
+the process died mid-drive) restores it unless a head unit is attached now. It used to ride on pin adoption, so a park
+older than 24 h (or a device clock moved a day forward) and any iOS process death mid-CarPlay came back unwitnessed and
+one 26 km/h walking fix shared the walk and wrote it as the spot (`park_rearm_test` HF10a–c; HF10a-0 / HF10c-0 =
+36c17f1e). Cost: after such a relaunch a phone-only drive pays the re-arm proof (HF10d: +35 s).
+
 **Documented residuals (privacy, 2026-09-25 — anything later that is not a NEW class joins this list):**
 1. GPS alone cannot tell slow traffic from a noisy brisk walker or drift (0–20 / 200 per white-noise canyon set;
    σv 2–3 m/s walkers, runners, cyclists, buses, trains un-pin) — the fix is the build-80 motion-activity item below.
@@ -325,13 +335,23 @@ no spot write after a witnessed or a lost disconnect; a real drive stays live on
 3. A LOST Android Auto disconnect (didDisconnect and `op=hold on=0` both lost) keeps the car feed (the 'androidauto'
    lock) alive: its dead-man probe reads the same session flag. Needs a liveness signal that survives both being lost
    (the phone watcher has its own belt, above; the privacy gate uses the 90 s TTL).
-4. After such a lost disconnect the park is unwitnessed: once the TTL lapses, the ordinary one-fast-fix rule applies.
+4. After such a lost disconnect, IN THE SAME PROCESS, the park is unwitnessed: once the TTL lapses, the ordinary
+   one-fast-fix rule applies. (After a relaunch, a last save made while attached — `att=1` — now restores a witness.)
 5. While storage reads keep failing, a drive after the Android TTL shares the head unit's last spot, not live.
 6. A device-clock rollback costs a drive its latch until the next vehicular fix and restarts a re-arm proof (PTd).
+   Measured on the lead's scripts (round 11): steps of −2 s every 30 s, or −5 s every 45 s or less often, leave a
+   witnessed-park drive-away at +31–32 s; −5 s every 30 s delays it to +56 s. Accepted.
 7. The parked-heading tracker (`carSpotTrust.headingTrackStep`) stays on wall time — it chooses the marker's facing
    only, and its observation is restored from the spot's persisted `t`.
 8. JS cannot guarantee native GPS teardown (expo-location start/remove race) — the build-80 native item below.
 9. Not verified on a device or a head unit (below).
+10. A device-clock ROLLBACK that happens while the device sleeps AND `performance.now()` is paused: both clocks then
+    agree on a short interval, and a lost Android Auto attachment can look alive for the rest of its 90 s — a walking
+    fix shared as "attached" (`park_rearm_test` KF1a pins it; KF1b bounds it: the revival ends within the remaining
+    counted 90 s — 20 s in the model). JS cannot see it with two clocks that both lie. Build 80 (native): expose a
+    boot-time clock that counts sleep — Android `SystemClock.elapsedRealtime()` (CLOCK_BOOTTIME), iOS
+    `mach_continuous_time()` — and use it in `privacyNow()`. Trigger HYPOTHESIS (whether performance.now pauses in sleep
+    on each platform is unmeasured).
 
 **Receipt for the Android Auto cold-start guard** (the mount starts a session only once native's hold receipt said
 "alive"; SELECT by the lead, 2026-09-25): across the 21 Android instances on runtime 1.29.0 in 14 days that logged

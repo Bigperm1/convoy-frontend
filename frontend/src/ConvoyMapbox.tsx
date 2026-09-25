@@ -3402,9 +3402,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // emitted a row per change. Rows inside 2 s of the last one are DROPPED, never queued —
   // the 60 s forced row reports whatever state it settled in.
   const camModeAtRef = useRef(0);
+  // `hide=` (2026-09-24): Ghost mode (settings.avatarMode) drops the self entry from `cars`, so <SelfCarModel> —
+  // the ONLY thing that pushes the lockstep camera — is never mounted, while every gate above still reads
+  // lockstep=1. The iPhone 16 Pro sim sat in Ghost for a day and logged `lockstep=1` with zero `cam-probe`
+  // rows; one A/B run (ghost off → cam-probe 8 s after launch, ghost on → none) settled it. hide=1 says
+  // "nobody is driving" without a query into settings.
   useEffect(() => {
     const emit = (force: boolean) => {
-      const key = `view=${mapView} hu=${headingUp ? 1 : 0} foll=${followUser ? 1 : 0} lock=${coldLockDone ? 1 : 0} places=${placesShown ? 1 : 0} ready=${readyRef.current ? 1 : 0} lockstep=${lockReadyRef.current ? 1 : 0} nav=${navigationActive ? 1 : 0}`;
+      const key = `view=${mapView} hu=${headingUp ? 1 : 0} foll=${followUser ? 1 : 0} lock=${coldLockDone ? 1 : 0} places=${placesShown ? 1 : 0} ready=${readyRef.current ? 1 : 0} lockstep=${lockReadyRef.current ? 1 : 0} nav=${navigationActive ? 1 : 0} hide=${hideSelfMarker ? 1 : 0}`;
       if (!force && key === camModeLastRef.current) return;
       const now = Date.now();
       if (now - camModeAtRef.current < 2000) return;
@@ -3416,7 +3421,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
     const id = setInterval(() => emit(true), 60_000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapView, headingUp, followUser, coldLockDone, placesShown, navigationActive]);
+  }, [mapView, headingUp, followUser, coldLockDone, placesShown, navigationActive, hideSelfMarker]);
   // LIVE camera target, read through a STABLE ref. The rAF lockstep's step() closure
   // is frozen for the life of an ease and, during continuous driving, never restarts
   // (a new fix only updates anim.current, not the loop) — so a getCam that closed over

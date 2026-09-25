@@ -70,6 +70,12 @@ hierarchy dump or by eye in the screenshot) gives the exact `lead`, `cut+`, `lag
   linking config — so reach Settings through the logo menu (`logo-menu-btn` → Settings row) and scroll.
   The grammar lives in `/Applications/Xcode-beta.app/Contents/PlugIns/IDEDeviceInteraction.framework`
   (`strings … | grep components`), not in any skill file on disk.
+* **Ghost mode kills the phone's lockstep camera on the sim — and in the field (2026-09-24).** `settings.avatarMode`
+  = `ghost` makes map.tsx pass `hideSelfMarker`, ConvoyMapbox then builds no self entry, `<SelfCarModel>` never
+  mounts, and it is the ONLY thing that pushes the heading-up camera — so the map never follows and no car draws,
+  while `cam-mode` still prints `lockstep=1`. The 16 Pro sim sat in Ghost from the 09-23 menu check to 09-24 18:25
+  and every "why does the phone pump never run on the sim" hour went into that. Check the setting BEFORE reading
+  any camera result (section "Phone lockstep camera on the sim" below); `cam-mode … hide=1` now says it in one row.
 
 ## Corner-release gate (numeric, seconds)
 
@@ -327,3 +333,54 @@ per frame; the old single-source ribbon drifted with the ground and snapped back
 Measured 2026-09-18 (old → near/far split): 54 km/h frames moving >2 px **206 → 0**, max 5.8 → 1.1 px; 97 km/h
 **107 → 5**, max 4.2 → 2.1 px. `ribbon_gap.py` (a threshold edge) is noisier — the glow's fade steps flip it by a
 whole fade piece — use it for the gap's LEVEL, not its jitter. Numeric gate: `ribbon_near_test.mts`.
+
+## Phone lockstep camera on the sim (2026-09-24) — it works; Ghost mode was the trap
+
+The phone's heading-up chase camera is pushed by `SelfCarModel.pushCam` (ConvoyMapbox), the same 60 fps loop
+that eases the car. On 2026-09-24 the iPhone 16 Pro sim (`D0487F47…`, build 78, bundle-swapped) logged
+`cam-mode surf=phone … foll=1 lock=1 ready=1 lockstep=1` and NOT ONE `cam-probe surf=phone` row, the map stayed
+at the crew overview after follow re-engaged, and no self car ever drew. Existing telemetry bounded it: the same
+sim HAD logged `cam-probe surf=phone` on 09-03/10/16/18/19/20/22/23, and its `self-lift q` rows (the lift query
+runs inside SelfCarModel) stopped for good at 09-23 17:51 — the session that "sim-verified the Ghost switch both
+ways" (memory `menu-reorganization-2026-09-23`). The sim's `convoy.settings.v3` read `avatarMode = 'ghost'`.
+
+A/B on the same bundle, same stream (`simctl location start --speed=14` on W Georgia St, started BEFORE launch),
+75 s each, rows under handle Jeff / os 18.6 / `launch_kind=updates-disabled`:
+
+| run | avatarMode | cam-probe | cam-apply | draw-cmp | app moving? | screenshot |
+|-----|------------|-----------|-----------|----------|-------------|------------|
+| A   | visible    | 1 (8 s after launch: `z=16.08 spd=50 hdg=-62`) | 1 | 3 | yes (8 speed rows) | 3D car at the padded centre, map heading-up |
+| B   | ghost      | 0 | 0 | 0 | yes (8 speed rows, 50 in a 30) | no car, map still on the launch block |
+
+So: the 3D GLB renders on the simulator (Metal is fine — the only Mapbox line is the benign "No fragment
+function present, building pipeline with only vertex shader"), `cameraRef` / `getCam` / `readyRef` are never
+consulted because the component that owns them is not mounted, and the frame pacer (`39cdbc34`, which the
+first "cam-probe stopped" instance coincided with) is exonerated — run A ran that code.
+
+### Recipe — a phone-camera receipt on the sim
+
+```bash
+U=D0487F47-9C35-4E97-82AB-42C2E2362CE4
+xcrun simctl terminate $U com.sw0rdfisch.convoy
+# 1. Ghost OFF (app terminated; the settings file is named by the md5 of the key)
+DATA=$(xcrun simctl get_app_container $U com.sw0rdfisch.convoy data)
+F="$DATA/Library/Application Support/com.sw0rdfisch.convoy/RCTAsyncLocalStorage_V1/$(python3 -c "import hashlib;print(hashlib.md5(b'convoy.settings.v3').hexdigest())")"
+python3 -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['avatarMode']='visible';d['avatarLive']=True;json.dump(d,open(p,'w'));print(d['avatarMode'])" "$F"
+# 2. Stream BEFORE launch (a start issued while the app is up delivers nothing — see § Traps)
+xcrun simctl location $U clear
+xcrun simctl location $U start --speed=14 --interval=1 49.28270,-123.12070 49.28620,-123.12760 49.28980,-123.13480 49.29230,-123.13920
+xcrun simctl launch $U com.sw0rdfisch.convoy
+sleep 40; xcrun simctl io $U screenshot /tmp/phone_chase.png
+```
+
+Receipt = `cam-probe surf=phone` within ~10 s of launch (the first push always logs one), then `cam-apply` /
+`draw-cmp surf=phone`, and the car at the padded centre with the streets rotated. A `cam-mode … hide=1` row
+means Ghost is on: fix the setting, do not debug the camera. What this still cannot do: a route (needs a tap —
+the Claude iOS-Simulator MCP or an iOS 27 sim with the Xcode MCP, see § Traps), so the pitched nav chase and
+the return-fly `cam-return-fly surf=phone` receipt need a Crew tap + 20 s on a moving sim with Ghost off.
+
+Field consequence (VERIFIED on the bench, not yet seen in a tester's rows): any driver with Ghost on and the
+map in heading-up has NO chase camera on the phone — native follow is off in heading-up by design
+(`followUserLocation={… && !headingUp}`), and the lockstep driver is unmounted. CarPlay/Android Auto are not
+affected (CarMapView has no ghost gate). The fix sits inside 🔒 `mbx-self-pos-parked-live` / `mbx-jsx-selfcar-model`
+(keep the self entry, hide the marker with SelfCarModel's `opacity` prop) and waits for Jeff's say-so.

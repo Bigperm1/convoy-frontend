@@ -56,7 +56,10 @@
 //      a read that hangs): walking fixes with 26 / 29 km/h readings are never shared live and write nothing, the saved
 //      witness is adopted once a retry reads it (>= 5 s apart), the record on disk is byte-identical, and a bounded
 //      `priv-hydrate` row names each outcome (HF0 = 0255f36a sharing the walk live and overwriting the record); HF5 the
-//      retry backoff; HF6 a hung read settling after the retry changes nothing.
+//      retry backoff; HF6 a hung read settling after the retry changes nothing; HF7 Android Auto's 90 s TTL lapsing
+//      (no disconnect heard) while reads fail — the head unit's latch never shares a walk (HF7-0 = 47db1aca sharing
+//      it; HF7b isolates shareablePosition's hydration check, HF7b-0 = without it); HF8 a caller awaiting a HUNG attempt is released when a retry succeeds, and within 10 s when none does
+//      (HF8-0 = 47db1aca never releasing it), and carDataService joins presence after the await, hydrated or not.
 //   W  the drive's latch still inside its 90 s window at the disconnect: a 12 km/h and a 26 km/h fix share the car
 //      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
@@ -68,7 +71,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SRC = new URL("../../src/", import.meta.url);
 const js = (body: string) => "data:text/javascript," + encodeURIComponent(body);
-const EMPTY = js(`const f = () => {}; export const Platform = { OS: "ios", select: (o) => o.ios ?? o.default };
+const EMPTY = js(`const f = () => {}; export const Platform = { get OS() { return globalThis.__os ?? "ios"; }, select: (o) => o.ios ?? o.default };
   export const useEffect = f, useState = (v) => [v, f], useRef = (v) => ({ current: v }), useCallback = (x) => x;`);
 // AsyncStorage reads come from globalThis.__store (scenario H); writes are recorded there too.
 // getItem waits for globalThis.__delay when a test sets it (a slow storage read at a relaunch — section Y).
@@ -862,6 +865,135 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
     const rowsAfter = (LOC_V.__rows as string[]).length;
     ok("HF6 a read that hung and settles after a retry succeeded changes nothing (no second adoption, no row)", !!r && r.hu === true && rowsAfter === lpState!.rows && r.rows.filter((x) => x.includes("ok=1")).length === 1,
       JSON.stringify({ before: lpState, rowsAfter }));
+  }
+  // A module at a given commit (its relative imports resolve to this worktree's, which 47db1aca shares).
+  const lpAt = async (rev: string): Promise<{ lp: LP; dir: string } | null> => {
+    let src: string | null = null;
+    try { src = execFileSync("git", ["show", `${rev}:frontend/src/locationPrivacy.ts`], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+    if (!src) return null;
+    const dir = mkdtempSync(join(tmpdir(), `park-rearm-${rev}-`)); const f = join(dir, "locationPrivacy.base.ts"); writeFileSync(f, src);
+    return { lp: await import(pathToFileURL(f).href + `?i=${++inst}`), dir };
+  };
+  {
+    // HF7 ANDROID TTL WITH FAILING READS (Codex delta review, reproduced there on 47db1aca): every read rejects; an
+    // Android Auto session asserts, 60 s of driving at 20 m/s (shared live — the head unit), then NO disconnect is
+    // heard; 100 s after the last driving fix the phone is walking at 3.3 m/s, then 26 km/h, 12 km/h, for 3 min.
+    const run = async (lpP: Promise<LP | null>) => {
+      const lp = await lpP; if (!lp) return null;
+      LOC_V.__os = "android"; LOC_V.__store = {}; LOC_V.__rows = [];
+      LOC_V.__getItem = () => Promise.reject(new Error("storage unavailable"));
+      clock = utc(23, 30, 0);
+      void lp.hydrateLocationPrivacy(); await tick();
+      lp.noteCarConnected(true, "androidauto");
+      let p = north(SPOT, -1500); let driveLive = false;
+      for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); await tick(); const sh: any = lp.shareablePosition({ ...p, speed: 20, heading: 0 }); if (sh.share && sh.lat === p.lat) driveLive = true; }
+      const latchAtEnd = lp.privacyDebug().latch;
+      clock += 100 * S;
+      const live: string[] = [];
+      for (let i = 0; i < 180; i++) {
+        clock += S; const v = i % 30 === 5 ? kmh(26) : i % 30 === 6 ? kmh(12) : 3.3; p = north(p, v);
+        lp.noteFix(p.lat, p.lng, v, null); await tick();
+        const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+        if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`+${i}s@${(v * 3.6).toFixed(0)}`);
+      }
+      const out = { driveLive, latchAtEnd, live, latchAfter: lp.privacyDebug().latch, parked: lp.privacyDebug().parked };
+      LOC_V.__getItem = undefined; LOC_V.__os = undefined;
+      return out;
+    };
+    const old = await lpAt("47db1aca");
+    if (old) {
+      const r0 = await run(Promise.resolve(old.lp));
+      ok("HF7-0 NEGATIVE CONTROL (47db1aca): after the TTL lapses the head unit's latch shares the walk LIVE", !!r0 && r0.driveLive && r0.live.length > 0, JSON.stringify(r0 && { live: r0.live.slice(0, 5), n: r0.live.length, latch: r0.latchAfter }));
+      rmSync(old.dir, { recursive: true, force: true });
+    } else console.log("  skip HF7-0 negative control: 47db1aca unavailable");
+    const r = await run(fresh(false));
+    ok("HF7 Android Auto TTL lapse with failing reads: the drive is live while attached, the walk after it never is (the latch expires, sharing needs a read)",
+      !!r && r.driveLive && r.latchAtEnd && r.live.length === 0 && r.latchAfter === false, JSON.stringify(r));
+    // HF7b the SHARING rule alone: the TTL lapses 90 s into a 150 s drive (no further assertion), so the latch the head
+    // unit armed is still inside its 90 s window when the walk starts 10 s after the drive — only `shareablePosition`
+    // requiring a successful read keeps that walk off the map. HF7b-0: this module without that one check shares it.
+    const walkInsideWindow = async (lpP: Promise<LP | null>) => {
+      const lp = await lpP; if (!lp) return null;
+      LOC_V.__os = "android"; LOC_V.__store = {}; LOC_V.__rows = [];
+      LOC_V.__getItem = () => Promise.reject(new Error("storage unavailable"));
+      clock = utc(23, 40, 0);
+      void lp.hydrateLocationPrivacy(); await tick();
+      lp.noteCarConnected(true, "androidauto");
+      let p = north(SPOT, -3000);
+      for (let i = 0; i < 150; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); await tick(); }
+      clock += 10 * S;
+      const live: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        clock += S; const v = kmh(12); p = north(p, v); lp.noteFix(p.lat, p.lng, v, null); await tick();
+        const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+        if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`+${i}s`);
+      }
+      LOC_V.__getItem = undefined; LOC_V.__os = undefined;
+      return { live, latch: lp.privacyDebug().latch };
+    };
+    {
+      const src = readFileSync(new URL("locationPrivacy.ts", SRC), "utf8");
+      const anchor = "const movingNow = _hydrateDone && _drivingLatched &&";
+      const d = mkdtempSync(join(tmpdir(), "park-rearm-hf7b-")); const f = join(d, "locationPrivacy.base.ts");
+      writeFileSync(f, src.replace(anchor, "const movingNow = _drivingLatched &&"));
+      const r0 = await walkInsideWindow(import(pathToFileURL(f).href + `?i=${++inst}`));
+      ok("HF7b-0 NEGATIVE CONTROL (this module without the hydration check in shareablePosition): the walk inside the latch window is shared LIVE", src.includes(anchor) && !!r0 && r0.live.length > 0, JSON.stringify(r0 && { n: r0.live.length, latch: r0.latch }));
+      rmSync(d, { recursive: true, force: true });
+    }
+    const rb = await walkInsideWindow(fresh(false));
+    ok("HF7b …a walk inside the head unit's 90 s latch window after the TTL lapsed, reads still failing → never live", !!rb && rb.live.length === 0, JSON.stringify(rb));
+  }
+  {
+    // HF8 a caller awaiting the first, HUNG attempt (carDataService's cold-start await) is released when a retry
+    // succeeds — before its 10 s bound.
+    const run = async (lpP: Promise<LP | null>) => {
+      const lp = await lpP; if (!lp) return null;
+      clock = utc(23, 50, 0);
+      const record = JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 15 * 60 * S, att: 0, mv: 0, hu: 1 });
+      LOC_V.__store = { [SPOT_KEY]: record }; LOC_V.__rows = [];
+      let n = 0; LOC_V.__getItem = (k: string, store: Record<string, string>) => { if (k === SPOT_KEY) n++; return n <= 1 ? new Promise(() => {}) : Promise.resolve(store[k] ?? null); };
+      let released = false;
+      const w = lp.hydrateLocationPrivacy(); void w.then(() => { released = true; });
+      await tick();
+      const before = released;
+      clock += 6 * S; const p = north(SPOT, 40); lp.noteFix(p.lat, p.lng, 1.4, null);
+      for (let k = 0; k < 5; k++) await tick();
+      LOC_V.__getItem = undefined;
+      return { before, released, hydratedHu: lp.parkEndedByHeadUnit() };
+    };
+    const old = await lpAt("47db1aca");
+    if (old) {
+      const r0 = await run(Promise.resolve(old.lp));
+      ok("HF8-0 NEGATIVE CONTROL (47db1aca): the retry hydrates, but the caller of the hung attempt is never released", !!r0 && r0.hydratedHu === true && r0.released === false, JSON.stringify(r0));
+      rmSync(old.dir, { recursive: true, force: true });
+    } else console.log("  skip HF8-0 negative control: 47db1aca unavailable");
+    const r = await run(fresh(false));
+    ok("HF8 a caller of the hung first attempt is released when a retry succeeds (and the saved witness is adopted)", !!r && r.before === false && r.released === true && r.hydratedHu === true, JSON.stringify(r));
+    // HF8b with no retry at all, a hung read releases its callers at the 10 s bound (setTimeout captured) — un-hydrated.
+    {
+      const lp = await fresh(false);
+      LOC_V.__store = {}; LOC_V.__getItem = () => new Promise(() => {});
+      const realSetTimeout = globalThis.setTimeout; const timers: { fn: () => void; ms: number }[] = [];
+      (globalThis as any).setTimeout = (fn: () => void, ms: number) => { timers.push({ fn, ms }); return timers.length; };
+      clock = utc(23, 55, 0);
+      let released = false; void lp.hydrateLocationPrivacy().then(() => { released = true; });
+      (globalThis as any).setTimeout = realSetTimeout;
+      await tick(); const before = released;
+      for (const t of timers) if (t.ms === 10_000) t.fn();
+      await tick(); await tick();
+      LOC_V.__getItem = undefined;
+      ok("HF8b a read that hangs with no retry releases its callers at the 10 s bound, still un-hydrated (fail-closed)",
+        before === false && released === true && timers.some((t) => t.ms === 10_000) && lp.privacyDebug().latch === false && lp.carSpot() == null,
+        JSON.stringify({ before, released, timers: timers.map((t) => t.ms) }));
+    }
+    // HF8c carDataService: after its hydration await it marks privacy ready and joins presence unconditionally (only a
+    // stopped service bails) — so a release by a retry, a failure or the bound all lead to the join; whether it shares
+    // anything is shareablePosition's call per tick. (Static: carDataService is not loadable in node.)
+    {
+      const src = readFileSync(new URL("carplay/carDataService.ts", SRC), "utf8");
+      const m = /try \{ await hydrateLocationPrivacy\(\); \} catch \{\}\s*\n\s*if \(!_running\) return;[^\n]*\n\s*_privacyReady = true;[\s\S]{0,1200}?\n\s*joinPresence\(\);\n\s*\}\)\(\);/.exec(src);
+      ok("HF8c carDataService: `await hydrateLocationPrivacy()` → `_privacyReady = true` → `joinPresence()`, gated only on the service still running", !!m);
+    }
   }
   {
     // HF5 BACKOFF: a read that always rejects — attempts are >= 5 s apart (≤ 13 in 60 s of 1 Hz fixes), rows stop at 5.

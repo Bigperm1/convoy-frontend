@@ -162,6 +162,10 @@ let _hydrating: Promise<void> | null = null;
 let _hydrateDone = false;
 let _hydrateAt = 0;       // when the latest attempt started: the retry backoff (no timer — the next caller retries)
 let _hydrateRows = 0;     // `priv-hydrate` rows this process (bounded)
+let _hydrateWaiter: Promise<void> | null = null;   // what callers of the latest attempt await (see hydrateLocationPrivacy)
+// Resolved ONCE, by whichever attempt succeeds: releases every caller still waiting on an older (hung) attempt.
+let _signalHydrated: () => void = () => {};
+const _hydrated = new Promise<void>((resolve) => { _signalHydrated = resolve; });
 let _drivingLatched = false;
 // True when the latch was RESTORED from disk on hydrate rather than earned by a real
 // >= 15 km/h fix in this process. A provisional latch cannot refresh _lastDrivingAt —
@@ -221,14 +225,28 @@ export function hydrateLocationPrivacy(): Promise<void> {
   // One attempt per 5 s: callers inside the window share it — in flight (single flight) or failed (the backoff: they
   // proceed un-hydrated, i.e. fail-closed). After the window the next caller starts a new one, whether the last one
   // failed or is still hanging.
-  if (_hydrating && now >= _hydrateAt && now - _hydrateAt < 5_000) return _hydrating;
+  if (_hydrating && _hydrateWaiter && now >= _hydrateAt && now - _hydrateAt < 5_000) return _hydrateWaiter;
   _hydrateAt = now;
-  _hydrating = _hydrateOnce().then((why) => {
+  const attempt = _hydrateOnce().then((why) => {
     const ok = why === "spot" || why === "empty" || why === "late";
-    if (ok) _hydrateDone = true;
+    if (ok) { _hydrateDone = true; _signalHydrated(); }
     if (why !== "late" && _hydrateRows < 5) { _hydrateRows += 1; try { logEventReliable(`priv-hydrate ok=${ok ? 1 : 0} why=${why}`); } catch {} }
   });
-  return _hydrating;
+  _hydrating = attempt;
+  // ── NO AWAIT HANGS (Codex delta review, 2026-09-25) ───────────────────────────────────────────────────────────────
+  // A caller is released by the FIRST of: ANY attempt succeeding (the shared `_hydrated` — so a caller that joined a
+  // hung attempt is freed by the retry that succeeds, e.g. carDataService's cold-start await before it joins presence),
+  // this attempt settling (a failure: the caller proceeds un-hydrated, i.e. fail-closed), or 10 s (a read that hangs
+  // with no retry, e.g. no fixes arriving). What a released caller then reads is decided by `_hydrateDone`, not by why
+  // it was released. Gate: tools/sim-qc/park_rearm_test.mts HF8.
+  _hydrateWaiter = new Promise<void>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const release = () => { if (timer != null) clearTimeout(timer); resolve(); };
+    void _hydrated.then(release);
+    void attempt.then(release);
+    try { timer = setTimeout(release, 10_000); (timer as any)?.unref?.(); } catch {}
+  });
+  return _hydrateWaiter;
 }
 /** One attempt. Returns "spot" / "empty" (or "late": a newer attempt already applied) on success, "read" / "parse" /
  * "apply" on failure — never throws. */
@@ -480,7 +498,12 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // Gate: tools/sim-qc/park_rearm_test.mts Y (1, 2 and 5 fixes before a delayed read).
   if (!_hydrateDone) {
     void hydrateLocationPrivacy();
-    if (!carAttached()) return;
+    if (!carAttached()) {
+      // A head unit's fixes may have armed the latch while hydration was failing; its 90 s window still runs out here
+      // (Codex delta review: an Android TTL lapse would otherwise leave it armed until a read succeeded).
+      if (_lastDrivingAt > 0 && Date.now() - _lastDrivingAt >= DRIVING_HYSTERESIS_MS) _drivingLatched = false;
+      return;
+    }
   }
   const spd = speedMs ?? 0;
   const now = Date.now();
@@ -669,7 +692,9 @@ export function shareablePosition(
   // churn the hysteresis was added for — and a label is not a location.
   // "Provably in the car": the latch plus current movement. A jogger fails the latch, so
   // walking-pace-and-above alone can no longer publish a live position.
-  const movingNow = _drivingLatched && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
+  // …and only once the saved park is KNOWN (Codex delta review, 2026-09-25): a latch armed by a head unit's fixes while
+  // hydration was failing proves nothing about a park it could not read. A head unit attached now still shares live.
+  const movingNow = _hydrateDone && _drivingLatched && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
   const inCar = carAttached() || movingNow;
   const status: "live" | "parked" = isParked() ? "parked" : "live";
 

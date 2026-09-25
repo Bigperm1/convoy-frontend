@@ -1066,6 +1066,17 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-CF `c3635e02` (code `94af3581`, 2026-09-25 12:38 PDT; KEY_PRESENT=1 iOS + Android) — Jeff's go: "Ship it"
+  (09-25, for "Publish bundle A (glyphs + hazard pill + crew-pill drop fix) as an OTA now?").** (1) Head units: the candy Hazards
+  triangle recut smaller and centred on its circumcentre (0.795/0.790/0.790 of the half-canvas vs 0.72/0.98/0.98 — it touched
+  CarPlay's circle in Jeff's 09:29 photo) and the Report grid glyphs in the phone's kind colours (`hz_*_neon`,
+  `tools/poi-pins/bake_car_hazard_icons.py`, hazard_panel_test B3/H). (2) The phone's report pill on CarPlay / Android Auto under
+  the crew pill, 15 s (`HAZARD_REPORT_PILL_MS`; phone stays 4 s; hazard_panel_test I1–I12). (3) Crew presence: one hub-global
+  Supabase budget (≤ 4 position tracks / 31 s + a priority slot, monotonic clock) — Supabase logged
+  `ClientPresenceRateLimitReached` every 10.0 s during Jeff's 09:19–10:06 drive (268 events), shutting the channel and blinking
+  drivers off the crew pill / peers' maps; positions now ~every 8 s (crew_online_test B0–B7, C0–C3, H, K). Codex: glyphs approve;
+  pill 1 finding fixed; presence r2 approve. Field receipts owed: 0 `ClientPresenceRateLimitReached` in a drive window,
+  `crew-presence` rows, `car-report-pill` → `car-report-drawn`, Jeff's eyes on the triangle + grid colours.
 - **✅ PUBLISHED in OTA-CE `414e1207` (code `3d66c662`, 2026-09-25 03:02 PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "make sure this weather
   background panel colour is the same for the hazard panel and the food/gas etc drop down panels. And the more panel, also switch
   the more panel … to slide down under the neon food/gas icons and make sure it layers over the version pill."** `src/panelFloor.ts`

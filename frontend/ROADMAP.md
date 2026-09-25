@@ -1066,7 +1066,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
-- **⏳ COMMITTED, NOT PUBLISHED — the Report panel round THREE (2026-09-25 01:40–02:20 PDT, Jeff off his OTA-CA screenshots: "You
+- **✅ PUBLISHED in OTA-CB `c9be74ad` (code `028c372a`, 2026-09-25 02:29 PDT, Jeff: "Put the neon border around the hazard panel square glyphs. Ship it"; KEY_PRESENT=1 iOS + Android) — the Report panel round THREE (2026-09-25 01:40–02:35 PDT, Jeff off his OTA-CA screenshots: "You
   didn't listen to my request in the FAB button layout … The compass needs to be 2D/3D on the phone. And the hazard on the top …
   the pin is wrong … Police pin is the shield with the P in it and in the ev charging colour … redo the remove pin panel … make
   this appear under the version pill … pop up a window asking if it's still there. Maybe make it pop up when scout mentions it"):**
@@ -1083,7 +1083,9 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   shield pin at the car + pill under the crew pill + the card with the big Remove (rows expired by hand after). NOT bench-testable:
   the Scout-timed prompt (needs another driver's pin) and the head-unit pin render. Gates: hazard_panel_test D4 + G1–G6,
   class_nav_and_3d_tease T1/T6 rewritten for the always-shown button, 60/60 sim-qc, typecheck, eslint 0, trap-check, doc-check,
-  nav-lock PASS (the compass region moved intact — no relock).
+  nav-lock PASS (the compass region moved intact — no relock). Plus, before the publish: the panel tiles rimmed 1.5 pt in
+  the kind's neon colour with a glow (compass = the metal's NeonPin rim; sim-verified) and Codex r4 ×3 — one still-there card per
+  run, no prompt Modal over the Report sheet, the report pill also when the search bar is hidden (under the turn banner).
 - **✅ PUBLISHED in OTA-CA `0c747ae8` (code `727cb141`, 2026-09-25 01:33 PDT, Jeff: "SHIP IT"; KEY_PRESENT=1 iOS + Android) — the Report panel
   round two (`e739f9e8` → `727cb141`, 2026-09-25 00:15–01:25).** (1) Buttons reordered on every surface on his words ("Top - mic, Second from top - hazards, Second from bottom - 2D/3D,
   Bottom - crew. Phone doesn't have mic"): CarPlay comms · hazards · view · crew, AA map strip hazards above crew, phone compass

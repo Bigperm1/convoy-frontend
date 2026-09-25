@@ -54,6 +54,7 @@ import { getDepartureBearing, departureBearingSource, noteCourse, orderRoutesFor
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot } from "../../src/locationPrivacy";
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
+import { removeWhenSettled } from "../../src/carFeedOwner";
 import { type CongestionLevel } from "../../src/mapboxDirections";
 import { useMapView2D, useMapView2DLocked, toggleMapView2D, setMapView2D, resetMapView2D } from "../../src/mapViewMode";
 import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
@@ -3758,11 +3759,36 @@ export default function MapScreen() {
   const lastUnitCheckRef = useRef<number>(0);
   // Throttle backend /location POSTs (live-avatar publish) to ~once / 4s.
   const lastLocPostRef = useRef<number>(0);
+  // ── THE PHONE WATCHER STOPS WHEN NAV ENDS IN THE BACKGROUND (privacy, 2026-09-25) ─────────────────────────────
+  // Jeff, 2026-09-25: "it should not follow me when i discconect from car play... this is a privacy concern. fix it
+  // and lock it." The gate inside this effect (`!appActive && !navActiveRef.current`) was evaluated only when the
+  // effect RAN, and it ran on [appActive, settings.liteGps] alone — so a phone route that ENDED while the app was
+  // backgrounded (arrival behind CarPlay, then the car switched off) left this high-accuracy watcher running in the
+  // background, feeding carStore ('mirror'), odometer and /location, for as long as the JS stayed alive.
+  // MEASURED (crash_reports, Jeff 09-21, instance 4sybba-405308): after the 08:19:08 carplay-disconnect the PHONE rows
+  // kept fresh fixes in the background (acc 7→5→6→41→21→24→7→8→16→13 m) and the phone and car rows carried the same
+  // fix at 08:25:02. That this watcher was the writer is a HYPOTHESIS (code read: it is the only continuous phone-coords
+  // writer outside turn-by-turn); the stale gate is VERIFIED by reading this effect.
+  // `fgWatchKeep` is true exactly when the gate lets the watcher run, so as a dep it re-runs the effect — and tears
+  // the watcher down — the moment nav ends while the app is not active. While the app is active it never changes.
+  // A nav that STARTS while backgrounded also flips it; that re-run must not START a watcher the old code never
+  // started, so fgWatchKeepRef carries the previous run's value and the gate refuses a background start after a run
+  // that had none. Gate: tools/sim-qc/car_feed_leak_test.mts F.
+  const fgWatchKeep = appActive || navMode === "turn-by-turn";
+  const fgWatchKeepRef = useRef(true);
   useEffect(() => {
     let sub: any = null;
+    // Set by this effect's cleanup. The old shape — `sub = await Location.watchPositionAsync(…)` with a cleanup of
+    // `sub?.remove?.()` — lost any watch that resolved after the cleanup had already run (nothing was left to remove
+    // it). A watch that resolves after `cancelled` is removed (src/carFeedOwner.ts removeWhenSettled), and a delivery
+    // to a cancelled effect removes it and is dropped. Trap: scripts/trap-check.py watch-assigned-after-await.
+    let cancelled = false;
+    const keepPrev = fgWatchKeepRef.current;
+    fgWatchKeepRef.current = fgWatchKeep;
     (async () => {
       try {
         if (!(await ensureLocationPermission())) return;
+        if (cancelled) return;
         // Battery: don't run the high-accuracy 1 Hz GPS watcher while the app is
         // backgrounded AND we're not navigating — there's no visible map and no
         // route to follow, so it would just drain the battery. Foreground OR an
@@ -3772,6 +3798,9 @@ export default function MapScreen() {
         // startForegroundCarFeed → carStore, so the car map tracks without this watcher.)
         // 🔒 NAV-LOCK begin map-fgwatch-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         if (!appActive && !navActiveRef.current) return;
+        // Backgrounded, and the previous run had no watcher (it saw no nav): this run exists only because a nav
+        // started in the background — keep the pre-2026-09-25 behaviour, no background start (see fgWatchKeep).
+        if (!appActive && !keepPrev) return;
         // ── THE ONE LOCATION FEED, AND ITS ONE SWITCH ─────────────────────────────
         // Default (liteGps off): BestForNavigation @ 500 ms / 2 m. Measured p50
         // accuracy ~4 m.
@@ -3807,11 +3836,14 @@ export default function MapScreen() {
         // unplug of the charger.
         const liteGps = settings.liteGps === true;
         // 🔒 NAV-LOCK end map-fgwatch-gate
-        sub = await Location.watchPositionAsync(
+        await Location.watchPositionAsync(
           liteGps
             ? { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 8 }
             : { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 2 },
           (pos) => {
+            // This effect instance is gone (cleanup ran): the fix is not ours to use. A delivery proves the native
+            // stream is up, so removing it here cannot strand it (src/carFeedOwner.ts header).
+            if (cancelled) { try { sub?.remove?.(); } catch {} return; }
             // 🔒 NAV-LOCK begin map-fgwatch-fix-ingest — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h > 0 ? h : undefined;
@@ -3969,13 +4001,19 @@ export default function MapScreen() {
             }
             // 🔒 NAV-LOCK end map-speed-unit-border-detect
           }
-        );
+        ).then((s) => {
+          sub = s;
+          // The cleanup already ran while the start was in flight: never keep it (removed once the native start
+          // has settled — src/carFeedOwner.ts removeWhenSettled; its first delivery removes it sooner, above).
+          if (cancelled) removeWhenSettled(s, Date.now());
+        });
       } catch {}
     })();
-    return () => { try { sub?.remove?.(); } catch {} };
-    // Re-subscribe only on foreground/background change (not on every nav
-    // start/stop — that's read via navActiveRef to avoid GPS blips mid-drive).
-  }, [appActive, settings.liteGps]);
+    return () => { cancelled = true; try { sub?.remove?.(); } catch {} };
+    // Re-subscribe on foreground/background change and on the Lite GPS switch — not on a nav start/stop while the
+    // app is active (read via navActiveRef, so a mid-drive start/stop never blips GPS). fgWatchKeep flips only while
+    // the app is NOT active, which is when a nav ending must stop this watcher (privacy, 2026-09-25, above).
+  }, [appActive, settings.liteGps, fgWatchKeep]);
 
   // ----- Hazard/Police reporting (Waze-style "5s ago" anchor) -----
   // Drivers usually notice a hazard a beat after they pass it. Snapping the

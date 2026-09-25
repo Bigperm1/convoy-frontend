@@ -35,6 +35,7 @@ import { aaActionStrip, aaMapButtons, handleAaButton, carTap } from './carAction
 import { startCarStatus, stopCarStatus } from './carStatus';
 import { isAskableStatus } from './carStatusRule';
 import { logEventReliable } from '../crashBreadcrumb';
+import { setCarSurfaceLive } from '../drawTelemetry';
 
 // ── COLD-CONNECT TRACER (2026-08-18 night) ──────────────────────────────────
 // The first-connect crash dies BETWEEN js-mark and every other instrument — no
@@ -202,7 +203,11 @@ export default function AndroidAutoRoot() {
       const { CarPlay } = require('react-native-carplay');
       const onDisconnect = () => {
         aaAliveRef.current = false;
+        // PRIVACY (Jeff, 2026-09-25: "it should not follow me when i discconect from car play... fix it and lock it"):
+        // the car session is over — release the location lock (every car watch, src/carFeedOwner.ts) and stop the
+        // car-surface telemetry rows that carry coordinates. CARPLAY.md §6c; gate car_feed_leak_test F.
         void releaseBgLocation('androidauto');
+        setCarSurfaceLive('androidauto', false);
         stopCarDataService();
         stopCarStatus();
         // RELEASE THE HEAD-UNIT FLAG TOO (2026-08-15). Without this the only thing
@@ -229,10 +234,11 @@ export default function AndroidAutoRoot() {
     // Dead-man probe: the 'androidauto' hold is legitimate only while this root is
     // mounted (see carplay probe note — 2026-08-26 background-GPS leak).
     registerBgConsumerProbe('androidauto', () => aaAliveRef.current);
+    setCarSurfaceLive('androidauto', true);  // car-surface telemetry rows allowed until disconnect/unmount (2026-09-25)
     void acquireBgLocation('androidauto');   // shared bg task + fg car feed
     startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
     startCarStatus('androidauto');           // car-screen "what is missing" + the Allow location action (build 79)
-    void startForegroundCarFeed();           // continuous GPS writer for the car map
+    void startForegroundCarFeed();           // continuous GPS writer for the car map — JOINS acquire's in-flight start (src/carFeedOwner.ts)
     void hydrateCarRouteFromDisk();          // persisted route ribbon on cold connect
     // THE head-unit signal for Android. This root's MOUNT is the only trustworthy proof
     // a car session exists: CarPlaySession (Kotlin) runs it natively and only then —
@@ -253,7 +259,8 @@ export default function AndroidAutoRoot() {
     noteCarConnected(true);
     return () => {
       aaAliveRef.current = false;
-      void releaseBgLocation('androidauto');
+      void releaseBgLocation('androidauto');   // privacy (2026-09-25): the unmount releases too — gate car_feed_leak_test F
+      setCarSurfaceLive('androidauto', false);
       stopCarDataService();
       stopCarStatus();
       noteCarConnected(false);

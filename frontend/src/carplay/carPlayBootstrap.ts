@@ -18,6 +18,7 @@ import { startCarDataService, stopCarDataService } from './carDataService';
 import { CAR_BAR_BUTTON_CONFIG, carMapButtonConfig, handleCarBarButton, handleCarMapButton } from './carActions';
 import { logEventReliable, reportCarPlayTapTrace } from '../crashBreadcrumb';
 import { startCarStatus, stopCarStatus, refreshCarStatus } from './carStatus';
+import { setCarSurfaceLive } from '../drawTelemetry';
 
 let booted = false;
 
@@ -241,6 +242,9 @@ export function initCarPlayBootstrap(): void {
 
   const onConnect = () => {
     setIdleRoot();
+    // Car-surface telemetry rows (draw-cmp / pose-fix / cam-apply surf=car) carry coordinates: they are allowed only
+    // between this connect and the matching disconnect (privacy, 2026-09-25 — src/drawTelemetry.ts setCarSurfaceLive).
+    setCarSurfaceLive('carplay', true);
     void acquireBgLocation('carplay');
     // Cold-capable PEERS + HAZARDS feeds (CarPlay-standalone Wave 1): WebSocket +
     // Supabase presence/Realtime + REST backstops, module-scope — the head unit
@@ -252,9 +256,13 @@ export function initCarPlayBootstrap(): void {
     startCarStatus('carplay');
     // ALSO start the continuous foreground feed directly on connect — independent of
     // map.tsx (which may be unmounted behind CarPlay) and of acquireBgLocation's
-    // permission branch. It self-guards (idempotent) and is released with the shared
-    // lock on disconnect. This is the main-context writer that keeps the car's GPS
-    // fix alive while the phone is in the mount / foreground.
+    // permission branch. It is released with the shared lock on disconnect. This is the
+    // main-context writer that keeps the car's GPS fix alive while the phone is in the
+    // mount / foreground.
+    // ⚠ This call and acquireBgLocation's run AT THE SAME TIME. Until 2026-09-25 that started TWO native watchers
+    // and orphaned one, which then followed Jeff home after the disconnect (two `nav-loc src=car` rows per connect).
+    // It is safe only because src/carFeedOwner.ts makes the start single-flight — this caller JOINS the in-flight
+    // start. Gate: tools/sim-qc/car_feed_leak_test.mts.
     void startForegroundCarFeed();
     // Cold connect: pull the persisted active-route polyline into carStore so the
     // car map draws the real ribbon even though the phone map isn't mounted.
@@ -305,7 +313,12 @@ export function initCarPlayBootstrap(): void {
     // longer find — which NSLogs and installs nothing, silently (RNCarPlay.m:545-560).
     idleTpl = null;
     idleAppearLogged = false;
+    // PRIVACY (Jeff, 2026-09-25: "it should not follow me when i discconect from car play... fix it and lock it"):
+    // once the head unit is gone Hairpin collects no location unless the app is open on the phone or the phone is
+    // navigating. This release is what ends the car feed — every car watch (src/carFeedOwner.ts), NAV_TASK when no
+    // phone navigation holds it, and the CLBackgroundActivitySession. CARPLAY.md §6c; gate car_feed_leak_test F.
     void releaseBgLocation('carplay');
+    setCarSurfaceLive('carplay', false);
     stopCarDataService();
     stopCarStatus();
     // Same-session delivery of the native tap receipts (build 79, RNCarPlay.m ConvoyTapTrace); the next

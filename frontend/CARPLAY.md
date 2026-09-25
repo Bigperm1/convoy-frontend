@@ -269,6 +269,37 @@ never got a `didConnect`, so it connects from the scene itself. Self-guarding on
 **The connect poke is now bounded to 60s** (re-armed on AppState-active / disconnect). It used
 to run every 3s forever on every phone that never connects to CarPlay.
 
+---
+
+## 6c. After the disconnect — location privacy (LOCKED, Jeff 2026-09-25)
+
+> Jeff, 2026-09-25: *"i think the connection is following me after the carplay dissconnect. it should not follow
+> me when i discconect from car play... this is a privacy concern. fix it and lock it."* What followed him:
+> *"My icon moved on the map."*
+
+**The rule: once CarPlay / Android Auto disconnects, Hairpin collects no location unless the app is open on the
+phone or the phone is navigating — and the driver stays pinned at the car until a head unit reconnects or the car
+provably drives away.**
+
+What was measured (crash_reports): fresh car-store fixes for minutes to hours after `carplay-disconnect` +
+`loc-bgsess op=stop` (09-23: 110 min and 2 h 09; 09-25: 10:08→10:14), raw walking coordinates in
+`draw-cmp surf=car` / `cam-apply surf=car`, two `nav-loc src=car` rows in the same second at every connect, and at
+10:13:10 one 26 km/h fix while walking that armed the driving latch and un-pinned him (`latch=0→1 hu=1→0`).
+
+| mechanism | fix | gate |
+|---|---|---|
+| The car GPS watch started twice per connect (guard before the await, assignment after it); `stop` reached one, the other ran on with background delivery | `src/carFeedOwner.ts` is the ONLY creator: single-flight start, stop removes every subscription with no delivery needed, a fix arriving with no lock holder removes its watch and is dropped | `tools/sim-qc/car_feed_leak_test.mts` (G0 reproduces the leak on the pre-fix `navNotification.ts`) |
+| map.tsx's phone watcher: `sub = await watchPositionAsync(…)` lost a watch that resolved after cleanup; its background gate was never re-evaluated when a route ended behind the head unit | a `cancelled` flag + `removeWhenSettled`; `fgWatchKeep` in the deps re-runs the gate when nav ends while the app is not active | `car_feed_leak_test` F11–F16 |
+| After a witnessed park one fast fix re-armed the latch and cleared the witness | `src/parkRearm.ts`: re-arm needs ≥ 15 km/h held 15 s AND 150 m from where that run began; a reconnect still clears it at once | `tools/sim-qc/park_rearm_test.mts` (his 10:12–10:14 fixes; N reproduces it on the pre-fix module) |
+| Car-surface telemetry rows kept printing coordinates after the disconnect (CarMapView stays mounted) | `drawTelemetry.setCarSurfaceLive` — set only by `carPlayBootstrap` onConnect/onDisconnect and `AndroidAutoRoot` mount/disconnect/unmount, never by `headUnitAttachedRaw()` | — |
+
+`scripts/trap-check.py` rule `watch-assigned-after-await` forbids the orphan shape anywhere in `src/` and `app/`.
+Every release writes `loc-release tag=<t> fgLive=<n> task=<0|1>` (bounded, reliable): the field receipt after a
+drive is `carplay-disconnect` → `loc-release tag=carplay fgLive=0 task=0` → no `loc-src feed=fg`, no fresh
+`draw-cmp surf=car` until the app is opened. Phone-only navigation still tracks in the background by design (the
+`nav` consumer). Not verified on a device or a head unit yet — the gates run the real modules in node with a fake
+expo-location.
+
 ## 7. Open / next
 
 - **Route line touching the car, drifting off-route** — Jeff's next focus, not yet addressed.

@@ -33,6 +33,21 @@ const MIN_SPEED_MS = 1.5;
 
 const lastAt: Record<string, number> = {};
 
+// ── NO CAR ROWS WITHOUT A CAR (privacy, 2026-09-25) ─────────────────────────────────────────────────────────────
+// Jeff, 2026-09-25: "it should not follow me when i discconect from car play... this is a privacy concern. fix it and
+// lock it." CarMapView stays mounted after a disconnect, so while any GPS kept reaching the car store its
+// `draw-cmp surf=car gps=…` rows printed the driver's raw WALKING coordinates into crash_reports (09-23: fresh car
+// rows with live gps from 09:23 to 11:08, 1 h 49 after the 09:19 disconnect). Those rows exist to diagnose the car
+// surface, so they are written only while a car surface is actually live: carPlayBootstrap.onConnect/onDisconnect and
+// AndroidAutoRoot's mount/disconnect/unmount set this — NEVER headUnitAttachedRaw(), which map.tsx does not set on a
+// cold CarPlay start. The same flag gates ConvoyMapbox's `cam-apply surf=car req=…` row.
+const _carSurfaces = new Set<string>();
+export function setCarSurfaceLive(surface: "carplay" | "androidauto", live: boolean): void {
+  if (live) _carSurfaces.add(surface); else _carSurfaces.delete(surface);
+}
+/** True while CarPlay or Android Auto is connected (see setCarSurfaceLive). */
+export function carSurfaceLive(): boolean { return _carSurfaces.size > 0; }
+
 // ── CORNER TRACE (2026-09-03, Jeff: "the first corner was off the route line by a lot") ──
 // The 10 s cadence above straddled that corner: the two rows either side of it showed the
 // marker 4.5 m and 1.7 m from GPS and nothing in between, so a 2–3 s excursion inside the
@@ -175,6 +190,7 @@ export function reportPoseFix(surface: "phone" | "car", navActive: boolean, f: {
   roundabout?: boolean;
 }): void {
   try {
+    if (surface === "car" && _carSurfaces.size === 0) return;   // no car surface → no car rows (privacy, 2026-09-25)
     if (!navActive || _poseRows >= POSE_ROWS_MAX) return;
     const now = Date.now();
     const win = f.roundabout ? _poseRbRowTimes : _poseRowTimes;
@@ -220,6 +236,8 @@ export function reportDraw(
 ): void {
   try {
     if (!raw || !drawn) return;
+    // No car surface → no car rows, corner-trace and snap-mode included: they print raw coordinates (2026-09-25).
+    if (surface === "car" && _carSurfaces.size === 0) return;
     const spd = typeof speedMs === "number" && isFinite(speedMs) ? speedMs : 0;
     // Corner trace + snap-mode rows run BEFORE the 10 s throttle (they have their own bounds).
     try { cornerTrace(surface, raw, drawn, mode, spd, navActive, gps, hdg); } catch {}

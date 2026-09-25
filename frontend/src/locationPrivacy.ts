@@ -30,6 +30,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { spotAdoptVerdict, spotHeadingFor, headingTrackStep, HEADING_TRACK_EMPTY, type HeadingTrack } from "./carSpotTrust";
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
+import { createParkRearm } from "./parkRearm";
 
 // Same key map.tsx has always used, so an existing install keeps its car spot and there
 // is no migration to get wrong.
@@ -159,6 +160,9 @@ let _drivingLatched = false;
 // >= 15 km/h fix in this process. A provisional latch cannot refresh _lastDrivingAt —
 // see the note in noteFix(). Cleared by the first genuine vehicular fix.
 let _latchProvisional = false;
+// After a WITNESSED park, one fast fix may not re-arm the latch or clear the witness (Jeff, 2026-09-25: "My icon moved
+// on the map"). The rule and its three constants live in src/parkRearm.ts; it runs only while _parkWitnessed stands.
+const _parkRearm = createParkRearm({ enterMs: DRIVING_ENTER_SPEED_MS, holdMs: DRIVING_SPEED_MS });
 
 /** Hydrate the persisted car spot + driving stamp. Idempotent; safe to call anywhere. */
 export async function hydrateLocationPrivacy(): Promise<void> {
@@ -374,11 +378,24 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // we have never measured what testers' phones report, so a threshold today would be
   // invented. Measure `acc=` from draw-cmp first, then gate here.
   const latchedBefore = _drivingLatched;
+  // ── A WITNESSED PARK IS NOT UNDONE BY ONE FAST FIX (privacy, 2026-09-25) ────────────────────────────────────────
+  // Jeff, 2026-09-25: "it should not follow me when i discconect from car play... this is a privacy concern. fix it
+  // and lock it" — and what followed him: "My icon moved on the map." 17:08:20Z carplay-disconnect (witnessed park);
+  // 17:13:10.094Z ONE 26 km/h fix (acc 14 m) while he was on foot armed this latch and, in the same call, `driving`
+  // cleared the witness, so the marker and the shared position went live and the car spot moved to where he walked
+  // (draw-cmp latch=0→1, hu=1→0, spotAge=59s at 17:14:14). While the witness stands, arming the latch and `driving`
+  // (which clears the witness, refreshes the stamp and writes the spot) need src/parkRearm.ts's SUSTAINED proof:
+  // >= 15 km/h held PARK_REARM_SUSTAIN_MS and PARK_REARM_MIN_M from where that run began. A head-unit reconnect
+  // still clears the witness at once (noteCarConnected). With no witnessed park `rearmOk` is true and every line
+  // below is what it was. Gate: tools/sim-qc/park_rearm_test.mts.
+  let rearmOk = true;
+  if (_parkWitnessed) rearmOk = _parkRearm.note(now, lat, lng, spd);
+  else _parkRearm.reset();
   // The latch: only a vehicular speed can ARM it; once armed, above-walking keeps it.
-  if (spd >= DRIVING_ENTER_SPEED_MS) { _drivingLatched = true; _latchProvisional = false; }
+  if (spd >= DRIVING_ENTER_SPEED_MS && rearmOk) { _drivingLatched = true; _latchProvisional = false; }
   else if (_lastDrivingAt > 0 && now - _lastDrivingAt >= DRIVING_HYSTERESIS_MS) _drivingLatched = false;
   const aboveWalking = spd >= DRIVING_SPEED_MS;
-  const driving = _drivingLatched && aboveWalking;
+  const driving = _drivingLatched && aboveWalking && rearmOk;
   if (driving) {
     // ── A PROVISIONAL LATCH MAY NOT EXTEND ITS OWN WINDOW (2026-08-29) ──────────
     // hydrate re-arms the latch from the persisted stamp so a force-quit mid-drive

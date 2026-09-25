@@ -411,13 +411,33 @@ RULES = [
     (
         "fgwatch-callback-without-sweep",
         ["src/navNotification.ts"],
-        r"(?s)_fgCarWatch = await Location\.watchPositionAsync\(.{0,3000}?\(loc\)\s*=>\s*\{\s*_lastFixAt = Date\.now\(\);(?!\s*void _sweepBgConsumers\()",
+        r"(?s)\A(?!.*void _sweepBgConsumers\(\"fgwatch\"\))|onFix:\s*\(loc\)\s*=>\s*\{\s*_lastFixAt = Date\.now\(\);(?!\s*void _sweepBgConsumers\()",
         "2026-09-14 (build 79, review of the location-without-Always plan, P3): the car fgwatch now asks iOS for "
         "continuous background delivery (allowsBackgroundLocationUpdates, patches/expo-location) — Apple: with that "
         "flag 'Core Location configures the system to keep the app running'. The dead-man sweep used to run ONLY from "
         "the NAV_TASK callback and stopped the fgwatch only when NAV_TASK was running, so a failed bgstart or a leaked "
         "tag would leave GPS + the blue pill up with nothing auditing it (the 2026-08-26 11-hour leak shape). The "
-        "fgwatch callback must call _sweepBgConsumers (self-throttled) right after it feeds the stall watchdog.",
+        "fgwatch callback must call _sweepBgConsumers (self-throttled) right after it feeds the stall watchdog. "
+        "2026-09-25: the callback is now the `onFix:` of the car-feed owner (src/carFeedOwner.ts); this fires when the "
+        "owner's onFix does not open with the sweep, or when no `_sweepBgConsumers(\"fgwatch\")` call exists at all "
+        "(the old anchor, `_fgCarWatch = await …`, no longer exists — a rule anchored on it could never fire again).",
+    ),
+    (
+        "watch-assigned-after-await",
+        ["src/**/*.ts", "src/**/*.tsx", "app/**/*.ts", "app/**/*.tsx"],
+        r"=\s*await\s+Location\.watchPositionAsync\(",
+        "2026-09-25 (Jeff: 'i think the connection is following me after the carplay dissconnect. it should not follow "
+        "me when i discconect from car play... this is a privacy concern. fix it and lock it'). `x = await "
+        "Location.watchPositionAsync(…)` is the orphan signature: whatever was meant to stop that watch runs while the "
+        "await is pending, finds nothing to remove, and the watch that resolves afterwards is kept by nobody. "
+        "navNotification.startForegroundCarFeed had it with its guard BEFORE the await — carPlayBootstrap.onConnect "
+        "starts it twice at once, so two native watchers started and one was never removed (MEASURED: two `nav-loc "
+        "src=car` rows in the same second at every one of Jeff's connects 09-22..09-25; a car-watch callback after the "
+        "release on every disconnect checked; fresh car fixes for up to 2 h 09 after the disconnect, raw walking "
+        "coordinates in draw-cmp surf=car). map.tsx's phone watcher had the same shape with an effect cleanup. The car "
+        "watch is created ONLY by src/carFeedOwner.ts (single-flight, stop removes every subscription); an effect that "
+        "owns a watch keeps a `cancelled` flag and removes a watch that resolves after its cleanup "
+        "(carFeedOwner.removeWhenSettled). Gate: tools/sim-qc/car_feed_leak_test.mts.",
     ),
     (
         "carplay-native-template-push-or-bare-placeholder",

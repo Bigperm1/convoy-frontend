@@ -39,6 +39,7 @@ import { recordTrip } from "./trips";
 import { feedOdo, odoNowM } from "./driveOdometer";
 import { logEvent, logEventReliable } from "./crashBreadcrumb";
 import { accentNow } from "./appSkin";
+import { createCarFeedOwner, boundedLog, LOC_RELEASE_RECEIPT_MAX } from "./carFeedOwner";
 
 const NAV_TASK = "convoy-nav-location";
 const NAV_NOTIF_ID = "convoy-nav-banner";
@@ -1070,16 +1071,27 @@ function _stopStallWatchdog(): void {
 // the car map draws whenever the Convoy app is foreground (the phone-in-the-
 // mount case), on plain "When In Use". It runs only while a consumer (CarPlay /
 // nav banner) holds the shared location lock, and is released with it.
-let _fgCarWatch: Location.LocationSubscription | null = null;
-
-export async function startForegroundCarFeed(): Promise<void> {
-  if (_fgCarWatch) return;
-  try {
+//
+// ── ONE OWNER, OR THE WATCH FOLLOWS THE DRIVER HOME (privacy, 2026-09-25) ──────────────────────────────────────
+// Jeff, 2026-09-25: "i think the connection is following me after the carplay dissconnect. it should not follow me
+// when i discconect from car play... this is a privacy concern. fix it and lock it."
+// This used to be `if (_fgCarWatch) return;` before the awaits and `_fgCarWatch = await Location.watchPositionAsync(…)`
+// after them, and carPlayBootstrap.onConnect starts it twice at once — so two native watchers started and one was
+// never removed (MEASURED: two `nav-loc src=car` rows in the same second at every Jeff connect; a car-watch callback
+// after the release on every disconnect checked; fresh car fixes for up to 2 h 09 after disconnect). The watch is
+// now created ONLY by src/carFeedOwner.ts: single-flight start, a stop that removes every subscription it made with
+// no delivery needed, and a per-delivery check that drops (and removes) any fix arriving when nobody holds the lock.
+// Watch options and the per-fix body below are unchanged. Rule + gate: CARPLAY.md §6c,
+// tools/sim-qc/car_feed_leak_test.mts; trap-check rule watch-assigned-after-await.
+type CarWatch = { remove: () => void; lite: boolean };
+const _carFeed = createCarFeedOwner<Location.LocationObject, CarWatch>({
+  wanted: () => _locConsumers.size > 0,
+  watch: async (onLoc) => {
     const fg = await Location.getForegroundPermissionsAsync();
-    if (!fg.granted) return;
+    if (!fg.granted) return null;
     const _carLoc = driveLocationOptions();
     try { logEventReliable(`nav-loc src=car mode=${_carLoc.lite ? "high" : "bfn"} t=${_carLoc.timeInterval} d=${_carLoc.distanceInterval}`); } catch {}
-    _fgCarWatch = await Location.watchPositionAsync(
+    return Location.watchPositionAsync(
       // 0.5s/2m navigation-grade fused fixes (was High = NearestTenMeters at 1s/5m — see
       // driveLocationOptions): the head unit's only continuous feed in several states.
       // iOS build 79 (patches/expo-location, 2026-09-14): opt THIS watcher into continuous background delivery. Stock
@@ -1087,76 +1099,85 @@ export async function startForegroundCarFeed(): Promise<void> {
       // pausesLocationUpdatesAutomatically at CoreLocation's default (true) — and for in-use authorization a pause
       // ends access until relaunch (Apple). Expo Records read declared fields only (Record.swift:48-58,
       // RecordTypeConverter.kt:72-81), so these keys are ignored on build 78 and on Android.
-      // The keep-alive is audited: the callback below runs the dead-man sweep (review C3).
+      // The keep-alive is audited: onFix below runs the dead-man sweep (review C3), and the owner drops + removes
+      // any delivery that arrives while no consumer holds the lock (2026-09-25).
       {
         accuracy: _carLoc.accuracy, timeInterval: _carLoc.timeInterval, distanceInterval: _carLoc.distanceInterval,
         allowsBackgroundLocationUpdates: true, showsBackgroundLocationIndicator: true, pausesUpdatesAutomatically: false,
         activityType: Location.LocationActivityType.AutomotiveNavigation,
       } as Location.LocationOptions,
-      (loc) => {
-        _lastFixAt = Date.now(); // feed the GPS stall watchdog
-        void _sweepBgConsumers("fgwatch"); // build 79: this watcher can keep the app running — audit it (throttled 60 s)
-        noteLocSource("fg", loc);
-        // Trip odometer from THIS feed too (Codex review 2026-09-15): on a cold Android Auto drive with a While-using
-        // grant this watcher can be the ONLY location source, and the cold step heal + cold trip distance both read
-        // the shared odometer. A fix the bg task already fed is ignored by odoAdd (dt <= 0), so two feeds cannot
-        // double-count.
-        feedOdo({
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-          at: typeof loc.timestamp === "number" ? loc.timestamp : Date.now(),
-          accM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : undefined,
-          speedMs: typeof loc.coords.speed === "number" && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
-        });
-        const h = loc.coords.heading;
-        const sp = loc.coords.speed;
-        // Position AND SPEED through the source-priority gate ('fgwatch' — beats the bg
-        // task, yields to the phone mirror while it's fresh). See the bgtask write above
-        // for why speed now rides the gate. carDbg stays ungated.
-        setCarSelfPosition(
-          loc.coords.latitude, loc.coords.longitude,
-          typeof h === "number" && h > 0 ? h : null,
-          'fgwatch',
-          typeof sp === "number" && sp >= 0 ? sp : 0,
-          loc.timestamp, // fix time — see the gate (8/20),
-          typeof loc.coords.accuracy === 'number' ? loc.coords.accuracy : null,
-          rawCourseHere(h),   // the fix's OWN course for the pose estimator (0° kept on iOS)
-        );
-        // Constant string, so carStore's equality gate already makes this a no-op after
-        // the first write; flag-gated too so it costs nothing at all when diag is off.
-        if (CAR_DIAG_MODE) setCarState({ carDbg: "fgfeed" });
-        // Best-effort metadata — wrapped so it can never block the position write.
-        try {
-          setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
-        } catch {}
-        maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude, rawCourseHere(h), sp);   // the fix's course + speed: the snap's direction rule
-        // Drive the cold nav engine from THIS feed too, not just the bg task. The bg
-        // task needs "Always" location; this watch only needs "While using", and while
-        // Android Auto is projecting the app counts as in use. Without this, a cold AA
-        // drive on a While-using grant had no step tracking and so no arrival at all.
-        // Gated on the phone engine being idle so a warm drive keeps exactly one caller
-        // (map.tsx's) and the banner can't be posted twice per turn.
-        if (!isPhoneTbtSpeaking()) {
-          void updateNavBanner(
-            loc.coords.latitude, loc.coords.longitude,
-            typeof sp === "number" && sp >= 0 ? sp : 0,
-          );
-        }
-      }
+      onLoc,
+    ).then((s) => ({ remove: () => s.remove(), lite: _carLoc.lite }));
+  },
+  onLive: (w) => {
+    _fgLite = w.lite;        // committed only now — the native start succeeded, with an owner
+    _reconcileLite(false);   // the setting may have hydrated/flipped while the watch was being built
+  },
+  log: (row) => { try { logEventReliable(row); } catch {} },
+  onFix: (loc) => {
+    _lastFixAt = Date.now(); // feed the GPS stall watchdog
+    void _sweepBgConsumers("fgwatch"); // build 79: this watcher can keep the app running — audit it (throttled 60 s)
+    noteLocSource("fg", loc);
+    // Trip odometer from THIS feed too (Codex review 2026-09-15): on a cold Android Auto drive with a While-using
+    // grant this watcher can be the ONLY location source, and the cold step heal + cold trip distance both read
+    // the shared odometer. A fix the bg task already fed is ignored by odoAdd (dt <= 0), so two feeds cannot
+    // double-count.
+    feedOdo({
+      lat: loc.coords.latitude,
+      lng: loc.coords.longitude,
+      at: typeof loc.timestamp === "number" ? loc.timestamp : Date.now(),
+      accM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : undefined,
+      speedMs: typeof loc.coords.speed === "number" && loc.coords.speed >= 0 ? loc.coords.speed : undefined,
+    });
+    const h = loc.coords.heading;
+    const sp = loc.coords.speed;
+    // Position AND SPEED through the source-priority gate ('fgwatch' — beats the bg
+    // task, yields to the phone mirror while it's fresh). See the bgtask write above
+    // for why speed now rides the gate. carDbg stays ungated.
+    setCarSelfPosition(
+      loc.coords.latitude, loc.coords.longitude,
+      typeof h === "number" && h > 0 ? h : null,
+      'fgwatch',
+      typeof sp === "number" && sp >= 0 ? sp : 0,
+      loc.timestamp, // fix time — see the gate (8/20),
+      typeof loc.coords.accuracy === 'number' ? loc.coords.accuracy : null,
+      rawCourseHere(h),   // the fix's OWN course for the pose estimator (0° kept on iOS)
     );
-    _fgLite = _carLoc.lite;                 // committed only now — the native start succeeded
-    if (_locConsumers.size === 0) {         // the last consumer released while the watch was being built
-      stopForegroundCarFeed();              // (the same guard acquireBgLocation carries; closes the watchdog's window too)
-      try { logEventReliable("bgloc-fgstart-raced stopped=1"); } catch {}
-      return;
+    // Constant string, so carStore's equality gate already makes this a no-op after
+    // the first write; flag-gated too so it costs nothing at all when diag is off.
+    if (CAR_DIAG_MODE) setCarState({ carDbg: "fgfeed" });
+    // Best-effort metadata — wrapped so it can never block the position write.
+    try {
+      setCarState({ selfCarColor: getSettings().carColor, mapMode: getMapMode(getSettings()) });
+    } catch {}
+    maybeUpdateSpeedLimit(loc.coords.latitude, loc.coords.longitude, rawCourseHere(h), sp);   // the fix's course + speed: the snap's direction rule
+    // Drive the cold nav engine from THIS feed too, not just the bg task. The bg
+    // task needs "Always" location; this watch only needs "While using", and while
+    // Android Auto is projecting the app counts as in use. Without this, a cold AA
+    // drive on a While-using grant had no step tracking and so no arrival at all.
+    // Gated on the phone engine being idle so a warm drive keeps exactly one caller
+    // (map.tsx's) and the banner can't be posted twice per turn.
+    if (!isPhoneTbtSpeaking()) {
+      void updateNavBanner(
+        loc.coords.latitude, loc.coords.longitude,
+        typeof sp === "number" && sp >= 0 ? sp : 0,
+      );
     }
-    _reconcileLite(false); // the setting may have hydrated/flipped while the watch was being built
-  } catch {}
+  },
+});
+// One `loc-release` row each time the location lock's consumer set empties (bounded per JS context).
+const _releaseReceipt = boundedLog(LOC_RELEASE_RECEIPT_MAX, (row) => { try { logEventReliable(row); } catch {} });
+
+// Every caller — acquireBgLocation, carPlayBootstrap.onConnect, AndroidAutoRoot's mount, carStatus's re-start, the
+// stall watchdog, the Lite GPS rebuild — lands here, and the owner joins concurrent starts into ONE native watch.
+// A start that resolves after the last consumer released is not kept (the owner's `carfeed op=raced` receipt; this
+// used to be `bgloc-fgstart-raced`).
+export async function startForegroundCarFeed(): Promise<void> {
+  try { await _carFeed.start(); } catch {}
 }
 
 function stopForegroundCarFeed(): void {
-  try { _fgCarWatch?.remove(); } catch {}
-  _fgCarWatch = null;
+  _carFeed.stop();   // every subscription the owner made, no delivery needed
   _fgLite = null;
 }
 
@@ -1175,11 +1196,11 @@ function _reconcileLite(fromSettings: boolean): void {
     const liteNow = getSettings().liteGps === true;
     const changed = fromSettings && liteNow !== _liteSeen;   // an ACTUAL toggle (or the hydration flip)
     if (fromSettings) _liteSeen = liteNow;
-    if (!driveFeedNeedsRelite({ liteNow, changed, consumers: _locConsumers.size, fg: { up: !!_fgCarWatch, lite: _fgLite }, bgLite: _bgLite })) return;
+    if (!driveFeedNeedsRelite({ liteNow, changed, consumers: _locConsumers.size, fg: { up: _carFeed.live() > 0, lite: _fgLite }, bgLite: _bgLite })) return;
     _reliteChain = _reliteChain.then(() => reliteDriveFeeds({
       liteNow, changed,
       consumers: () => _locConsumers.size,
-      fg: () => ({ up: !!_fgCarWatch, lite: _fgLite }),
+      fg: () => ({ up: _carFeed.live() > 0, lite: _fgLite }),
       bgOn: () => Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false),
       bgLite: () => _bgLite,
       restartFg: async () => { stopForegroundCarFeed(); await startForegroundCarFeed(); },
@@ -1378,7 +1399,7 @@ export async function acquireBgLocation(tag: string): Promise<boolean> {
     } catch {}
     if (!canBg) setCarState({ carDbg: "bg:no-always" }); // head-unit-visible breadcrumb
     _bgGranted = canBg;
-    // ALWAYS start the foreground feed (self-guards via _fgCarWatch; released with the
+    // ALWAYS start the foreground feed (single-flight via src/carFeedOwner.ts; released with the
     // shared lock). It is the only CONTINUOUS main-context writer that lands selfLat in
     // the carStore the CarPlay surface reads. Previously this ran only `if (!canBg)`, so
     // on "Always" it was skipped — leaving the car surface with no fix (CONVOY logo)
@@ -1418,10 +1439,17 @@ export async function releaseBgLocation(tag: string): Promise<void> {
   if (_locConsumers.size > 0) return; // another consumer still needs it
   _stopStallWatchdog();
   stopForegroundCarFeed();
+  let task = "?";
   try {
     const started = await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => false);
     if (started) await Location.stopLocationUpdatesAsync(NAV_TASK);
+    const after = started ? await Location.hasStartedLocationUpdatesAsync(NAV_TASK).catch(() => null) : false;
+    task = after == null ? "?" : after ? "1" : "0";
   } catch {}
+  // THE RELEASE RECEIPT (privacy, 2026-09-25): the lock is empty, so NOTHING of ours may still hold GPS. fgLive = car
+  // watches the owner still holds (0 unless one is inside its CAR_FEED_SETTLE_MS settle), task = NAV_TASK still
+  // registered after the stop (? = the read failed). Absence-interpreted with carplay-disconnect -> reliable logger.
+  _releaseReceipt(`loc-release tag=${tag} fgLive=${_carFeed.live()} task=${task}`);
 }
 
 // Begin the nav banner for a route. Returns true if the background location task

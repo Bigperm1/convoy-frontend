@@ -38,6 +38,7 @@ import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
 import { createFramePacer, frameDue, msUntilDue, navMapFps } from "./framePacer";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM, rfPredict, rfFix, rfPose, type RfState } from "./poseEstimator";
+import { foldPrefersGlobal } from "./routeFold";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "./yawRate";
 import { ensureYawSignLoaded, getSeededYawSign, noteLearnedYawSign } from "./poseSeed";
 import { logEvent } from "./crashBreadcrumb";
@@ -1002,6 +1003,8 @@ export function projectOntoRoute(
   let bestI = 1, bestT = 0;   // that segment's end-vertex index + the fraction along it (for bearingSmooth)
   let total = 0;
   let bestClamped = false;
+  // THE FOLD (2026-09-24, src/routeFold.ts): the window's answer, kept while the whole line is checked once.
+  let foldKeep: { d2: number; arc: number; x: number; y: number; dx: number; dy: number; i: number; t: number; c: boolean } | null = null;
   const windowed = typeof nearAtM === 'number' && Number.isFinite(nearAtM);
   const span = Math.max(PROJ_WINDOW_MIN_M, (movedM ?? 0) * PROJ_WINDOW_TRAVEL_MULT);
   const lo = windowed ? (nearAtM as number) - span : 0;
@@ -1068,7 +1071,17 @@ export function projectOntoRoute(
     // a clamp that still puts the car near the line (the corner case). Anything
     // else — nothing found, a far clamp, a wildly off-line result, or the latch
     // above — means the window no longer describes where the car is, so re-scan.
-    if (dist <= PROJ_WINDOW_ABANDON_M && !_latched && (!bestClamped || dist <= PROJ_CLAMP_TRUST_M)) break;
+    if (dist <= PROJ_WINDOW_ABANDON_M && !_latched && (!bestClamped || dist <= PROJ_CLAMP_TRUST_M)) {
+      // THE FOLD (2026-09-24, John's King George reroute — see src/routeFold.ts): an accepted answer this far off the
+      // line is not a corner. Keep it, let pass 1 scan the whole line, and take the whole line only when it is
+      // PROJ_FOLD_GAIN× closer (the car took the route's OTHER leg). Below PROJ_FOLD_M nothing changes.
+      if (!foldPrefersGlobal(bestD2, 0)) break;
+      foldKeep = { d2: bestD2, arc: bestArc, x: bestX, y: bestY, dx: bestDx, dy: bestDy, i: bestI, t: bestT, c: bestClamped };
+    }
+  }
+  if (foldKeep && !foldPrefersGlobal(foldKeep.d2, bestD2)) {
+    bestD2 = foldKeep.d2; bestArc = foldKeep.arc; bestX = foldKeep.x; bestY = foldKeep.y; bestDx = foldKeep.dx; bestDy = foldKeep.dy;
+    bestI = foldKeep.i; bestT = foldKeep.t; bestClamped = foldKeep.c;
   }
   if (total <= 0) return null;
   acc = total;

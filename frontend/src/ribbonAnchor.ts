@@ -76,13 +76,25 @@ export function alongMOnPartition(
  */
 export type CutAnchorHint = { key: unknown; m: number } | null;
 export type CutAnchor = { m: number; distM: number; src: "prev" | "global" | "fallback"; hint: CutAnchorHint };
+/**
+ * THE FOLD (2026-09-24, John's 18:57 CarPlay photo: "the car under the route line"). His reroute went right onto King
+ * George, U-turned 239 m up and came back SOUTH past the same corner; he turned LEFT at the corner straight onto the
+ * return leg. The hint window (±250 m around the last anchor at the corner) covers only the OUTBOUND leg, whose nearest
+ * point to a car on the return leg is the corner itself — 9, 19 … 77 m away as he drove off, 72 m at the light. That was
+ * under the 80 m acceptance below, so the local answer was kept, the global scan never ran, and for the whole minute at
+ * the light the cut sat at the corner while the return leg was drawn through his car (receipts: `ribbon-trim surf=car
+ * lag=556 anchorOff=71 hint=prev proj=3`, replayed on the real route in tools/sim-qc/ribbon_fold_test.mts). A local
+ * answer more than ANCHOR_RECHECK_M off is now checked against the whole line — one linear pass, only when the car is
+ * that far from its last leg — and the nearer wins. The ≤ 80 m rule still decides whether the car is on this line at all.
+ */
+export const ANCHOR_RECHECK_M = 20;
 export function anchorCutM(
   p: AnchorPartition, lat: number, lng: number, hint: CutAnchorHint, key: unknown, fallbackM: number, spanM = 250,
 ): CutAnchor {
   const local = (hint && hint.key === key) ? alongMOnPartition(p, lat, lng, hint.m, spanM) : null;
   let best = local;
   let src: CutAnchor["src"] = "prev";
-  if (!best || best.distM > 80) {
+  if (!best || best.distM > ANCHOR_RECHECK_M) {
     const g = alongMOnPartition(p, lat, lng, null);
     if (g && (!best || g.distM < best.distM)) { best = g; src = "global"; }
   }

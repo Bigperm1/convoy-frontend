@@ -121,7 +121,8 @@ CarMapView.tsx, ConvoyCarPlay.tsx, carActions.ts, carStore.ts, locationPrivacy.t
 between two 🔒 markers, or in a hash-locked module, stop and ask first.** It runs with every sim-qc gate before an OTA or a cut.
 A failure is not a bug to fix in the manifest: it is a question for Jeff. With his words in hand:
 `node --experimental-strip-types tools/sim-qc/nav_lock_test.mts --relock "Jeff, <date>: <what he said>"` — never edit
-the JSON by hand, never relock without the quote. Field reports still get investigated and DESIGNED; the change waits.
+the JSON by hand, never relock without the quote. A NEW pure drive-engine module joins the lock the same way:
+`… --relock "Jeff, …" --add-hash src/<module>.ts` (2026-09-25). Field reports still get investigated and DESIGNED; the change waits.
 
 **ONE nav change per real drive.** After 2026-07-31, eleven OTAs in a single day made the app
 *worse*. Every symptom gets its **own** verdict; do not bundle nav behaviour changes.

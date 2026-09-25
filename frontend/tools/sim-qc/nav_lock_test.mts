@@ -27,6 +27,7 @@
 //   node --experimental-strip-types tools/sim-qc/nav_lock_test.mts            # the gate (exit 1 on any drift)
 //   node --experimental-strip-types tools/sim-qc/nav_lock_test.mts --list src/chaseZoom.ts   # what the extractor sees
 //   node --experimental-strip-types tools/sim-qc/nav_lock_test.mts --relock "<quote>"        # Jeff-approved re-pin
+//   … --relock "<quote>" --add-hash src/newPureModule.ts                                   # + code-lock a NEW file
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
@@ -147,9 +148,20 @@ function currentOf(file: string, name: string, lits: Map<string, { value: string
 }
 
 if (args[0] === "--relock") {
-  const quote = args.slice(1).join(" ").trim();
+  // `--add-hash <file>` (repeatable, 2026-09-25): CODE-LOCK a NEW pure module under the same approval — --relock only
+  // re-pins files already in the manifest, so a new drive-engine module (e.g. a constant moved out of a watchNew file)
+  // stayed outside the lock. The file must exist and must not be in the manifest yet.
+  const addHash: string[] = []; const rest: string[] = [];
+  for (let i = 1; i < args.length; i++) { if (args[i] === "--add-hash") { addHash.push(args[++i] ?? ""); } else rest.push(args[i]); }
+  const quote = rest.join(" ").trim();
   if (!/jeff/i.test(quote) || quote.length < 12) { console.error("--relock needs Jeff's words, e.g. --relock \"Jeff, 2026-09-20: raise the nose cap to 70\""); process.exit(2); }
   const changes: string[] = [];
+  for (const f of addHash) {
+    if (!f || manifest.files[f]) { console.error(`--add-hash ${f || "(missing path)"}: ${f ? "already in the manifest" : "needs a repo-relative path"}`); process.exit(2); }
+    let src: string; try { src = read(f); } catch { console.error(`--add-hash ${f}: file not found`); process.exit(2); }
+    manifest.files[f] = { hash: codeHash(src), why: "pure drive-engine module: code-locked (added via --add-hash)" };
+    changes.push(`${f}: NEW FILE code-locked ${manifest.files[f].hash!.slice(7, 19)}`);
+  }
   for (const [file, spec] of Object.entries(manifest.files)) {
     const src = read(file); const lits = extractLiterals(src);
     if (spec.hash !== undefined) { const h = codeHash(src); if (h !== spec.hash) { changes.push(`${file}: code ${spec.hash.slice(7, 19)} → ${h.slice(7, 19)}`); spec.hash = h; } }

@@ -112,7 +112,10 @@ export type Opts = { android?: boolean; rafAlive?: boolean; carFramePump?: boole
   /** …and runs up to this much longer than asked (seeded, per animation). */
   animEndJitterMs?: number; seed?: number;
   /** A device whose map REPORTS a zoom this far off what it shows (the closed loop's worst case: it can never agree). */
-  reportZoomBias?: number };
+  reportZoomBias?: number;
+  /** Camera reports (onCameraChanged / onMapIdle) DELIVERED this much later than captured — a busy JS thread / bridge;
+   *  each keeps its capture `timestamp` (round 9, finding 2). */
+  reportDelayMs?: number };
 /** animStep: this vsync's camera came from a native animation's update (fly / ease motion, not a cut). */
 export type Frame = { t: number; zoom: number; pitch: number; heading: number; sizeZoom: number | null; animating: boolean; animStep: boolean };
 
@@ -177,7 +180,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, followHeadingDeg: 90, markPainted: () => {}, setStyleGen: () => {},
     camInputsRef: ref({ followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, mapH: 480, mapW: 800, previewMulti: false, uiScale: 1, mapScale: 1 }),
     paintedRef: ref(true), lockReadyRef: ref(true), aaLiveRef: ref({ hasFix: true, lat: cam.lat, lng: cam.lng, followZoom: o.followZoom ?? 16.8, followPitch: 45 }),
-    camObsRef: ref(null), camWantRef: ref(null), camRepairRef: ref(M.newCamRepair ? M.newCamRepair() : null),
+    camObsRef: ref(null), camWantRef: ref(null), camRepairRef: ref(M.newCamRepair ? M.newCamRepair(now) : null),
     camHoldUntilRef: ref(0), crewEaseUntilRef: ref(0), reapplyAfterRef: ref(0), camHoldWasActiveRef: ref(false), crewOverviewRef: ref(false), returnFlyRef: ref(0), zoomSnapRef: ref(false),
     zoomHoldUntilRef: ref(0), userZoomRef: ref(0), zoomBaseRef: ref(0), pinchActiveRef: ref(false),
     manualZoomRef: ref(null), zoomChRef: ref(M.newCarZoomChannel()), zoomLogRef: ref(M.newCarZoomLog()),
@@ -279,8 +282,9 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
           camMoved = true;
           if (s >= 1) { anim = null; animEnds.push(now - T0); }
         }
-        if (camMoved) { camMoved = false; lastMoveAt = now; idlePending = true; turn(() => onCameraChanged(camState())); }
-        else if (idlePending && !anim && now - lastMoveAt >= 50) { idlePending = false; turn(() => onMapIdle(camState())); }
+        const report = (fn: (st: any) => void) => { const st = camState(); if (o.reportDelayMs) timers.push({ at: now + o.reportDelayMs, fn: () => fn(st), id: ++tid, raf: false }); else turn(() => fn(st)); };
+        if (camMoved) { camMoved = false; lastMoveAt = now; idlePending = true; report(onCameraChanged); }
+        else if (idlePending && !anim && now - lastMoveAt >= 50) { idlePending = false; report(onMapIdle); }
         frames.push({ t: now - T0, zoom: cam.zoom, pitch: cam.pitch, heading: cam.heading, sizeZoom, animating: !!anim, animStep });
         // rAF callbacks due at this vsync
         const due = timers.filter((x) => x.raf && x.at <= now); for (const t of due) { timers.splice(timers.indexOf(t), 1); turn(t.fn); }

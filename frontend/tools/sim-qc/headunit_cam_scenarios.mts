@@ -717,23 +717,117 @@ export function runDelayScenarios(src: Src): Result[] {
     ok(id, name, pass, `(native animation ${nativeRunning ? "still running" : "NOT running"} at the first finger; loop during the pinch: ${rowsDuring.length} rows, ${pendingDuring ? "OWED a push" : "owed nothing"}; after: ${j.judged ? (j.miss ? `OFF ${j.miss}` : `on the pinch framing at all ${j.judged} judged samples`) : "NEVER JUDGED"}; end ${t.held ? `NOT held (${t.held})` : "held 16.8/45/90"}; 60 s idle: ${t.idleWrites} writes; loop ${ops(repairRows(h, 0, h.now))})`);
   }
 
-  // RB — the budget, through the production code: a device whose map always REPORTS 0.1 of a zoom level off what it
-  // shows can never agree. Parked: ≤ 3 corrective pushes, then ONE giveup row, then silence (60 s: zero camera writes);
-  // a new owner write (recenter) re-arms it for ≤ 3 more and one more giveup; a MOVING car's lockstep never involves it.
+  // ════ Round 9 (three adversarial reviews of 6c8abe9d) — each finding's reproduction, through the production code ════
+  const native = (h: HU, o: any) => h.C.cameraRef.current.setCamera({ ...o, animationMode: "none", animationDuration: 0 });   // NOT an owner write
+  const poseOf = (h: HU) => `${f3(h.cam.zoom)}/${h.cam.pitch.toFixed(1)}/${h.cam.heading.toFixed(1)}`;
+  const at3 = (h: HU, z: number, p: number, hd: number) => Math.abs(h.cam.zoom - z) <= 0.02 && Math.abs(h.cam.pitch - p) <= 0.5 && angOff(h.cam.heading, hd) <= 0.5;
+  /** Largest number of `re` rows / camera writes in any `win` ms window of [a, b]. */
+  const perWindow = (ts: number[], win: number) => { let m = 0; for (let i = 0; i < ts.length; i++) { let n = 0; for (let k = i; k < ts.length && ts[k] - ts[i] < win; k++) n++; m = Math.max(m, n); } return m; };
+  const corrective = (h: HU, a: number) => h.rows(/cam-repair surf=car op=(push|fly)/).filter((r) => r.t >= a).map((r) => r.t);
+
+  // RB — the budget bounds a map that NEVER agrees (it always reports 0.1 of a level off), parked, 10 min: per episode
+  // ≤ 3 corrective writes then ONE giveup row; after it only slow retries (20 s, doubling); in any minute ≤ 6 corrective
+  // writes and ≤ 12 rows. A recenter starts a new episode (≤ 3 more, one more giveup). A moving car never involves it.
   for (const android of [false, true]) {
     const h = hPark(unit({ android, reportZoomBias: 0.1 }));
-    h.gesture({ kind: "recenter" }); h.advance(10000);
-    const r1 = repairRows(h, 0, h.now);   // the whole first episode: from the moment it parked (the loop starts there)
-    const w0 = writes(h), i0 = h.now; h.advance(60000);
-    const idle1 = writes(h) - w0, idleRows1 = repairRows(h, i0, h.now).length;
+    const t0 = h.now; h.advance(600000);
+    const rr = repairRows(h, t0, h.now), cw = corrective(h, t0), rowsT = rr.map((r) => r.t);
+    const gives = rr.filter((r) => / op=giveup/.test(r.row)).length;
+    const burst = cw.filter((t) => t < t0 + 10000).length;
     const t1 = h.now; h.gesture({ kind: "recenter" }); h.advance(10000);
     const r2 = repairRows(h, t1, h.now);
     const tm = h.now; h.setMoving(true); h.advance(10000);
     const rm = repairRows(h, tm, h.now).length;
-    const pushes = (rr: { row: string }[]) => rr.filter((r) => / op=(push|fly)/.test(r.row)).length, gives = (rr: { row: string }[]) => rr.filter((r) => / op=giveup/.test(r.row)).length;
-    ok(`RB1${android ? "a" : ""}`, `a map that always reports 0.1 off, parked: ≤ ${3} pushes (from parking, through a recenter) then ONE giveup, then 60 s with zero writes; a recenter re-arms it once more; moving: never (${android ? "Android" : "iOS"})`,
-      pushes(r1) <= 3 && pushes(r1) >= 1 && gives(r1) === 1 && idle1 === 0 && idleRows1 === 0 && pushes(r2) <= 3 && gives(r2) === 1 && rm === 0,
-      `(first episode ${ops(r1)}; idle 60 s: ${idle1} writes, ${idleRows1} rows; after a recenter ${ops(r2)}; 10 s moving: ${rm} rows)`);
+    ok(`RB1${android ? "a" : ""}`, `a map that always reports 0.1 off, parked 10 min: ≤ 3 corrective writes then ONE giveup, then slow retries only; ≤ 6 writes and ≤ 12 rows in any minute; a recenter = a new episode (≤ 3 + one giveup); moving: never (${android ? "Android" : "iOS"})`,
+      burst >= 1 && burst <= 3 && gives === 1 && perWindow(cw, 60000) <= 6 && perWindow(rowsT, 60000) <= 12 && cw.length <= 3 + 6
+      && r2.filter((r) => / op=(push|fly)/.test(r.row)).length <= 3 && r2.filter((r) => / op=giveup/.test(r.row)).length === 1 && rm === 0,
+      `(10 min: ${ops(rr)}; first 10 s ${burst} writes; most in a minute: ${perWindow(cw, 60000)} writes / ${perWindow(rowsT, 60000)} rows; slow retries at +${cw.filter((t) => t >= t0 + 10000).map((t) => Math.round((t - t0) / 1000)).join(", +")} s; after a recenter ${ops(r2)}; 10 s moving: ${rm} rows)`);
+  }
+
+  // RC — the time caps under a flood of episodes (probe1 P2: the never-agree map + an AppState re-assert every 3 s for
+  // 5 min used to log 175 rows and 75 corrective writes). Any minute: ≤ 6 unconfirmed corrective writes, ≤ 12 rows.
+  for (const android of [false, true]) {
+    const h = hPark(unit({ android, reportZoomBias: 0.1 }));
+    h.advance(15000);
+    const t0 = h.now;
+    for (let k = 0; k < 100; k++) { h.reassert(); h.advance(3000); }
+    const rr = repairRows(h, t0, h.now), cw = corrective(h, t0);
+    const mw = perWindow(cw, 60000), mr = perWindow(rr.map((r) => r.t), 60000);
+    ok(`RC1${android ? "a" : ""}`, `a never-agreeing map + an AppState re-assert every 3 s for 5 min: ≤ 6 corrective writes and ≤ 12 rows in any minute (${android ? "Android" : "iOS"})`,
+      mw <= 6 && mr <= 12, `(5 min: ${ops(rr)}; most in a minute: ${mw} writes / ${mr} rows; drop= on rows: ${rr.filter((r) => / drop=/.test(r.row)).length})`);
+  }
+
+  // BS — SEPARATE lost writes never exhaust a budget (probe3: DL0 ×4 at 2.5 s gave up and stranded the camera at
+  // 15/0/0). Codex's shape repeated N times, 150 ms native start delay, parked: 30 s after the last, home and held.
+  for (const [N, gap] of [[4, 2500], [5, 2000], [8, 2000]] as const) for (const android of [false, true]) {
+    const h = hPark(unit({ android, animStartDelayMs: 150 }));
+    h.C.__peers = [];
+    const t0 = h.now;
+    for (let k = 0; k < N; k++) { hAt(h, t0 + k * gap); h.crew(); h.advance(720); h.gesture({ kind: "recenter" }); }
+    const tl = h.now; h.advance(30000);
+    const rr = repairRows(h, t0, h.now);
+    const late = h.frames.filter((f) => f.t >= tl + 5000);
+    const off = late.find((f) => Math.abs(f.zoom - 16.8) > 0.02 || Math.abs(f.pitch - 45) > 0.5 || angOff(f.heading, 90) > 0.5);
+    ok(`BS${N}${android ? "a" : ""}`, `Codex's lost write ×${N}, ${gap} ms apart (150 ms native start delay, nearby crew, parked): home 5 s after the last and held for 25 s; no giveup (${android ? "Android" : "iOS"})`,
+      !off && !rr.some((r) => / op=giveup/.test(r.row)), `(${off ? `OFF at +${Math.round(off.t - tl)} ms: ${f3(off.zoom)}/${off.pitch.toFixed(1)}/${off.heading.toFixed(1)}` : `home ${poseOf(h)}`}; loop ${ops(rr)})`);
+  }
+
+  // GS — after a giveup the camera is not abandoned: a map that ignores EVERY write for 8 s (all three tries are lost),
+  // then works again. Nothing else happens. The slow retry must bring it home, then 60 s idle with zero writes.
+  for (const android of [false, true]) {
+    const h = hPark(unit({ android }));
+    const set0 = h.C.cameraRef.current.setCamera; let deafUntil = 0;
+    h.C.cameraRef.current.setCamera = (o: any) => { if (h.now < deafUntil) return; set0(o); };
+    const t0 = h.now; native(h, { zoomLevel: 12, pitch: 20 }); deafUntil = t0 + 8000;
+    h.advance(40000);
+    const rr = repairRows(h, t0, h.now);
+    const giveAt = rr.find((r) => / op=giveup/.test(r.row))?.t ?? NaN, okAt = rr.find((r) => / op=ok/.test(r.row))?.t ?? NaN;
+    const w0 = writes(h), i0 = h.now; h.advance(60000);
+    const idle = writes(h) - w0, idleRows = repairRows(h, i0, h.now).length;
+    ok(`GS1${android ? "a" : ""}`, `a map deaf to every write for 8 s: three tries lost → ONE giveup → a slow retry brings it home ≤ 25 s after the giveup with nothing happening; then 60 s idle with zero writes (${android ? "Android" : "iOS"})`,
+      Number.isFinite(giveAt) && Number.isFinite(okAt) && okAt - giveAt <= 25000 && at3(h, 16.8, 45, 90) && idle === 0 && idleRows === 0,
+      `(loop ${ops(rr)}; giveup +${Math.round(giveAt - t0)} ms, home +${Math.round(okAt - t0)} ms; camera ${poseOf(h)}; idle 60 s: ${idle} writes, ${idleRows} rows)`);
+  }
+
+  // RW — the repair RESTORES WHAT WAS WRITTEN, never the speed target (probe1 P3/P4). Parked, the target moved while
+  // stopped (a legitimate rest off target), then one foreign change: P3 — target 15.0/30, a 0.3-level loss → back at
+  // exactly the written 16.8/45; P4 — resting at 13.5 with the target at 16.8, a 3° pitch loss → back at 13.5/45.
+  for (const android of [false, true]) {
+    const h3 = hPark(unit({ android }));
+    h3.setFollowZoom(15.0); h3.setFollowPitch(30); h3.advance(3000);
+    const t3 = h3.now; native(h3, { zoomLevel: h3.cam.zoom - 0.3 }); h3.advance(5000);
+    ok(`RW1${android ? "a" : ""}`, `target moved while parked (15.0 / pitch 30), a 0.3-level loss → back at EXACTLY the written 16.8/45/90 (≤ 0.002 / 0.02°), not a step toward the target (${android ? "Android" : "iOS"})`,
+      Math.abs(h3.cam.zoom - 16.8) <= 0.002 && Math.abs(h3.cam.pitch - 45) <= 0.02 && angOff(h3.cam.heading, 90) <= 0.02, `(camera ${h3.cam.zoom.toFixed(4)}/${h3.cam.pitch.toFixed(3)}/${h3.cam.heading.toFixed(2)}; loop ${ops(repairRows(h3, t3, h3.now))})`);
+    const h4 = unit({ android, followZoom: 13.5 }); h4.advance(8000); hPark(h4);
+    h4.setFollowZoom(16.8); h4.advance(3000);
+    const t4 = h4.now; native(h4, { pitch: h4.cam.pitch + 3 }); h4.advance(5000);
+    ok(`RW2${android ? "a" : ""}`, `resting at z 13.5 with the target at 16.8, a 3° pitch loss → back at the written 13.5/45, not flown to the target (${android ? "Android" : "iOS"})`,
+      at3(h4, 13.5, 45, 90), `(camera ${poseOf(h4)}; loop ${ops(repairRows(h4, t4, h4.now))}; flies ${h4.rows(/cam-return-fly/).filter((r) => r.t >= t4).map((r) => r.row.split(" ").slice(2, 4).join(" ")).join(", ") || "-"})`);
+  }
+
+  // RD — a LATE REPORT is never judged against a newer write (two reviewers, independently): camera reports delivered
+  // 0 / 100 / 160 / 250 / 400 ms after they were captured × compass / recenter / '+' / tap-zoom, parked, iOS and Android;
+  // plus a recenter from a − framing below 14 and the same with the pitch target moved 45 → 60 while parked. Expected:
+  // ZERO loop rows (only the report is late), no fly, the camera on the owner's framing — the parked map never moved to
+  // the new pitch target.
+  const rdActs: [string, (h: HU) => void, number, number][] = [
+    ["compass", (h) => h.gesture({ kind: "compass" }), 16.8, 0],
+    ["recenter", (h) => h.gesture({ kind: "recenter" }), 16.8, 90],
+    ["+ press", (h) => h.press(0.5), 17.3, 90],
+    ["tap-zoom in", (h) => h.gesture({ kind: "zoom", scale: 1, velocity: 1 }), 17.8, 90],
+    ["recenter from a − framing at 12.8", (h) => h.gesture({ kind: "recenter" }), 16.8, 90],
+    ["recenter from 12.8 with the pitch target moved to 60 while parked", (h) => h.gesture({ kind: "recenter" }), 16.8, 90],
+  ];
+  let ri = 0;
+  for (const d of [0, 100, 160, 250, 400]) for (const [name, act, z, hd] of rdActs) for (const android of [false, true]) {
+    const h = hPark(unit({ android, reportDelayMs: d }));
+    if (name.includes("12.8")) { for (let k = 0; k < 8; k++) { h.press(-0.5); h.advance(120); } h.advance(1500); }
+    if (name.includes("pitch target")) h.setFollowPitch(60);
+    h.advance(3000);
+    const t0 = h.now; act(h); h.advance(5000);
+    const rr = repairRows(h, t0, h.now), fl = h.rows(/cam-return-fly/).filter((r) => r.t >= t0).length;
+    ok(`RD${++ri}`, `${name}, camera reports delivered ${d} ms late, parked (${android ? "Android" : "iOS"})`, rr.length === 0 && fl === 0 && at3(h, z, 45, hd),
+      `(loop ${ops(rr)}; flies ${fl}; camera ${poseOf(h)} want ${z}/45/${hd})`);
   }
 
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);

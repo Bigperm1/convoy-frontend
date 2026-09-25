@@ -1758,7 +1758,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // map reports once nothing owns the camera). The phone passes no camPoseOutRef: unchanged.
     if (camPoseOutRef) {
       const wh = (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : camHeading;
-      camPoseOutRef.current = { zoom: camZoom.current, pitch: camPitch.current, heading: typeof wh === 'number' ? wh : null, at: now };
+      // Finite values only (round 9: a NaN heading made the loop disagree forever); a non-finite zoom publishes nothing.
+      if (Number.isFinite(camZoom.current)) camPoseOutRef.current = { zoom: camZoom.current, pitch: Number.isFinite(camPitch.current) ? camPitch.current : null, heading: typeof wh === 'number' && Number.isFinite(wh) ? wh : null, at: now };
     }
     // CAM-APPLY RECEIPT (2026-09-03): ask the map where it ACTUALLY is, ≤1 poll / 2 s, async.
     // Jeff's 09:22 roundabout: pushes were issued the whole time (heat-probe cam == tick) yet

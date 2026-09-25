@@ -47,7 +47,9 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
   const mapTsx = readFileSync(new URL("../../app/(app)/map.tsx", import.meta.url), "utf8");
   ok("D1 the phone sheet builds its tiles from HAZARD_TILES (no second list)", sheet.includes("HAZARD_TILES.filter(") && !/\{ id: 'hz-/.test(sheet));
   ok("D2 the phone sheet has art for every report glyph in all four metals", ["hz_police", "hz_crash", "hz_hazard", "hz_traffic"].every((g) => new RegExp(`${g}:\\s*\\{ brand: require\\(.*premium: require\\(.*ultra: require\\(.*diamond: require\\(`).test(sheet)));
-  ok("D3 map.tsx mounts the Hazards FAB and the sheet, and the tap reports through reportHazard", mapTsx.includes('testID="hazards-fab"') && mapTsx.includes("<HazardSheet") && mapTsx.includes("void reportHazard(kind)"));
+  ok("D3 map.tsx mounts the Hazards FAB and the sheet, and the tap reports through reportHazard", mapTsx.includes('testID="hazards-fab"') && mapTsx.includes("<HazardSheet") && mapTsx.includes("return reportHazard(kind)"));
+  ok("D5 the sheet dismisses when turn-by-turn starts and holds off a second tap while a report is in flight", mapTsx.includes('dismiss={navMode === "turn-by-turn"}') && sheet.includes("if (visible && dismiss) onClose();") && sheet.includes("if (_reportBusy) return;") && sheet.includes("finally(() => { _reportBusy = false; })"));
+  ok("D6 the panel is a GlassFill card, not Glass (Glass collapsed to 0 height inside the Modal on the sim)", sheet.includes("<GlassFill intensity={70}") && !sheet.includes("<Glass radius"));
   ok("D4 the phone FAB sits between Crew and the compass (CarPlay order: crew then hazards)", mapTsx.indexOf('testID="crew-fit-fab"') < mapTsx.indexOf('testID="hazards-fab"') && mapTsx.indexOf('testID="hazards-fab"') < mapTsx.indexOf('testID="compass-fab"'));
 }
 

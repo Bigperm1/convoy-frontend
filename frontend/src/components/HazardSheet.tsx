@@ -9,7 +9,7 @@
 // the same POST /hazards the voice intents use — and closes the sheet; the confirmation is the ReportToast pill.
 import React, { useEffect, useRef } from "react";
 import { Animated, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import Glass from "../Glass";
+import { GlassFill } from "../Glass";
 import { PressableScale } from "../ui/PressableScale";
 import { useAppSkin } from "../appSkin";
 import { haptics } from "../haptics";
@@ -29,13 +29,22 @@ export const HAZARD_FAB_ART = HAZARD_ART.hz_hazard;
 const REPORT_TILES = HAZARD_TILES.filter((t): t is typeof t & { kind: HazardKind; glyph: keyof typeof HAZARD_ART } => t.kind != null && t.glyph in HAZARD_ART);
 const TILE = 76;                      // pt; the Hairpin square radius is 28 % of it
 const TILE_RADIUS = Math.round(TILE * 0.28);
+// One report at a time (Codex review 2026-09-24): the sheet closes on the tap, so React state cannot dedupe a second
+// tap or a re-open during a slow POST — the CarPlay path has _reportInFlight for the same reason. Module-level so it
+// survives the sheet unmounting; released when the caller's promise settles.
+let _reportBusy = false;
 
-export default function HazardSheet({ visible, onClose, onReport }: {
+export default function HazardSheet({ visible, onClose, onReport, dismiss }: {
   visible: boolean;
   onClose: () => void;
-  onReport: (kind: HazardKind) => void;
+  /** Returns the report's promise so the sheet can hold off a second tap until it settles. */
+  onReport: (kind: HazardKind) => Promise<unknown> | void;
+  /** True while turn-by-turn is active: a sheet left open at drive start (the speed auto-start, a car-session
+   *  adoption) must not sit over guidance (Codex review 2026-09-24). */
+  dismiss?: boolean;
 }) {
   const metal = useAppSkin();
+  useEffect(() => { if (visible && dismiss) onClose(); }, [visible, dismiss, onClose]);
   const y = useRef(new Animated.Value(40)).current;
   useEffect(() => {
     if (!visible) { y.setValue(40); return; }
@@ -49,7 +58,8 @@ export default function HazardSheet({ visible, onClose, onReport }: {
         <Animated.View style={[styles.sheetWrap, { transform: [{ translateY: y }] }]}>
           {/* Stop backdrop taps inside the panel */}
           <Pressable onPress={() => {}} testID="hazard-sheet">
-            <Glass radius={26}>
+            <View style={styles.card}>
+              <GlassFill intensity={70} style={styles.cardFill} />
               <View style={styles.inner}>
                 <Text maxFontSizeMultiplier={1.2} style={styles.title}>Report</Text>
                 <View style={styles.row}>
@@ -59,7 +69,12 @@ export default function HazardSheet({ visible, onClose, onReport }: {
                       testID={`report-${t.kind}`}
                       style={styles.tile}
                       accessibilityLabel={`Report ${t.title}`}
-                      onPress={() => { haptics.snap(); onReport(t.kind); }}
+                      onPress={() => {
+                        if (_reportBusy) return;
+                        haptics.snap();
+                        _reportBusy = true;
+                        Promise.resolve(onReport(t.kind)).catch(() => {}).finally(() => { _reportBusy = false; });
+                      }}
                     >
                       <View style={styles.tileFace}>
                         <Image source={HAZARD_ART[t.glyph][metal]} style={styles.glyph} resizeMode="contain" />
@@ -70,7 +85,7 @@ export default function HazardSheet({ visible, onClose, onReport }: {
                 </View>
                 <Text maxFontSizeMultiplier={1.2} style={styles.hint}>Pinned where you were 5 seconds ago. The crew sees it right away.</Text>
               </View>
-            </Glass>
+            </View>
           </Pressable>
         </Animated.View>
       </Pressable>
@@ -80,7 +95,9 @@ export default function HazardSheet({ visible, onClose, onReport }: {
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.42)" },
-  sheetWrap: { paddingHorizontal: 12, paddingBottom: 28 },
+  sheetWrap: { paddingHorizontal: 12, paddingBottom: 28, width: "100%" },
+  card: { borderRadius: 26, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)", backgroundColor: "rgba(28,28,30,0.55)" },
+  cardFill: { borderRadius: 26, overflow: "hidden" },
   inner: { paddingTop: 16, paddingBottom: 14, paddingHorizontal: 14 },
   title: { color: "#F4F4F4", fontSize: 20, fontWeight: "700", letterSpacing: -0.2, textAlign: "center", marginBottom: 14 },
   row: { flexDirection: "row", justifyContent: "space-between", gap: 8 },

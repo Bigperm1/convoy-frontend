@@ -6238,8 +6238,9 @@ export default function MapScreen() {
       {/* The Report sheet (the head unit's grid, on the phone). Closes on the tap; the toast confirms. */}
       <HazardSheet
         visible={showReport}
+        dismiss={navMode === "turn-by-turn"}
         onClose={() => setShowReport(false)}
-        onReport={(kind) => { setShowReport(false); try { logEvent(`hazard-panel pick surf=phone id=hz-${kind} kind=${kind}`); } catch {} void reportHazard(kind); }}
+        onReport={(kind) => { setShowReport(false); try { logEvent(`hazard-panel pick surf=phone id=hz-${kind} kind=${kind}`); } catch {} return reportHazard(kind); }}
       />
       {/* Music broadcast toast — shows up when the convoy admin pushes a
           track from the Music screen. Sits slightly higher than the report

@@ -1066,6 +1066,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-CC `1fe07ebb` (code `82936248`, 2026-09-25 02:49 PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "make sure the glyphs are the
+  same neon colour as the border just like the food/gas/etc. Also remove the confirmation popup when selecting to remove the alert.
+  Since the compass has moved make sure you put a 7sec timer on the crew press to zoom back to user location."** Tile glyphs tinted
+  the kind's bright colour (compass keeps the metal); the card's Remove deletes without the native confirm; `src/crewReturn.ts`
+  CREW_RETURN_MS 7000 armed right after the 🔒 crew-fit block → recenterNow() + `crew-return ms=` crumb (the map's return fly then
+  brings the chase back on the next push). Sim receipts on a moving car: press → foll=0, 7.0 s later crew-return + foll=1 lockstep=1.
+  Gates G9–G11, 60/60 sim-qc, nav-lock PASS (no relock).
 - **✅ PUBLISHED in OTA-CB `c9be74ad` (code `028c372a`, 2026-09-25 02:29 PDT, Jeff: "Put the neon border around the hazard panel square glyphs. Ship it"; KEY_PRESENT=1 iOS + Android) — the Report panel round THREE (2026-09-25 01:40–02:35 PDT, Jeff off his OTA-CA screenshots: "You
   didn't listen to my request in the FAB button layout … The compass needs to be 2D/3D on the phone. And the hazard on the top …
   the pin is wrong … Police pin is the shield with the P in it and in the ev charging colour … redo the remove pin panel … make

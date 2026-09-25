@@ -51,7 +51,7 @@ import {
   useRouteTrafficRefresh, fetchRouteViaStops, arriveNow, countRouteUturns, fmtUturnAt,
 } from "../../src/nav";
 import { getDepartureBearing, departureBearingSource, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
-import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot } from "../../src/locationPrivacy";
+import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot, subscribeHeadUnit } from "../../src/locationPrivacy";
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
 import { removeWhenSettled } from "../../src/carFeedOwner";
@@ -3769,15 +3769,23 @@ export default function MapScreen() {
   // kept fresh fixes in the background (acc 7→5→6→41→21→24→7→8→16→13 m) and the phone and car rows carried the same
   // fix at 08:25:02. That this watcher was the writer is a HYPOTHESIS (code read: it is the only continuous phone-coords
   // writer outside turn-by-turn); the stale gate is VERIFIED by reading this effect.
-  // `fgWatchKeep` is true exactly when the gate lets the watcher run, so as a dep it re-runs the effect — and tears
-  // the watcher down — the moment nav ends while the app is not active. While the app is active it never changes.
-  // A nav that STARTS while backgrounded also flips it; that re-run must not START a watcher the old code never
-  // started, so fgWatchKeepRef carries the previous run's value and the gate refuses a background start after a run
-  // that had none. Gate: tools/sim-qc/car_feed_leak_test.mts F.
-  const fgWatchKeep = appActive || navMode === "turn-by-turn";
+  // `fgWatchKeep` goes false exactly when a watcher that is running in the background has lost every reason to:
+  // the app is not active, no phone route, and no head unit (review 2026-09-25: a HEAD UNIT keeps it — a phone route
+  // that ends behind CarPlay / Android Auto and a second one started from the head unit keep the watcher they always
+  // had). As a dep it re-runs the effect, whose gate then tears the watcher down: at the disconnect, or when the route
+  // ends after it. While the app is active it never changes. A flip to TRUE while backgrounded (a route or a head unit
+  // arriving) must not START a watcher the old code never started, so fgWatchKeepRef carries the previous run's value
+  // and the gate refuses a background start after a run that had none. The head-unit flag is locationPrivacy's own
+  // aggregate (headUnitAttachedRaw: the CarPlay session on iOS, AndroidAutoRoot on Android — never map.tsx's
+  // `carConnected`, which is spurious on Android), made reactive by subscribeHeadUnit.
+  // Gate: tools/sim-qc/car_feed_leak_test.mts M (this effect, extracted and run) and F.
+  const [huAttached, setHuAttached] = useState(() => headUnitAttachedRaw());
+  useEffect(() => { setHuAttached(headUnitAttachedRaw()); return subscribeHeadUnit(setHuAttached); }, []);
+  const fgWatchKeep = appActive || navMode === "turn-by-turn" || huAttached;
   const fgWatchKeepRef = useRef(true);
   useEffect(() => {
     let sub: any = null;
+    let subAt = 0;   // when `sub` resolved — a removal younger than the native settle waits for it (removeWhenSettled)
     // Set by this effect's cleanup. The old shape — `sub = await Location.watchPositionAsync(…)` with a cleanup of
     // `sub?.remove?.()` — lost any watch that resolved after the cleanup had already run (nothing was left to remove
     // it). A watch that resolves after `cancelled` is removed (src/carFeedOwner.ts removeWhenSettled), and a delivery
@@ -3798,8 +3806,8 @@ export default function MapScreen() {
         // startForegroundCarFeed → carStore, so the car map tracks without this watcher.)
         // 🔒 NAV-LOCK begin map-fgwatch-gate — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         if (!appActive && !navActiveRef.current) return;
-        // Backgrounded, and the previous run had no watcher (it saw no nav): this run exists only because a nav
-        // started in the background — keep the pre-2026-09-25 behaviour, no background start (see fgWatchKeep).
+        // Backgrounded, and the previous run had no reason to run (no route, no head unit): this run exists only because a
+        // route or a head unit arrived in the background — keep the pre-2026-09-25 behaviour, no background start.
         if (!appActive && !keepPrev) return;
         // ── THE ONE LOCATION FEED, AND ITS ONE SWITCH ─────────────────────────────
         // Default (liteGps off): BestForNavigation @ 500 ms / 2 m. Measured p50
@@ -4003,13 +4011,16 @@ export default function MapScreen() {
           }
         ).then((s) => {
           sub = s;
+          subAt = Date.now();
           // The cleanup already ran while the start was in flight: never keep it (removed once the native start
           // has settled — src/carFeedOwner.ts removeWhenSettled; its first delivery removes it sooner, above).
-          if (cancelled) removeWhenSettled(s, Date.now());
+          if (cancelled) removeWhenSettled(s, subAt);
         });
       } catch {}
     })();
-    return () => { cancelled = true; try { sub?.remove?.(); } catch {} };
+    // At once for a watch older than the native settle (every real one); a younger one when it has settled — a remove
+    // that lands before the native stream started can strand it (src/carFeedOwner.ts header, Codex 2026-09-25).
+    return () => { cancelled = true; if (sub) removeWhenSettled(sub, subAt); };
     // Re-subscribe on foreground/background change and on the Lite GPS switch — not on a nav start/stop while the
     // app is active (read via navActiveRef, so a mid-drive start/stop never blips GPS). fgWatchKeep flips only while
     // the app is NOT active, which is when a nav ending must stop this watcher (privacy, 2026-09-25, above).

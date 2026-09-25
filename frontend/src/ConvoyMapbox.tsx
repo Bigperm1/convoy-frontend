@@ -34,7 +34,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { overviewSizePt, isOverviewZoom } from "./overviewSize";
 import { RETURN_FLY_MS, predictAhead, returnFlyStep } from "./returnFly";
-import { reportDraw, reportPoseFix, resetPoseFixBudget, carSurfaceLive } from "./drawTelemetry";
+import { reportDraw, reportPoseFix, resetPoseFixBudget, reportCamApply } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
 import { createFramePacer, frameDue, msUntilDue, navMapFps } from "./framePacer";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, poseRoadWindowM, rfPredict, rfFix, rfPose, type RfState } from "./poseEstimator";
@@ -1715,10 +1715,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
           if (!Array.isArray(ctr) || typeof z !== 'number') return;
           const dM = Math.hypot((ctr[1] - reqLa) * 111320, (ctr[0] - reqLn) * 111320 * Math.cos((reqLa * Math.PI) / 180));
           const dz = z - reqZ;
-          // A car-surface row prints the car camera's centre (the driver's position): only while CarPlay / Android
-          // Auto is live — the view stays mounted after a disconnect (privacy, 2026-09-25; src/drawTelemetry.ts).
-          if ((dM > 15 || Math.abs(dz) > 0.4) && (probeRole !== 'car' || carSurfaceLive())) {
-            try { logEvent(`cam-apply surf=${probeRole} dM=${Math.round(dM)} dz=${dz.toFixed(2)} req=${reqLa.toFixed(5)},${reqLn.toFixed(5)} z=${reqZ.toFixed(2)} act=${Number(ctr[1]).toFixed(5)},${Number(ctr[0]).toFixed(5)} z=${z.toFixed(2)} lag=${Date.now() - at}`); } catch {}
+          // A car-surface row prints the car camera's centre (the driver's position): reportCamApply drops it unless
+          // CarPlay / Android Auto is live — the view stays mounted after a disconnect (privacy, 2026-09-25).
+          if (dM > 15 || Math.abs(dz) > 0.4) {
+            reportCamApply(probeRole, `dM=${Math.round(dM)} dz=${dz.toFixed(2)} req=${reqLa.toFixed(5)},${reqLn.toFixed(5)} z=${reqZ.toFixed(2)} act=${Number(ctr[1]).toFixed(5)},${Number(ctr[0]).toFixed(5)} z=${z.toFixed(2)} lag=${Date.now() - at}`);
           }
         }).catch(() => { camApplyBusy.current = false; });
       } catch { camApplyBusy.current = false; }

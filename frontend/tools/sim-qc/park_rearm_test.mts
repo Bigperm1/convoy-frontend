@@ -26,9 +26,17 @@
 //   J1 his recorded fixes → stays pinned: latch false, parkEndedByHeadUnit() true, share = the car spot, spot unmoved.
 //   J2 the same stretch densified to 1 Hz with EVERY fix at 29 km/h (worse than the data) → still pinned: the
 //      displacement rule refuses it however long the speed artifact lasts.
-//   R  a real drive-away after a witnessed park → re-arms 15–20 s after the run starts and >= 150 m from it, live after.
-//   L  a red light mid re-arm → the run starts over.
-//   G  a gap with no fixes → the run starts over.
+//   V  the rule's values (src/parkRearm.ts, outside nav-lock) are pinned.
+//   R  a real drive-away after a witnessed park → re-arms once 15 s at >= 15 km/h AND 250 m are in (<= 30 s), live
+//      after; a highway pull-away within 20 s.
+//   L  a 25 s red light mid-proof does not start it over.
+//   E  stop-sign grids (100–160 m blocks) and stop-and-go traffic prove within ~60–75 s (v1 never did).
+//   G  one far fix after a gap cannot prove (the robust median).
+//   O  Jeff's 08-29 walk (rows as recorded, the >= 9 km/h counterfactual, and 41 s stuck on the multipath coordinate).
+//   S  every new witness starts the proof from nothing (S1), and a witness adopted by hydrate drops a racing latch (S2).
+//   K  the head-unit sources: an iOS COLD CarPlay disconnect is witnessed (K0 = the pre-fix cold path sharing live),
+//      a cold connect clears yesterday's witness (K2/K3), the map mirror cannot create or cancel a witness (K4), and
+//      with no session source the map mirror still works (K5).
 //   C  a CarPlay reconnect → the witness clears at once; the first vehicular fix is live (unchanged).
 //   U  no witnessed park → identical outputs to the pre-fix module, fix by fix (the "byte-for-byte" claim).
 //   H  a witness restored from disk (hydrate, hu=1) is protected the same way; H2 with a driving stamp < 90 s old
@@ -180,45 +188,111 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
   ok(`J2 ${n} fixes at 29 km/h over ${(t3 - t0) / S} s (his positions, max ${maxFromFirst.toFixed(0)} m from the first) → still pinned`, allOk, bad.join(" | "));
 }
 
+// ── V · the rule's values are pinned (src/parkRearm.ts is outside tools/sim-qc/data/nav-lock.json) ────────────────
+// Changing one of these needs Jeff's say-so (RULES.md §4) — the lock tool does not cover this file yet.
+{
+  const R = await import(new URL("parkRearm.ts", SRC).href);
+  const want = { PARK_REARM_WINDOW_MS: 120_000, PARK_REARM_VEHICULAR_MS: 15_000, PARK_REARM_MIN_M: 250, PARK_REARM_MOVE_RATIO: 0.5, PARK_REARM_FIX_CREDIT_MS: 2_000 };
+  const got = Object.fromEntries(Object.keys(want).map((k) => [k, (R as any)[k]]));
+  ok("V1 parkRearm constants are the approved values", JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
+}
+
+// Kinematic drive at 2 Hz (the phone watcher's default 500 ms / 2 m): accelerate a m/s² to vmax, cruise, brake b m/s²
+// to 0 at each stop, stand `stopS` s with no fixes (the 2 m distance filter), repeat. Straight road north from SPOT.
+// (The model of review-priv/s_edges.mts, 2026-09-25.) Returns seconds until the witness cleared, or null.
+function grid(lp: LP, t0: number, blocks: number, blockM: number, vmax: number, a = 1.5, b = 2.0, stopS = 3): number | null {
+  let t = t0, pos = SPOT;
+  for (let k = 0; k < blocks; k++) {
+    let x = 0, v = 0;
+    while (x < blockM - 0.01) {
+      const brakeDist = (v * v) / (2 * b);
+      if (blockM - x <= brakeDist + 0.001 && v > 0) v = Math.max(0, v - b * 0.5); else v = Math.min(vmax, v + a * 0.5);
+      if (v <= 0.05 && x > blockM / 2) break;
+      const dx = Math.min(v * 0.5, blockM - x); x += dx; pos = north(pos, dx); t += 500; clock = t;
+      lp.noteFix(pos.lat, pos.lng, v, 0);
+      if (!lp.parkEndedByHeadUnit()) return (t - t0) / S;
+    }
+    t += stopS * S;
+  }
+  return null;
+}
+// Stop-and-go: speed 0 → vpeak → 0 as a half-sine of period P s; 2 Hz fixes while moving (none while stopped).
+function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): number | null {
+  let t = t0, pos = SPOT;
+  for (let i = 0; i < maxS * 2; i++) {
+    t += 500; clock = t; const v = vpk * Math.sin(Math.PI * (((i * 0.5) % P) / P));
+    pos = north(pos, v * 0.5); if (v > 0.3) lp.noteFix(pos.lat, pos.lng, v, 0);
+    if (!lp.parkEndedByHeadUnit()) return (t - t0) / S;
+  }
+  return null;
+}
+
 // ── R · a real drive-away after a witnessed park ────────────────────────────────────────────────────────────────
 {
   const lp = await fresh();
   parkWithCarPlay(lp);
   const T = utc(17, 30, 0);                       // 20 min later, no CarPlay this time (phone in the mount)
-  let pos = SPOT; let v = 0; let runStart: { t: number; p: { lat: number; lng: number } } | null = null;
-  let armed: { t: number; dt: number; d: number } | null = null; let earlyArm = false;
-  for (let i = 0; i <= 40 && !armed; i++) {
+  let pos = SPOT; let v = 0; let firstVeh: number | null = null;
+  let armed: { s: number; sinceVeh: number; fromSpot: number } | null = null;
+  for (let i = 0; i <= 60 && !armed; i++) {
     clock = T + i * S;
     v = Math.min(i * 1.0, 11);                    // 1 m/s² from rest to 40 km/h
     pos = north(pos, v);                           // metres covered in the last second ≈ current speed
     lp.noteFix(pos.lat, pos.lng, v, 0);
-    if (!runStart && v >= kmh(15)) runStart = { t: clock, p: pos };
-    if (lp.privacyDebug().latch) {
-      armed = { t: clock, dt: runStart ? (clock - runStart.t) / S : -1, d: runStart ? metres(runStart.p, pos) : -1 };
-      if (armed.dt < 15 || armed.d < 150) earlyArm = true;
-    }
+    if (firstVeh == null && v >= kmh(15)) firstVeh = clock;
+    if (lp.privacyDebug().latch) armed = { s: i, sinceVeh: (clock - (firstVeh ?? clock)) / S, fromSpot: metres(SPOT, pos) };
   }
-  ok("R1 not re-armed before 15 s and 150 m of vehicular run", !!armed && !earlyArm, JSON.stringify(armed));
-  ok("R2 re-armed within 20 s of the run's first ≥ 15 km/h fix", !!armed && armed.dt <= 20, JSON.stringify(armed));
+  ok("R1 not re-armed before 15 s at >= 15 km/h and 250 m from the spot", !!armed && armed.sinceVeh >= 15 && armed.fromSpot >= 250, JSON.stringify(armed));
+  ok("R2 re-armed within 30 s of pulling away (1 m/s² to 40 km/h)", !!armed && armed.s <= 30, JSON.stringify(armed));
   ok("R3 the witnessed park is cleared by the re-arm", lp.parkEndedByHeadUnit() === false);
   clock += S; pos = north(pos, 11); lp.noteFix(pos.lat, pos.lng, 11, 0);
   const sh = lp.shareablePosition({ ...pos, speed: 11, heading: 0 });
   ok("R4 …and the next fix is shared LIVE and recorded as the car spot", sh.share === true && (sh as any).lat === pos.lat && lp.carSpot()?.lat === pos.lat, JSON.stringify(sh));
 }
+{
+  // Highway pull-away: 2.5 m/s² to 100 km/h, 1 Hz.
+  const lp = await fresh(); parkWithCarPlay(lp);
+  const T = utc(17, 35, 0); let pos = SPOT; let at: number | null = null;
+  for (let i = 0; i <= 60 && at == null; i++) { clock = T + i * S; const v = Math.min(2.5 * i, kmh(100)); pos = north(pos, v); lp.noteFix(pos.lat, pos.lng, v, 0); if (!lp.parkEndedByHeadUnit()) at = i; }
+  ok("R5 highway pull-away (2.5 m/s² to 100 km/h) proves within 20 s", at != null && at <= 20, `after ${at} s`);
+}
 
-// ── L · a red light in the middle of the re-arm ─────────────────────────────────────────────────────────────────
+// ── L · a red light in the middle of the proof does not start it over ─────────────────────────────────────────
 {
   const lp = await fresh();
   parkWithCarPlay(lp);
   let t = utc(17, 40, 0); let pos = SPOT;
   const step = (v: number) => { t += S; clock = t; pos = north(pos, v); lp.noteFix(pos.lat, pos.lng, v, 0); };
-  for (let i = 0; i < 12; i++) step(10);          // 12 s at 36 km/h: a run of 110 m
-  for (let i = 0; i < 3; i++) step(0);            // red light: below 9 km/h → the run starts over
+  for (let i = 0; i < 12; i++) step(10);          // 12 s at 36 km/h: 120 m
+  step(2); step(0.5);                              // braking to the light
+  t += 25 * S;                                     // 25 s red light: no fixes (2 m distance filter)
   const resumeAt = t + S;
   let armedDt: number | null = null;
-  for (let i = 0; i < 25 && armedDt == null; i++) { step(10); if (lp.privacyDebug().latch) armedDt = (t - resumeAt) / S; }
-  ok("L1 the stop reset the run: not armed at resume + 10 s (though 22 s / 220 m of vehicular driving in total)", armedDt != null && armedDt >= 15, `armed ${armedDt} s after resuming`);
-  ok("L2 …armed once the NEW run held 15 s and 150 m", armedDt != null && armedDt <= 16, `armed ${armedDt} s after resuming`);
+  for (let i = 0; i < 40 && armedDt == null; i++) { step(10); if (lp.privacyDebug().latch) armedDt = (t - resumeAt) / S; }
+  ok("L1 a 25 s red light mid-proof: armed within 15 s of pulling away again (v1 started over and needed 16+)", armedDt != null && armedDt <= 15, `armed ${armedDt} s after resuming`);
+}
+
+// ── E · stop-sign grids and stop-and-go traffic prove (v1 never did: review-priv/s_edges.mts) ────────────────────
+{
+  const res: string[] = []; let allOk = true;
+  for (const [blocks, blockM, vk, limit] of [[20, 100, 30, 60], [20, 150, 30, 60], [20, 160, 30, 60], [20, 120, 40, 60], [20, 150, 50, 60], [3, 400, 50, 60]] as const) {
+    const lp = await fresh(); parkWithCarPlay(lp);
+    const s2 = grid(lp, utc(18, 0, 0), blocks, blockM, kmh(vk));
+    if (s2 == null || s2 > limit) allOk = false;
+    res.push(`${blocks}×${blockM}m@${vk}:${s2 ?? "PINNED"}s`);
+  }
+  ok("E1 stop-sign grids (100–160 m blocks, 3 s stops) prove within 60 s", allOk, res.join(" "));
+}
+{
+  const res: string[] = []; let allOk = true;
+  // 71 s is the computed bound for the slowest case (250 m at 2/π × 20 km/h = 3.5 m/s); 75 s allows the 2 Hz sampling.
+  for (const [vpk, P, limit] of [[20, 20, 75], [25, 30, 75], [30, 40, 60]] as const) {
+    const lp = await fresh(); parkWithCarPlay(lp);
+    const s2 = stopAndGo(lp, utc(18, 30, 0), kmh(vpk), P);
+    if (s2 == null || s2 > limit) allOk = false;
+    res.push(`peak${vpk}/P${P}:${s2 ?? "PINNED"}s`);
+  }
+  ok("E2 stop-and-go (half-sine to 20–30 km/h, 20–40 s period) proves within the computed bound", allOk, res.join(" "));
 }
 
 // ── G · a gap with no fixes ─────────────────────────────────────────────────────────────────────────────────────
@@ -228,7 +302,199 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
   let t = utc(17, 50, 0); let pos = SPOT;
   for (let i = 0; i < 10; i++) { t += S; clock = t; pos = north(pos, 10); lp.noteFix(pos.lat, pos.lng, 10, 0); }
   t += 60 * S; clock = t; pos = north(pos, 700); lp.noteFix(pos.lat, pos.lng, 10, 0);   // 60 s later, 700 m on
-  ok("G1 a 60 s gap is not 'held': one fix 700 m away does not re-arm", lp.privacyDebug().latch === false && lp.parkEndedByHeadUnit() === true);
+  ok("G1 one fix 700 m away after a 60 s gap does not re-arm (the median of the last three cannot be one fix)", lp.privacyDebug().latch === false && lp.parkEndedByHeadUnit() === true);
+}
+
+// ── O · Jeff's 08-29 walk (crash_reports, handle Jeff, SELECT only; UTC) ─────────────────────────────────────────
+//   20:00:46.090 spd=9 49.173335,-122.666000 · 20:00:56.095 spd=16 49.173400,-122.665518 · 20:01:06.564 spd=12
+//   49.173395,-122.665085 · 20:01:17.091 spd=7 49.173371,-122.665494 · 20:01:28.633 spd=51 49.173307,-122.660864 (the
+//   multipath fix, 338 m away) · 20:02:09.411 spd=49 49.173307,-122.660870 (the same coordinate 41 s later).
+// Replayed after the 09-25 witnessed park at SPOT (the same street; SPOT is 30–70 m from his walking fixes).
+{
+  const P = (lat: number, lng: number) => ({ lat, lng });
+  const REC = [
+    { s: 0, p: P(49.173335, -122.666000), v: 9 }, { s: 10.005, p: P(49.173400, -122.665518), v: 16 },
+    { s: 20.474, p: P(49.173395, -122.665085), v: 12 }, { s: 31.001, p: P(49.173371, -122.665494), v: 7 },
+    { s: 42.543, p: P(49.173307, -122.660864), v: 51 }, { s: 83.321, p: P(49.173307, -122.660870), v: 49 },
+  ];
+  const pinnedAll = (lp: LP, seq: { s: number; p: { lat: number; lng: number }; v: number }[], t0: number) => {
+    const bad: string[] = [];
+    for (const f of seq) {
+      clock = t0 + Math.round(f.s * S); lp.noteFix(f.p.lat, f.p.lng, kmh(f.v), null);
+      const r = pinnedAtSpot(lp, { ...f.p, speed: kmh(f.v) });
+      if (!r.ok && bad.length < 2) bad.push(`+${f.s.toFixed(1)}s ${r.why}`);
+    }
+    return bad;
+  };
+  const densify = (seq: typeof REC, over: (i: number, v: number) => number = (_i, v) => v) => {
+    const out: typeof REC = [];
+    for (let i = 0; i + 1 < seq.length; i++) {
+      const a = seq[i], b = seq[i + 1];
+      for (let s2 = a.s; s2 < b.s; s2 += 1) { const k = (s2 - a.s) / (b.s - a.s); out.push({ s: s2, p: P(a.p.lat + (b.p.lat - a.p.lat) * k, a.p.lng + (b.p.lng - a.p.lng) * k), v: over(i, a.v + (b.v - a.v) * k) }); }
+    }
+    out.push(seq[seq.length - 1]);
+    return out;
+  };
+  {
+    const lp = await fresh(); parkWithCarPlay(lp);
+    const bad = pinnedAll(lp, REC, utc(18, 50, 0));
+    ok("O1 his 08-29 rows as recorded (both multipath fixes included) → pinned after every one", bad.length === 0, bad.join(" | "));
+  }
+  {
+    // Counterfactual (review-priv/s_outlier.mts b): the 7 km/h sample read 10, so every walking fix is >= 9 km/h,
+    // densified to 1 Hz by interpolation up to the first multipath fix, then one walking fix back.
+    const lp = await fresh(); parkWithCarPlay(lp);
+    const seq = densify(REC.slice(0, 4).map((f, i) => (i === 3 ? { ...f, v: 10 } : f)).concat([{ s: 41.6, p: P(49.173360, -122.665600), v: 10 }, REC[4], { s: 43.6, p: P(49.173371, -122.665494), v: 12 }]));
+    const bad = pinnedAll(lp, seq, utc(19, 0, 0));
+    ok("O2 counterfactual: walking >= 9 km/h at 1 Hz + the 338 m outlier + a walking fix → pinned", bad.length === 0, bad.join(" | "));
+  }
+  {
+    // The adversarial reading of the two multipath rows 41 s apart: the phone sat on the bad coordinate the whole time,
+    // reporting ~50 km/h at 1 Hz. Robust position AND displacement are then satisfied — only the move ratio refuses it.
+    const lp = await fresh(); parkWithCarPlay(lp);
+    const stuck = [] as typeof REC;
+    for (let s2 = 42.543; s2 <= 83.321; s2 += 1) stuck.push({ s: s2, p: P(49.173307, -122.660864 - 0.000006 * ((s2 - 42.543) / 40.778)), v: 50 });
+    const seq = densify(REC.slice(0, 4)).concat(stuck);
+    const bad = pinnedAll(lp, seq, utc(19, 10, 0));
+    ok(`O3 the phone stuck 41 s on the multipath coordinate (${metres(SPOT, REC[4].p).toFixed(0)} m from the spot) at 50 km/h → pinned (it never moved as its speed claims)`, bad.length === 0, bad.join(" | "));
+  }
+}
+
+{
+  // O4: the phone in a car that has NOT left — circling the car park at 16 km/h (a 40 m loop, so the speed and the
+  // moves agree and vehicular time accrues) — then ONE multipath fix 400 m away. Only the robust median refuses it:
+  // the last three fixes' median is still in the car park.
+  const lp = await fresh(); parkWithCarPlay(lp);
+  const t0 = utc(19, 20, 0); const R0 = 20; const v = kmh(16);
+  const loopAt = (s2: number) => { const a = (v * s2) / R0; return { lat: SPOT.lat + (R0 * Math.sin(a)) / 111320, lng: SPOT.lng + (R0 * (1 - Math.cos(a))) / (111320 * Math.cos((SPOT.lat * Math.PI) / 180)) }; };
+  let bad = "";
+  for (let s2 = 0; s2 <= 60; s2++) { clock = t0 + s2 * S; const p = loopAt(s2); lp.noteFix(p.lat, p.lng, v, null); }
+  const far = north(SPOT, 400); clock = t0 + 61 * S; lp.noteFix(far.lat, far.lng, kmh(50), null);
+  const back = loopAt(62); clock = t0 + 62 * S; lp.noteFix(back.lat, back.lng, v, null);
+  const r = pinnedAtSpot(lp, { ...back, speed: v });
+  if (!r.ok) bad = r.why;
+  ok("O4 60 s circling the car park at 16 km/h, then ONE fix 400 m away → pinned (the median of the last three)", bad === "", bad);
+}
+
+// ── S · every new witness starts the proof from nothing ─────────────────────────────────────────────────────────
+{
+  // S1 (review-priv/s_edges.mts): a proven drive-away, then a head-unit session with no fix in between, then a walk.
+  const lp = await fresh(); parkWithCarPlay(lp);
+  let t = utc(20, 0, 0), pos = SPOT;
+  for (let i = 0; i < 60 && lp.parkEndedByHeadUnit(); i++) { t += S; clock = t; const v = Math.min(i * 1.0, 11); pos = north(pos, v); lp.noteFix(pos.lat, pos.lng, v, 0); }
+  const spotBefore = lp.carSpot();
+  t += 10 * 60 * S; clock = t; lp.noteCarConnected(true); t += 2 * S; clock = t; lp.noteCarConnected(false);
+  const w = north(pos, 30); t += 60 * S; clock = t; lp.noteFix(w.lat, w.lng, kmh(26), null);
+  const w2 = north(pos, 33); t += S; clock = t; lp.noteFix(w2.lat, w2.lng, kmh(12), null);
+  const sp = lp.carSpot(); const sh = lp.shareablePosition({ ...w2, speed: kmh(12), heading: 0 });
+  ok("S1 a proof from an earlier park does not carry into the next witness", lp.privacyDebug().latch === false && lp.parkEndedByHeadUnit() === true
+    && sp?.lat === spotBefore?.lat && (sh as any).lat === spotBefore?.lat, JSON.stringify({ latch: lp.privacyDebug().latch, sh }));
+}
+{
+  // S2: a fast fix reaches noteFix while hydrate is still reading a hu=1 spot (carDataService calls noteFix synchronously).
+  const lp = await fresh();
+  clock = utc(20, 30, 0);
+  (globalThis as any).__store = {
+    "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: utc(20, 20, 0), att: 0, mv: 0, hu: 1 }),
+    "convoy.lastDrivingAt.v1": String(utc(20, 19, 0)),
+  };
+  const h = lp.hydrateLocationPrivacy();
+  const p = north(SPOT, 40); lp.noteFix(p.lat, p.lng, kmh(26), null);
+  await h;
+  const q = north(SPOT, 45); clock = utc(20, 30, 5);
+  const sh = lp.shareablePosition({ ...q, speed: kmh(12), heading: 0 });
+  ok("S2 a hu=1 witness adopted after a racing fast fix drops that fix's latch → the car spot", lp.privacyDebug().latch === false && (sh as any).lat === SPOT.lat, JSON.stringify(sh));
+}
+
+// ── K · the head-unit SOURCES: iOS cold CarPlay (carPlayBootstrap) and the map.tsx mirror ───────────────────────
+// Review 2026-09-25: on iOS only map.tsx reported a head unit, so a COLD CarPlay drive (the phone app never opened)
+// was never witnessed (Rodrigo poi7m7-227888 `draw-cmp … latch=1 parked=1 hu=0` 282 s after `carplay-disconnect`).
+const coldDrive = (lp: LP, source: "carplay" | null) => {
+  clock = utc(21, 0, 0);
+  if (source) lp.noteCarConnected(true, source);
+  const start = north(SPOT, -720);
+  for (let i = 0; i <= 60; i++) { clock = utc(21, 0, 0) + i * S; lp.noteFix(start.lat + (SPOT.lat - start.lat) * (i / 60), SPOT.lng, 12, 0); }  // carDataService.onStoreTick
+  for (let i = 1; i <= 10; i++) { clock = utc(21, 1, 0) + i * S; lp.noteFix(SPOT.lat, SPOT.lng, 0, null); }
+  clock = utc(21, 1, 20);
+  if (source) lp.noteCarConnected(false, source);                           // carPlayBootstrap.onDisconnect
+};
+const openAppAndWalk = (lp: LP, mapWrites: boolean) => {
+  clock = utc(21, 6, 20);                                                    // the app opened 5 min later
+  if (mapWrites) lp.noteCarConnected(false);                                 // map.tsx mounts: its mirror reads false
+  const walk = north(SPOT, 47);
+  const before = lp.shareablePosition({ ...walk, speed: kmh(26), heading: 0 });   // the watcher callback, before noteFix
+  lp.noteFix(walk.lat, walk.lng, kmh(26), null);
+  const after = lp.shareablePosition({ ...walk, speed: kmh(26), heading: 0 });
+  return { before, after, spot: lp.carSpot(), walk };
+};
+{
+  const base = await freshBase();
+  if (!base) console.log("  skip K0 negative control: pre-fix module unavailable");
+  else {
+    coldDrive(base, null);                                                   // pre-fix: nothing reports a head unit on iOS cold
+    const r = openAppAndWalk(base, true);
+    ok("K0 NEGATIVE CONTROL (pre-fix, cold CarPlay): the first 26 km/h walking fix is shared LIVE and becomes the car spot",
+      (r.before as any).lat === r.walk.lat && (r.after as any).lat === r.walk.lat, JSON.stringify(r));
+  }
+  const lp = await fresh();
+  coldDrive(lp, "carplay");
+  ok("K1a cold CarPlay disconnect is witnessed and drops the latch", lp.parkEndedByHeadUnit() === true && lp.privacyDebug().latch === false);
+  const r = openAppAndWalk(lp, true);
+  const atSpot = (x: any) => x?.share === true && x.lat === SPOT.lat && x.lng === SPOT.lng;
+  ok("K1b …5 min later the app opens (map mirror reads false) and a 26 km/h fix → the car spot, before and after noteFix", atSpot(r.before) && atSpot(r.after) && r.spot?.lat === SPOT.lat, JSON.stringify(r));
+}
+{
+  // K2: yesterday's witnessed park on disk; hydrate first, then the cold connect.
+  const lp = await fresh();
+  clock = utc(22, 0, 0);
+  (globalThis as any).__store = { "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 12 * 3600 * S, att: 0, mv: 0, hu: 1 }) };
+  await lp.hydrateLocationPrivacy();
+  const was = lp.parkEndedByHeadUnit();
+  lp.noteCarConnected(true, "carplay");
+  const p = north(SPOT, 12); clock += S; lp.noteFix(p.lat, p.lng, 12, 0);
+  const sh = lp.shareablePosition({ ...p, speed: 12, heading: 0 });
+  ok("K2 a cold connect clears a persisted hu=1 witness at once; the drive is live from its first fix", was === true && lp.parkEndedByHeadUnit() === false && (sh as any).lat === p.lat, JSON.stringify(sh));
+}
+{
+  // K3: the connect lands first, the hydrate read resolves after it.
+  const lp = await fresh();
+  clock = utc(22, 30, 0);
+  (globalThis as any).__store = { "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 12 * 3600 * S, att: 0, mv: 0, hu: 1 }) };
+  lp.noteCarConnected(true, "carplay");
+  await lp.hydrateLocationPrivacy();
+  ok("K3 hydrate never adopts a witness while a head unit is attached", lp.parkEndedByHeadUnit() === false);
+}
+{
+  // K4: warm iOS, both writers. The bootstrap claims the source at boot; the map mirror lags at both ends.
+  const lp = await fresh();
+  clock = utc(23, 0, 0);
+  lp.noteCarConnected(false, "carplay");                                     // boot, nothing attached
+  lp.noteCarConnected(true, "carplay");                                      // connect
+  lp.noteCarConnected(false);                                                // map mirror still false (lagging render)
+  const noSpuriousWitness = lp.parkEndedByHeadUnit() === false && lp.headUnitAttachedRaw() === true;
+  lp.noteCarConnected(true);
+  const start = north(SPOT, -300);
+  for (let i = 0; i <= 25; i++) { clock = utc(23, 0, 1) + i * S; lp.noteFix(start.lat + (SPOT.lat - start.lat) * (i / 25), SPOT.lng, 12, 0); }
+  clock += 5 * S;
+  lp.noteCarConnected(false, "carplay");                                     // disconnect (session lifecycle)
+  const witnessed = lp.parkEndedByHeadUnit() === true && lp.privacyDebug().latch === false && lp.headUnitAttachedRaw() === false;
+  lp.noteCarConnected(true);                                                 // the mirror, one render late, still true
+  const w = north(SPOT, 30); clock += S;
+  const sh = lp.shareablePosition({ ...w, speed: kmh(12), heading: 0 });
+  const notCancelled = lp.parkEndedByHeadUnit() === true && (sh as any).lat === SPOT.lat;
+  lp.noteCarConnected(false);
+  ok("K4a a lagging map mirror at the connect creates no witness", noSpuriousWitness);
+  ok("K4b the session disconnect witnesses at once", witnessed);
+  ok("K4c a lagging map mirror after the disconnect cannot cancel the witness or share live", notCancelled && lp.parkEndedByHeadUnit() === true, JSON.stringify(sh));
+}
+{
+  // K5: the bootstrap never ran in this context (it bailed): map.tsx is the writer, as before.
+  const lp = await fresh();
+  clock = utc(23, 30, 0);
+  lp.noteCarConnected(true);
+  const p = north(SPOT, 10); lp.noteFix(p.lat, p.lng, 12, 0);
+  clock += 5 * S; lp.noteCarConnected(false);
+  ok("K5 with no session source the map mirror still witnesses (the pre-2026-09-25 path)", lp.parkEndedByHeadUnit() === true);
 }
 
 // ── C · a CarPlay reconnect is instant (unchanged) ──────────────────────────────────────────────────────────────

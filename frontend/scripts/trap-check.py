@@ -423,6 +423,18 @@ RULES = [
         "(the old anchor, `_fgCarWatch = await …`, no longer exists — a rule anchored on it could never fire again).",
     ),
     (
+        "car-row-outside-drawtelemetry",
+        ["src/**/*.ts", "src/**/*.tsx", "app/**/*.ts", "app/**/*.tsx"],
+        r"`(?:cam-apply|draw-cmp|pose-fix|corner-trace|snap-mode) surf=(?!\$\{surface\})",
+        "2026-09-25 (Jeff: 'it should not follow me when i discconect from car play... this is a privacy concern. fix it "
+        "and lock it'). The per-surface draw rows print coordinates (gps=, raw=, drawn=, req=, act=, est=). CarMapView stays "
+        "mounted after a CarPlay / Android Auto disconnect, and on 09-23 its `draw-cmp surf=car gps=…` rows put Jeff's raw "
+        "walking coordinates into crash_reports from 09:23 to 11:08 (the disconnect was 09:19). src/drawTelemetry.ts drops "
+        "every car row unless setCarSurfaceLive says a car surface is live, and it is the only place these rows may be "
+        "built (cam-apply included: ConvoyMapbox calls reportCamApply). This fires on one of these rows built anywhere "
+        "else. Gate: tools/sim-qc/car_feed_leak_test.mts T.",
+    ),
+    (
         "watch-assigned-after-await",
         ["src/**/*.ts", "src/**/*.tsx", "app/**/*.ts", "app/**/*.tsx"],
         r"=\s*await\s+Location\.watchPositionAsync\(",

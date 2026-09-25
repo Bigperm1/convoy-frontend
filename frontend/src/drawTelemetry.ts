@@ -39,14 +39,24 @@ const lastAt: Record<string, number> = {};
 // `draw-cmp surf=car gps=…` rows printed the driver's raw WALKING coordinates into crash_reports (09-23: fresh car
 // rows with live gps from 09:23 to 11:08, 1 h 49 after the 09:19 disconnect). Those rows exist to diagnose the car
 // surface, so they are written only while a car surface is actually live: carPlayBootstrap.onConnect/onDisconnect and
-// AndroidAutoRoot's mount/disconnect/unmount set this — NEVER headUnitAttachedRaw(), which map.tsx does not set on a
-// cold CarPlay start. The same flag gates ConvoyMapbox's `cam-apply surf=car req=…` row.
+// AndroidAutoRoot's mount/disconnect/unmount set this — not headUnitAttachedRaw() (the privacy module's flag, with its
+// own writers and a map.tsx fallback). The same flag gates ConvoyMapbox's `cam-apply surf=car req=…` row
+// (reportCamApply below).
 const _carSurfaces = new Set<string>();
 export function setCarSurfaceLive(surface: "carplay" | "androidauto", live: boolean): void {
   if (live) _carSurfaces.add(surface); else _carSurfaces.delete(surface);
 }
 /** True while CarPlay or Android Auto is connected (see setCarSurfaceLive). */
 export function carSurfaceLive(): boolean { return _carSurfaces.size > 0; }
+/** The CAM-APPLY receipt (ConvoyMapbox pushCam): `cam-apply surf=<surface> <rest>`. Emitted HERE so the car-surface
+ *  drop is one tested code path (tools/sim-qc/car_feed_leak_test.mts T) — a car row prints the car camera's centre,
+ *  i.e. the driver's position, and CarMapView stays mounted after a disconnect. */
+export function reportCamApply(surface: string, rest: string): void {
+  try {
+    if (surface === "car" && _carSurfaces.size === 0) return;
+    logEvent(`cam-apply surf=${surface} ${rest}`);
+  } catch {}
+}
 
 // ── CORNER TRACE (2026-09-03, Jeff: "the first corner was off the route line by a lot") ──
 // The 10 s cadence above straddled that corner: the two rows either side of it showed the

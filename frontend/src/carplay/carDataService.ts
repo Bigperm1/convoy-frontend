@@ -376,13 +376,12 @@ function buildCarPayload(): Record<string, any> | null {
     arrSec: s.arrowPaint?.secondary,
     arrPick: g.arrowPick === 'arrow3d' ? 'arrow3d' : 'arrow',
     scanId: s.carScanStatus === 'ready' && s.carScanId ? s.carScanId : undefined,
-    // Was hardcoded 'live'. The gate's own answer now — and NOTE the deliberate ASYMMETRY
-    // with the warm phone map, because the obvious reading is wrong: map.tsx calls
-    // noteCarConnected(true) (map.tsx:3409), so isParked() is false there and its peer
-    // stays 'live' at any standstill. This context asserts nothing (see the declined
-    // noteCarConnected item), so on a COLD drive a driver stopped past the 90 s hysteresis
-    // draws 'parked' (0.5 opacity) to the crew. Cosmetic, self-correcting on the next
-    // moving fix, and COLD-PATH ONLY — while map.tsx is mounted its provider (priority 2)
+    // Was hardcoded 'live'. The gate's own answer now. This service itself still asserts no head unit (the
+    // declined noteCarConnected item — it runs on Android too, where didConnect is spurious). Since 2026-09-25 the
+    // iOS CarPlay session lifecycle (carPlayBootstrap, source 'carplay') and AndroidAutoRoot assert it, so on a cold
+    // car drive isParked() is false and the peer stays 'live' at a standstill, as on the warm phone map (on Android
+    // only until CAR_CONNECT_TTL_MS lapses, then 'parked' 0.5 opacity past the 90 s hysteresis). Cosmetic, and
+    // COLD-PATH ONLY — while map.tsx is mounted its provider (priority 2)
     // owns the broadcast outright and this payload is never even read (presenceHub.ts:83-90
     // breaks at the first non-top priority).
     // `status` is NOT one of presenceHub's position keys (idKeyOf excludes only

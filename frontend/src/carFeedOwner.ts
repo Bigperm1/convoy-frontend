@@ -20,7 +20,9 @@
 // watcher asks iOS for continuous background delivery (allowsBackgroundLocationUpdates, pausesUpdatesAutomatically
 // false), so the orphan kept GPS on and the app alive for the life of the JS runtime. One orphan (Ni GR, 09-23) has
 // no visible double start, so the fix is not "stop calling it twice": this owner is the ONLY creation path of a car
-// watch, and it can always reach every watch it made.
+// watch, and it can reach every watch it made IN THIS JS CONTEXT. (A watch from a previous JS context — an in-process
+// reload — is out of its reach; review 2026-09-25 found the reload paths gated off while CarPlay / Android Auto or
+// turn-by-turn is live: 0 of 51 rt-1.29.0 restarts with CarPlay connected. Native half: CARPLAY.md §6c.)
 //
 // ── THE RULE ─────────────────────────────────────────────────────────────────────────────────────────────────────
 //  • start() is single-flight: a caller that arrives while a start is in flight JOINS it. At most one live watch.
@@ -39,8 +41,11 @@
 // native entry is nil anyway. So removal waits for the native start to have settled: a subscription younger than
 // CAR_FEED_SETTLE_MS is NEUTRALISED at once (none of its deliveries reach onFix, and each delivery removes it — a
 // delivery proves the native stream is up, so that remove cannot strand it) and removed when it is
-// CAR_FEED_SETTLE_MS old (a timer, plus an opportunistic sweep on every start/stop in case JS timers are frozen).
-// A subscription older than that — the car watch at the end of any real drive — is removed at once.
+// CAR_FEED_SETTLE_MS old (a timer, plus an opportunistic sweep on every start / stop / live() call in case JS timers
+// are frozen). A subscription older than that — the car watch at the end of any real drive — is removed at once.
+// ⚠ THIS IS NOT A GUARANTEE (Codex 2026-09-25): a young subscription with frozen timers and no delivery waits for the
+// next owner call, and the native race itself cannot be closed from JS. The native fix is a build-80 item
+// (CARPLAY.md §6c: serialize start/remove inside expo-location's LocationModule.swift / LocationsStreamer).
 //
 // Pure: no react-native / expo imports. The native watch, the clock and the timer are injected so
 // tools/sim-qc/car_feed_leak_test.mts drives this exact code in plain node.
@@ -201,5 +206,5 @@ export function createCarFeedOwner<L, S extends WatchSub = WatchSub>(d: CarFeedD
     sweep();
   }
 
-  return { start, stop, live: () => held.size };
+  return { start, stop, live: () => { sweep(); return held.size; } };
 }

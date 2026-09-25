@@ -161,8 +161,32 @@ let _drivingLatched = false;
 // see the note in noteFix(). Cleared by the first genuine vehicular fix.
 let _latchProvisional = false;
 // After a WITNESSED park, one fast fix may not re-arm the latch or clear the witness (Jeff, 2026-09-25: "My icon moved
-// on the map"). The rule and its three constants live in src/parkRearm.ts; it runs only while _parkWitnessed stands.
-const _parkRearm = createParkRearm({ enterMs: DRIVING_ENTER_SPEED_MS, holdMs: DRIVING_SPEED_MS });
+// on the map"). The rule and its constants live in src/parkRearm.ts; it runs only while _parkWitnessed stands, and
+// every new witness starts it from nothing.
+const _parkRearm = createParkRearm({ enterMs: DRIVING_ENTER_SPEED_MS });
+// ── WHO MAY SAY A HEAD UNIT IS ATTACHED (2026-09-25) ────────────────────────────────────────────────────────────
+// Jeff, 2026-09-25: "it should not follow me when i discconect from car play... fix it and lock it." On iOS the only
+// writer used to be map.tsx, so a COLD CarPlay drive (the phone app never opened) was never attached and its disconnect
+// never WITNESSED: the drive's latch survived, and when the app was opened later a fast walking fix was shared live and
+// became the car spot (review 2026-09-25: Rodrigo poi7m7-227888 `draw-cmp … latch=1 parked=1 hu=0` 282 s after
+// `carplay-disconnect`; Enablewhore 81og7a-596619, Ni GR apa0nj-742426). Each writer now reports as a SOURCE:
+//   'carplay'     — carPlayBootstrap's CarPlay session lifecycle (iOS, cold AND warm: react-native-carplay keeps its
+//                   connect/disconnect callbacks in a Set, so the bootstrap hears every session). Once it has reported
+//                   it alone decides the iOS answer — map.tsx mirrors the SAME session through a React state that can
+//                   lag a render or read false before its hook settles, and a mirror must not be able to create a
+//                   witness at a connect or hold one off at a disconnect.
+//   'map'         — map.tsx (iOS only): the fallback when the bootstrap never ran in this JS context (it bailed).
+//   'androidauto' — AndroidAutoRoot (Android only), with the CAR_CONNECT_TTL_MS backstop in carAttached().
+// `_carConnected` / `_carConnectedAt` keep their meaning (the aggregate, and its last assertion), so carAttached()'s
+// Android TTL and headUnitAttachedRaw() read exactly what they read before.
+export type HeadUnitSource = "map" | "carplay" | "androidauto";
+const _huSources: Partial<Record<HeadUnitSource, boolean>> = {};
+const _huListeners = new Set<(attached: boolean) => void>();
+/** Called with the aggregate head-unit flag whenever it changes (map.tsx keeps its phone watcher alive with it). */
+export function subscribeHeadUnit(fn: (attached: boolean) => void): () => void {
+  _huListeners.add(fn);
+  return () => { _huListeners.delete(fn); };
+}
 
 /** Hydrate the persisted car spot + driving stamp. Idempotent; safe to call anywhere. */
 export async function hydrateLocationPrivacy(): Promise<void> {
@@ -212,7 +236,17 @@ export async function hydrateLocationPrivacy(): Promise<void> {
           // Same freshness rule as the spot itself: only adopt the persisted witnessed-park
           // flag when the persisted spot was adopted. `hu` on disk can only have survived
           // if nothing drove since the disconnect (drivers rewrite the key without it).
-          if (p?.hu) _parkWitnessed = true;
+          // 2026-09-25: never over a head unit that is attached NOW (a cold CarPlay connect can land before this
+          // read resolves — the connect already cleared yesterday's witness and must win), and adopting a witness
+          // applies the witness's own rules: the drive's latch drops (a fast fix that raced this read must not keep
+          // sharing live) and the re-arm proof starts from nothing (Jeff: "it should not follow me when i discconect
+          // from car play"). Gate: park_rearm_test K2/K3, S2.
+          if (p?.hu && !_carConnected) {
+            _parkWitnessed = true;
+            _drivingLatched = false;
+            _latchProvisional = false;
+            _parkRearm.reset();
+          }
         } else {
           _spotDrop = v.why;
         }
@@ -250,18 +284,27 @@ export async function hydrateLocationPrivacy(): Promise<void> {
   } catch {}
 }
 
-/** Head unit attached/detached. Owned by map.tsx (iOS) / AndroidAutoRoot (Android) —
- * the only writers entitled to assert a head unit on their platform. */
-export function noteCarConnected(connected: boolean): void {
+/** Head unit attached/detached, per SOURCE (see _huSources): carPlayBootstrap ('carplay', iOS), map.tsx ('map',
+ * iOS fallback), AndroidAutoRoot ('androidauto', Android) — the only writers entitled to assert a head unit. */
+export function noteCarConnected(connected: boolean, source: HeadUnitSource = "map"): void {
   // 🔒 NAV-LOCK begin priv-car-connected-transition — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
-  const next = !!connected;
+  // react-native-carplay's didConnect fires on EVERY Android launch (CarPlayModule.kt checkForConnection, see the TTL
+  // note below): a 'carplay' report can only ever be iOS.
+  if (source === "carplay" && Platform.OS === "android") return;
+  _huSources[source] = !!connected;
+  const iosSays = _huSources.carplay !== undefined ? _huSources.carplay : _huSources.map;
+  const next = !!iosSays || !!_huSources.androidauto;
+  // Did THIS write assert a head unit? A 'map' write is only a mirror once the bootstrap has reported.
+  const asserted = !!connected && (source !== "map" || _huSources.carplay === undefined);
+  const changed = _carConnected !== next;
   // A true→false TRANSITION is a WITNESSED park: the head unit released, so the drive
   // ended at the current car spot. GPS alone cannot tell a walk-away from a >90 s crawl
   // — that ambiguity is the entire reason the self-marker's 75 m separation gate exists
   // (map.tsx, 2026-08-05) — but a disconnect is unambiguous, so it may bypass that gate.
-  // Cleared by the next CONNECT and by a PROVEN drive-away (noteFix + src/parkRearm.ts, 2026-09-25: 15 s at
-  // >= 15 km/h AND 150 m — one fast fix no longer does it). A head unit unplugged mid-drive therefore pins the
-  // unplug-point spot for that ~15–20 s, then the drive goes live again (privacy-favouring; CARPLAY.md §6c).
+  // Cleared by the next CONNECT and by a PROVEN drive-away (noteFix + src/parkRearm.ts, 2026-09-25: within the last
+  // 120 s, 15 s credited at >= 15 km/h AND 250 m net AND 250 m from the spot — one fast fix no longer does it). A head
+  // unit unplugged mid-drive therefore pins the unplug-point spot until that proof (~15–30 s on an open road, up to
+  // ~70 s in slow stop-and-go), then the drive goes live again (privacy-favouring; CARPLAY.md §6c).
   // ⚠ Transition-based on purpose: a writer repeating `false` (or `true`) is a no-op
   // here, so this stays correct even if a spurious repeat-writer ever returns.
   if (_carConnected && !next) {
@@ -273,11 +316,12 @@ export function noteCarConnected(connected: boolean): void {
     // fix >= 9 km/h in that window — a GPS jump or a brisk walk away from the car — was shared LIVE on the old drive's
     // latch (park_rearm_test W, negative control on the pre-fix module). A head unit letting go is proof the drive
     // ended, so the latch drops here with the witness; it re-arms only through noteFix's re-arm proof
-    // (src/parkRearm.ts: >= 15 km/h held 15 s AND 150 m) or a reconnect. Consequence, accepted and privacy-favouring:
-    // a CarPlay / Android Auto unplug MID-DRIVE shares the unplug-point car spot until that proof (~15–20 s at city
-    // speed). The 90 s parked STATUS label is unchanged — isParked() reads _lastDrivingAt, which this does not touch.
+    // (src/parkRearm.ts) or a reconnect. Consequence, accepted and privacy-favouring: a CarPlay / Android Auto unplug
+    // MID-DRIVE shares the unplug-point car spot until that proof (~15–30 s on an open road, up to ~70 s in slow
+    // stop-and-go). The 90 s parked STATUS label is unchanged — isParked() reads _lastDrivingAt, untouched here.
     _drivingLatched = false;
     _latchProvisional = false;
+    _parkRearm.reset();   // a new witness proves from nothing (a proof left over from an earlier park must not count)
     // Persisted with the spot so an app restart while parked still pins to the car.
     // Every plain {lat,lng} writer of this key (noteFix, map.tsx's 15 s mirror) drops
     // the flag on the next drive — which is exactly when it should expire.
@@ -288,11 +332,12 @@ export function noteCarConnected(connected: boolean): void {
     _lastSpotMeta = { t: _carSpotAt || Date.now(), att: 0, mv: 0, hu: 1 };
     if (_hdgTrack.obs) _hdgTrack = { ..._hdgTrack, frozen: true };
   }
-  if (next) _parkWitnessed = false;
+  if (next && asserted) { _parkWitnessed = false; _parkRearm.reset(); }
   _carConnected = next;
   // Stamp on every assertion, clear outright on release. The stamp is what makes
   // this a claim that expires rather than a latch — see CAR_CONNECT_TTL_MS.
-  _carConnectedAt = next ? Date.now() : 0;
+  _carConnectedAt = !next ? 0 : asserted ? Date.now() : _carConnectedAt;
+  if (changed) for (const l of Array.from(_huListeners)) { try { l(next); } catch {} }
   // 🔒 NAV-LOCK end priv-car-connected-transition
 }
 
@@ -357,7 +402,9 @@ function carAttached(): boolean {
   //   iOS — map.tsx writes `!!carConnected`, i.e. it writes FALSE on disconnect as well
   //     as TRUE on connect (verified at app/(app)/map.tsx:3422 + :3462). There is a real
   //     release path, so there is nothing for a timeout to rescue, and adding one only
-  //     created the failure above.
+  //     created the failure above. (2026-09-25: the iOS writer is now the CarPlay session
+  //     lifecycle itself — carPlayBootstrap, source 'carplay', cold and warm — with map.tsx
+  //     as the fallback mirror; both release on disconnect, so this still holds.)
   //
   // ⚠ Do NOT "simplify" this back to a single expiring branch. The two platforms have
   // genuinely different guarantees about hearing a disconnect, and that asymmetry — not
@@ -401,12 +448,13 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // 17:13:10.094Z ONE 26 km/h fix (acc 14 m) while he was on foot armed this latch and, in the same call, `driving`
   // cleared the witness, so the marker and the shared position went live and the car spot moved to where he walked
   // (draw-cmp latch=0→1, hu=1→0, spotAge=59s at 17:14:14). While the witness stands, arming the latch and `driving`
-  // (which clears the witness, refreshes the stamp and writes the spot) need src/parkRearm.ts's SUSTAINED proof:
-  // >= 15 km/h held PARK_REARM_SUSTAIN_MS and PARK_REARM_MIN_M from where that run began. A head-unit reconnect
-  // still clears the witness at once (noteCarConnected). With no witnessed park `rearmOk` is true and every line
-  // below is what it was. Gate: tools/sim-qc/park_rearm_test.mts.
+  // (which clears the witness, refreshes the stamp and writes the spot) need src/parkRearm.ts's SUSTAINED proof: in
+  // the last 120 s, 15 s credited at >= 15 km/h, 250 m of robust net displacement, and 250 m from the car spot (passed
+  // in). A head-unit reconnect still clears the witness at once (noteCarConnected). With no witnessed park `rearmOk`
+  // is true and every line below is what it was.
+  // Gate: tools/sim-qc/park_rearm_test.mts.
   let rearmOk = true;
-  if (_parkWitnessed) rearmOk = _parkRearm.note(now, lat, lng, spd);
+  if (_parkWitnessed) rearmOk = _parkRearm.note(now, lat, lng, spd, _carSpot);
   else _parkRearm.reset();
   // The latch: only a vehicular speed can ARM it; once armed, above-walking keeps it.
   if (spd >= DRIVING_ENTER_SPEED_MS && rearmOk) { _drivingLatched = true; _latchProvisional = false; }

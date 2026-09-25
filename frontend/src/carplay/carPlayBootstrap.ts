@@ -19,6 +19,7 @@ import { CAR_BAR_BUTTON_CONFIG, carMapButtonConfig, handleCarBarButton, handleCa
 import { logEventReliable, reportCarPlayTapTrace } from '../crashBreadcrumb';
 import { startCarStatus, stopCarStatus, refreshCarStatus } from './carStatus';
 import { setCarSurfaceLive } from '../drawTelemetry';
+import { noteCarConnected } from '../locationPrivacy';
 
 let booted = false;
 
@@ -245,6 +246,13 @@ export function initCarPlayBootstrap(): void {
     // Car-surface telemetry rows (draw-cmp / pose-fix / cam-apply surf=car) carry coordinates: they are allowed only
     // between this connect and the matching disconnect (privacy, 2026-09-25 — src/drawTelemetry.ts setCarSurfaceLive).
     setCarSurfaceLive('carplay', true);
+    // THE HEAD-UNIT SIGNAL, COLD OR WARM (privacy, 2026-09-25). Until today only map.tsx told locationPrivacy a head unit
+    // was attached, so a COLD CarPlay drive (the phone app never opened) was never attached and its disconnect never
+    // WITNESSED — the drive's latch survived it, and a fast walking fix after the app was opened went out live and
+    // became the car spot (Jeff: "it should not follow me when i discconect from car play... fix it and lock it").
+    // This is the session lifecycle itself, so it is the authoritative iOS source (locationPrivacy _huSources); a
+    // connect also clears a witnessed park left on disk by the previous drive. Gate: car_feed_leak_test CP, park_rearm_test K.
+    noteCarConnected(true, 'carplay');
     void acquireBgLocation('carplay');
     // Cold-capable PEERS + HAZARDS feeds (CarPlay-standalone Wave 1): WebSocket +
     // Supabase presence/Realtime + REST backstops, module-scope — the head unit
@@ -314,9 +322,11 @@ export function initCarPlayBootstrap(): void {
     idleTpl = null;
     idleAppearLogged = false;
     // PRIVACY (Jeff, 2026-09-25: "it should not follow me when i discconect from car play... fix it and lock it"):
-    // once the head unit is gone Hairpin collects no location unless the app is open on the phone or the phone is
-    // navigating. This release is what ends the car feed — every car watch (src/carFeedOwner.ts), NAV_TASK when no
-    // phone navigation holds it, and the CLBackgroundActivitySession. CARPLAY.md §6c; gate car_feed_leak_test F.
+    // once the head unit is gone Hairpin runs no GPS watcher or location stream unless the app is open on the phone or
+    // the phone is navigating (iOS visit events still wake the app and post the CAR SPOT — src/visitMonitor.ts). This
+    // release is what ends the car feed — every car watch (src/carFeedOwner.ts), NAV_TASK when no phone navigation
+    // holds it, and the CLBackgroundActivitySession. CARPLAY.md §6c; gate car_feed_leak_test CP.
+    noteCarConnected(false, 'carplay');   // the WITNESSED park: the latch drops, the spot pins (locationPrivacy)
     void releaseBgLocation('carplay');
     setCarSurfaceLive('carplay', false);
     stopCarDataService();
@@ -400,7 +410,9 @@ export function initCarPlayBootstrap(): void {
     // never ran" — this row is the proof it did, on this exact launch.
     // rearm = the listener re-arm above (1 = both calls dispatched, 0 = threw — see carplay-listeners-rearm — dev = skipped).
     receipt('bootstrap-ok', `conn=${CarPlay.connected ? 1 : 0} hookOwns=${carPlayHookOwnsRoot ? 1 : 0} rearm=${rearm}`);
-    if (CarPlay.connected) onConnect(); else { poke(); ensurePolling(); }
+    // Not connected at boot: say so as the session source, so map.tsx's mirror of the same session is only a fallback
+    // from here on (locationPrivacy _huSources). A false with nothing attached is a no-op there.
+    if (CarPlay.connected) onConnect(); else { noteCarConnected(false, 'carplay'); poke(); ensurePolling(); }
     // A head unit connecting often brings the app active — re-poke then, and resume
     // polling in case it had stopped.
     AppState.addEventListener('change', (s) => { if (s === 'active' && !CarPlay.connected) { poke(); ensurePolling(); } });

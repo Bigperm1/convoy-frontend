@@ -217,7 +217,7 @@ export default function AndroidAutoRoot() {
         // asserts it, so the disconnect is the matching release; the TTL stays as the
         // backstop for the case this event never arrives (build 70, where the native
         // emit does not exist).
-        noteCarConnected(false);
+        noteCarConnected(false, 'androidauto');
       };
       CarPlay.registerOnDisconnect?.(onDisconnect);
       off = () => { try { CarPlay.unregisterOnDisconnect?.(onDisconnect); } catch {} };
@@ -256,14 +256,14 @@ export default function AndroidAutoRoot() {
     // failure that was just removed from app/(app)/map.tsx. Instead the flag lapses after
     // CAR_CONNECT_TTL_MS and the gate falls back to the driving latch, which is the
     // private direction.
-    noteCarConnected(true);
+    noteCarConnected(true, 'androidauto');
     return () => {
       aaAliveRef.current = false;
       void releaseBgLocation('androidauto');   // privacy (2026-09-25): the unmount releases too — gate car_feed_leak_test F
       setCarSurfaceLive('androidauto', false);
       stopCarDataService();
       stopCarStatus();
-      noteCarConnected(false);
+      noteCarConnected(false, 'androidauto');
     };
   }, []);
 

@@ -22,11 +22,20 @@
 //   C  a delivery after the release → self-stops, onFix never called.
 //   D  a stop with ZERO deliveries → 0 live (a phone lying still gets no callbacks).
 //   E  5 connect/disconnect cycles → exactly 1 native start per connect, 0 live after each disconnect.
-//   F  static: navNotification.ts's only watchPositionAsync( is inside the owner; the disconnect paths release the lock
-//      (CarPlay onDisconnect; Android Auto disconnect AND unmount); map.tsx's phone watcher is cancellation-safe and
-//      re-runs when nav ends; no `= await Location.watchPositionAsync(` anywhere in src/ or app/.
+//   F  static: navNotification.ts's only watchPositionAsync( is inside the owner; the Android Auto disconnect AND unmount
+//      release the lock as plain top-level statements (not deferred, not conditional); map.tsx's effect deps and
+//      fgWatchKeep; no `= await Location.watchPositionAsync(` and no named import of it anywhere in src/ or app/.
+//   G  the REAL navNotification.ts through connect/disconnect (G0 = the pre-fix file leaking one watch; G6 = a FAILED
+//      background start, where only the release's own stop can end the car watch).
+//   T  the REAL drawTelemetry.ts: no surf=car draw-cmp / pose-fix / corner-trace / cam-apply row without a live car.
+//   CP the REAL carPlayBootstrap.ts: connect / disconnect call the head-unit writer, the lock and the telemetry flag
+//      synchronously (a deferred or conditional release fails).
+//   M  map.tsx's phone-watcher effect, extracted from the source and run: a cleanup before, soon after and long after
+//      the watch resolves, deliveries to a dead effect, and the background gate.
+//      What M cannot see: whether React re-runs the effect at the right moments (F checks the deps text), hook order,
+//      the real expo-location, and the ingest body on the live path.
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { createCarFeedOwner, removeWhenSettled, CAR_FEED_SETTLE_MS, type WatchSub } from "../../src/carFeedOwner.ts";
+import { createCarFeedOwner, removeWhenSettled, CAR_FEED_SETTLE_MS, CAR_FEED_RECEIPT_MAX, LOC_RELEASE_RECEIPT_MAX, type WatchSub } from "../../src/carFeedOwner.ts";
 
 let fails = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -96,6 +105,11 @@ function makeOwner(native: FakeNative, perm: ReturnType<typeof makePerm>, consum
   });
   return { owner, fixes, rows };
 }
+
+// ── P · the owner's values are pinned (src/carFeedOwner.ts is outside tools/sim-qc/data/nav-lock.json) ─────────
+// Changing one needs Jeff's say-so (RULES.md §4) — the lock tool does not cover this file yet.
+ok("P1 carFeedOwner constants are the approved values", CAR_FEED_SETTLE_MS === 1000 && CAR_FEED_RECEIPT_MAX === 20 && LOC_RELEASE_RECEIPT_MAX === 20,
+  JSON.stringify({ CAR_FEED_SETTLE_MS, CAR_FEED_RECEIPT_MAX, LOC_RELEASE_RECEIPT_MAX }));
 
 // ── A · two concurrent starts ────────────────────────────────────────────────────────────────────────────────────
 {
@@ -282,6 +296,21 @@ function closeOf(src: string, open: number): number {
   return -1;
 }
 const count = (s: string, needle: string) => s.split(needle).length - 1;
+// The statements directly in a `{ … }` block (bracket depth 1, split at `;`), whitespace-normalised. A call deferred
+// into a timer/closure or put under a condition is NOT a top-level statement of the block.
+function statements(block: string): string[] {
+  const out: string[] = []; let depth = 0; let cur = ""; let inS: string | null = null;
+  for (let i = 0; i < block.length; i++) {
+    const c = block[i];
+    if (inS) { cur += c; if (c === "\\") { cur += block[i + 1] ?? ""; i++; continue; } if (c === inS) inS = null; continue; }
+    if (c === "'" || c === '"' || c === "`") { inS = c; cur += c; continue; }
+    if ("({[".includes(c)) { depth++; if (depth === 1) continue; }
+    else if (")}]".includes(c)) { depth--; if (depth === 0) continue; }
+    if (depth === 1 && c === ";") { out.push(cur.replace(/\s+/g, " ").trim()); cur = ""; continue; }
+    if (depth >= 1) cur += c;
+  }
+  return out.filter(Boolean);
+}
 function bodyAfter(src: string, marker: string, from = 0): string | null {
   const at = src.indexOf(marker, from);
   if (at < 0) return null;
@@ -301,32 +330,38 @@ function bodyAfter(src: string, marker: string, from = 0): string | null {
   ok("F4 stopForegroundCarFeed stops the owner", !!stopFn && /_carFeed\.stop\(\)/.test(stopFn));
   const rel = bodyAfter(nav, "export async function releaseBgLocation(tag: string): Promise<void> {");
   ok("F5 releaseBgLocation stops the car feed and logs `loc-release`", !!rel && /stopForegroundCarFeed\(\)/.test(rel) && /loc-release tag=/.test(rel));
-  ok("F6 the owner's wanted() is the lock's consumer set", !!ownerCall && /wanted:\s*\(\)\s*=>\s*_locConsumers\.size\s*>\s*0/.test(ownerCall));
+  ok("F6 the owner's wanted() is exactly the lock's consumer set", !!ownerCall && /wanted:\s*\(\)\s*=>\s*_locConsumers\.size\s*>\s*0\s*,/.test(ownerCall));
 
+  // carPlayBootstrap's connect / disconnect are checked by RUNNING them (section CP). The same statement check here
+  // keeps the static half meaningful for a tree the behavioural half cannot load.
   const cp = blank(read("src/carplay/carPlayBootstrap.ts"));
   const cpDis = bodyAfter(cp, "const onDisconnect = () => {");
-  ok("F7 carPlayBootstrap onDisconnect → releaseBgLocation('carplay')", !!cpDis && cpDis.includes("releaseBgLocation('carplay')"));
-  ok("F8 carPlayBootstrap onDisconnect → setCarSurfaceLive('carplay', false)", !!cpDis && cpDis.includes("setCarSurfaceLive('carplay', false)"));
+  const cpSt = cpDis ? statements(cpDis) : [];
+  ok("F7 carPlayBootstrap onDisconnect: release + witness as plain top-level statements",
+    ["void releaseBgLocation('carplay')", "noteCarConnected(false, 'carplay')"].every((x) => cpSt.includes(x)), JSON.stringify(cpSt.filter((x) => /release|noteCar/.test(x))));
+  ok("F8 carPlayBootstrap onDisconnect → setCarSurfaceLive('carplay', false) (top level)", cpSt.includes("setCarSurfaceLive('carplay', false)"));
 
   const aa = blank(read("src/carplay/AndroidAutoRoot.tsx"));
   const aaDis = bodyAfter(aa, "const onDisconnect = () => {");
-  ok("F9 AndroidAutoRoot disconnect → releaseBgLocation('androidauto')", !!aaDis && aaDis.includes("releaseBgLocation('androidauto')") && aaDis.includes("setCarSurfaceLive('androidauto', false)"));
+  const aaSt = aaDis ? statements(aaDis) : [];
+  ok("F9 AndroidAutoRoot disconnect: release + telemetry flag + head-unit release as plain top-level statements",
+    ["void releaseBgLocation('androidauto')", "setCarSurfaceLive('androidauto', false)", "noteCarConnected(false, 'androidauto')"].every((x) => aaSt.includes(x)), JSON.stringify(aaSt));
   const acq = aa.indexOf("acquireBgLocation('androidauto')");
   const effAt = acq < 0 ? -1 : aa.lastIndexOf("useEffect(", acq);
   const mountEff = effAt < 0 ? null : bodyAfter(aa, "useEffect(", effAt);
   const unmount = mountEff ? bodyAfter(mountEff, "return () => {") : null;
-  ok("F10 AndroidAutoRoot unmount → releaseBgLocation('androidauto')", !!unmount && unmount.includes("releaseBgLocation('androidauto')") && unmount.includes("setCarSurfaceLive('androidauto', false)"));
+  const unSt = unmount ? statements(unmount) : [];
+  ok("F10 AndroidAutoRoot unmount: the same three as plain top-level statements",
+    ["void releaseBgLocation('androidauto')", "setCarSurfaceLive('androidauto', false)", "noteCarConnected(false, 'androidauto')"].every((x) => unSt.includes(x)), JSON.stringify(unSt));
 
   const map = blank(read("app/(app)/map.tsx"));
   ok("F11 map.tsx: exactly one watchPositionAsync(", count(map, "watchPositionAsync(") === 1);
   const w = map.indexOf("Location.watchPositionAsync(");
   const eAt = map.lastIndexOf("useEffect(", w);
   const eff = eAt < 0 ? null : bodyAfter(map, "useEffect(", eAt);
-  ok("F12 map.tsx phone watcher: `let cancelled = false` + the cleanup sets it", !!eff && /let cancelled = false;/.test(eff) && /return \(\) => \{ cancelled = true;/.test(eff));
-  ok("F13 …a watch resolving after the cleanup is removed (removeWhenSettled)", !!eff && /\.then\(\(s\) => \{[\s\S]*?sub = s;[\s\S]*?if \(cancelled\) removeWhenSettled\(s,/.test(eff));
-  ok("F14 …a delivery to a cancelled effect is dropped and removes the watch", !!eff && /\(pos\) => \{\s*if \(cancelled\) \{ try \{ sub\?\.remove\?\.\(\); \} catch \{\} return; \}/.test(eff));
-  ok("F15 …and the effect re-runs when nav ends in the background (fgWatchKeep in the deps)", !!eff && /\[appActive, settings\.liteGps, fgWatchKeep\]\s*\)$/.test(eff));
-  ok("F16 …and fgWatchKeep is the gate's own condition", /const fgWatchKeep = appActive \|\| navMode === "turn-by-turn";/.test(map));
+  ok("F15 map.tsx phone watcher re-runs when it loses its last reason to run (fgWatchKeep in the deps)", !!eff && /\[appActive, settings\.liteGps, fgWatchKeep\]\s*\)$/.test(eff));
+  ok("F16 …fgWatchKeep = app active OR a phone route OR a head unit (locationPrivacy's own aggregate, kept reactive)",
+    /const fgWatchKeep = appActive \|\| navMode === "turn-by-turn" \|\| huAttached;/.test(map) && /return subscribeHeadUnit\(setHuAttached\);/.test(map));
 }
 {
   // No `= await Location.watchPositionAsync(` in src/ or app/, and no creator of a watch outside the two owners above.
@@ -340,13 +375,15 @@ function bodyAfter(src: string, marker: string, from = 0): string | null {
     }
   };
   walk("src/"); walk("app/");
-  const assignAfterAwait: string[] = []; const creators: string[] = [];
+  const assignAfterAwait: string[] = []; const creators: string[] = []; const named: string[] = [];
   for (const f of files) {
     const b = blank(read(f));
     if (/=\s*await\s+Location\.watchPositionAsync\(/.test(b)) assignAfterAwait.push(f);
     if (/watchPositionAsync\(/.test(b)) creators.push(f);
+    if (/import\s*\{[^}]*\bwatchPositionAsync\b[^}]*\}\s*from\s*["']expo-location["']|\{[^}]*\bwatchPositionAsync\b[^}]*\}\s*=\s*Location\b/.test(b)) named.push(f);
   }
   ok("F17 no `= await Location.watchPositionAsync(` in src/ or app/", assignAfterAwait.length === 0, assignAfterAwait.join(","));
+  ok("F17b no named / destructured watchPositionAsync (an alias would hide a watch from F18)", named.length === 0, named.join(","));
   ok("F18 the only watch creators are navNotification.ts (owner) and map.tsx (phone watcher)",
     JSON.stringify(creators.sort()) === JSON.stringify(["app/(app)/map.tsx", "src/navNotification.ts"]), JSON.stringify(creators));
 }
@@ -381,8 +418,20 @@ if (!process.env.CAR_FEED_ROOT) {
     export const stopLocationUpdatesAsync = (...a) => L().stopLocationUpdatesAsync(...a);
     export const watchPositionAsync = (...a) => L().watchPositionAsync(...a);`);
   const RN = js(`export const Platform = { OS: "ios", select: (o) => o.ios ?? o.default };
-    export const AppState = { currentState: "background", addEventListener: () => ({ remove() {} }) };`);
+    export const AppState = { currentState: "background", addEventListener: () => ({ remove() {} }) };
+    export const NativeModules = { RNCarPlay: {} }; export const processColor = (c) => c;`);
   const STORAGE = js(`export default { getItem: () => Promise.resolve(null), setItem: () => Promise.resolve(), removeItem: () => Promise.resolve(), multiRemove: () => Promise.resolve() };`);
+  const REACT = js(`const f = () => {}; export const useEffect = f, useState = (v) => [v, f], useRef = (v) => ({ current: v }), useCallback = (x) => x; export default {};`);
+  const ROWS = js(`export const logEvent = (r) => { globalThis.__rows.push(String(r)); }; export const logEventReliable = logEvent;`);
+  // A module exporting the names `parent` imports from `spec`, each one RECORDING its calls into globalThis.__calls
+  // as "<spec>:<name>(<json args>)" and returning a resolved promise (so `void x().catch(…)` works). For section CP.
+  const recorderFor = (parentSrc: string, spec: string): string => {
+    const m = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*["']${spec.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}["']`).exec(parentSrc);
+    const names = (m?.[1] ?? "").split(",").map((x) => x.trim()).filter((x) => x && !x.startsWith("type ")).map((x) => x.split(/\s+as\s+/).pop()!.trim());
+    const val = (n: string) => n === "carPlayHookOwnsRoot" ? "false" : /^[A-Z][A-Z0-9_]+$/.test(n) ? "{}"
+      : `(...a) => { globalThis.__calls.push(${JSON.stringify(spec + ":" + n)} + "(" + a.map((x) => JSON.stringify(x)).join(",") + ")"); return ${n === "getCarState" ? "({})" : "Promise.resolve()"}; }`;
+    return js(names.map((n) => `export const ${n} = ${val(n)};`).join("\n"));
+  };
   const NOTIF = js(`const p = () => Promise.resolve(); export const AndroidImportance = { HIGH: 4 }; export const AndroidNotificationPriority = { HIGH: "high" };
     export const setNotificationChannelAsync = p, scheduleNotificationAsync = p, dismissNotificationAsync = p, cancelScheduledNotificationAsync = p, getPermissionsAsync = p, requestPermissionsAsync = p;`);
   const TASKS = js(`export const defineTask = () => {}; export const isTaskRegisteredAsync = () => Promise.resolve(false);`);
@@ -404,23 +453,28 @@ if (!process.env.CAR_FEED_ROOT) {
       if (spec === "@react-native-async-storage/async-storage") return { url: STORAGE, shortCircuit: true };
       if (spec === "expo-notifications") return { url: NOTIF, shortCircuit: true };
       if (spec === "expo-task-manager") return { url: TASKS, shortCircuit: true };
+      if (spec === "react") return { url: REACT, shortCircuit: true };
       const parent = ctx.parentURL ?? "";
       if (spec.startsWith(".") && /navNotification(\.base)?\.ts$/.test(parent)) {
         if (REAL.has(spec)) return { url: new URL(`${spec.slice(2)}.ts`, SRC).href, shortCircuit: true };   // the worktree's pure module
         return { url: stubFor(readFileSync(fileURLToPath(parent), "utf8"), spec), shortCircuit: true };
       }
+      if (spec.startsWith(".") && /carPlayBootstrap\.ts$/.test(parent)) return { url: recorderFor(readFileSync(fileURLToPath(parent), "utf8"), spec), shortCircuit: true };
+      if (spec === "./crashBreadcrumb" && /drawTelemetry\.ts$/.test(parent)) return { url: ROWS, shortCircuit: true };
+      if (spec.startsWith(".") && !/\.[a-z]+$/i.test(spec)) { try { return next(spec + ".ts", ctx); } catch {} }
       return next(spec, ctx);
     },
   });
   // The fake native location service (expo JS semantics, see FakeNative) + NAV_TASK state.
-  const makeLoc = () => {
+  const makeLoc = (bgStartFails = false) => {
     const native = new FakeNative(); let task = false;
     g.__loc = {
       getForegroundPermissionsAsync: async () => ({ granted: true, status: "granted" }),
       getBackgroundPermissionsAsync: async () => ({ granted: true }),
       requestBackgroundPermissionsAsync: async () => ({ granted: true }),
       hasStartedLocationUpdatesAsync: async () => task,
-      startLocationUpdatesAsync: async () => { task = true; },
+      // G6: a FAILED background start (When-In-Use behind the lock, an Android FGS refusal) — NAV_TASK never runs.
+      startLocationUpdatesAsync: async () => { if (bgStartFails) throw new Error("bgstart refused"); task = true; },
       stopLocationUpdatesAsync: async () => { task = false; },
       watchPositionAsync: (_o: unknown, cb: (l: any) => void) => native.watch(cb),
     };
@@ -475,6 +529,138 @@ if (!process.env.CAR_FEED_ROOT) {
       d.push(JSON.stringify(r2));
     }
     ok("G5 5 more connect/disconnect cycles on the real module → 1 watch each, 0 after each", allOk, d.join(" "));
+    // G6 — the review's mutation (the car-watch stop moved inside `if (started)`) passed every gate because this fake
+    // always started NAV_TASK. With the background start refused, only the release's own stop ends the car watch.
+    g.__rows.length = 0;
+    const failing = makeLoc(true);
+    const r3 = await connectDisconnect(mod, failing.native);
+    ok("G6 FAILED background start: releaseBgLocation still removes the car watch (fgLive=0 task=0)",
+      r3.madeAtConnect === 1 && r3.liveAfter === 0 && !failing.task() && g.__rows.includes("loc-release tag=carplay fgLive=0 task=0"),
+      JSON.stringify({ ...r3, rows: g.__rows.filter((x: string) => x.startsWith("loc-release")) }));
+  }
+
+  // ── T · the car-surface telemetry drop, run for real (src/drawTelemetry.ts) ─────────────────────────────────────
+  {
+    const dt = await import(new URL("src/drawTelemetry.ts", ROOT).href);
+    const rows = () => (g.__rows as string[]).filter((r) => /^(draw-cmp|pose-fix|corner-trace|snap-mode|cam-apply) surf=car/.test(r));
+    const phoneRows = () => (g.__rows as string[]).filter((r) => /^(draw-cmp|pose-fix|cam-apply) surf=phone/.test(r));
+    const raw = { lat: 49.1734, lng: -122.6654 }, gps = { lat: 49.1734, lng: -122.6654, accM: 5 };
+    const pose = { fixAge: 90, acc: 5, course: 90, spd: 8, estHdg: 90, yaw: null, src: "gps", drawnVsFixM: 1, distM: 2, routeW: 0.5 };
+    const hdg = { locked: 90, raw: 90, route: 90 };
+    const burst = () => {
+      t += 61_000;
+      dt.reportDraw("car", raw, raw, "raw", 8, true, gps, hdg); dt.reportPoseFix("car", true, pose); dt.reportCamApply("car", "dM=40 req=49.17340,-122.66540");
+      dt.reportDraw("phone", raw, raw, "raw", 8, true, gps, hdg); dt.reportPoseFix("phone", true, pose); dt.reportCamApply("phone", "dM=40 req=49.17340,-122.66540");
+    };
+    g.__rows.length = 0; burst();
+    const before = rows().length, ctlPhone = phoneRows().length;
+    dt.setCarSurfaceLive("carplay", true); g.__rows.length = 0; burst();
+    const during = rows().length;
+    dt.setCarSurfaceLive("carplay", false); g.__rows.length = 0; burst();
+    const after = rows().length;
+    ok("T1 no car surface → no surf=car draw-cmp / pose-fix / cam-apply row (the phone rows still write)", before === 0 && ctlPhone === 3, `car=${before} phone=${ctlPhone}`);
+    ok("T2 CarPlay live → the car rows write", during === 3, `car=${during}`);
+    ok("T3 after the disconnect → none again", after === 0, `car=${after}`);
+    const cmb = blank(read("src/ConvoyMapbox.tsx"));
+    ok("T4 ConvoyMapbox's cam-apply goes through reportCamApply (no direct cam-apply row)", /reportCamApply\(probeRole, /.test(cmb) && !/`cam-apply surf=/.test(cmb));
+  }
+
+  // ── CP · carPlayBootstrap.ts run for real: connect / disconnect ───────────────────────────────────────────────────
+  {
+    g.__calls = [] as string[];
+    g.__DEV__ = true;
+    const cb = { connect: [] as (() => void)[], disconnect: [] as (() => void)[] };
+    const CarPlay = { connected: false, bridge: { checkForConnection() {} }, registerOnConnect: (f: () => void) => cb.connect.push(f), registerOnDisconnect: (f: () => void) => cb.disconnect.push(f), setRootTemplate() {} };
+    class MapTemplate { cfg: unknown; constructor(c: unknown) { this.cfg = c; } }
+    g.require = (m: string) => { if (m === "react-native-carplay") return { CarPlay, MapTemplate }; throw new Error(`require ${m}`); };
+    g.__loc = { ...g.__loc, getForegroundPermissionsAsync: async () => ({ granted: false }) };
+    const boot = await import(new URL("src/carplay/carPlayBootstrap.ts", ROOT).href);
+    boot.initCarPlayBootstrap();
+    const calls = g.__calls as string[];
+    ok("CP0 at boot (nothing attached) the session claims the head-unit source", calls.includes(`../locationPrivacy:noteCarConnected(false,"carplay")`), JSON.stringify(calls.filter((c) => /noteCar/.test(c))));
+    calls.length = 0; CarPlay.connected = true; for (const f of cb.connect) f();
+    const onC = [...calls];
+    ok("CP1 connect, synchronously: head unit attached, lock acquired, car feed started, car rows allowed",
+      [`../locationPrivacy:noteCarConnected(true,"carplay")`, `../navNotification:acquireBgLocation("carplay")`, `../navNotification:startForegroundCarFeed()`, `../drawTelemetry:setCarSurfaceLive("carplay",true)`].every((x) => onC.includes(x)),
+      JSON.stringify(onC.filter((c) => /noteCar|BgLocation|ForegroundCarFeed|SurfaceLive/.test(c))));
+    calls.length = 0; CarPlay.connected = false; for (const f of cb.disconnect) f();
+    const onD = [...calls];
+    ok("CP2 disconnect, SYNCHRONOUSLY (no timer, no await): the park witnessed, the lock released, car rows stopped",
+      [`../locationPrivacy:noteCarConnected(false,"carplay")`, `../navNotification:releaseBgLocation("carplay")`, `../drawTelemetry:setCarSurfaceLive("carplay",false)`].every((x) => onD.includes(x)),
+      JSON.stringify(onD.filter((c) => /noteCar|BgLocation|SurfaceLive/.test(c))));
+    ok("CP3 …and the witness comes before the lock release (the latch drops before anything else can run)",
+      onD.indexOf(`../locationPrivacy:noteCarConnected(false,"carplay")`) < onD.indexOf(`../navNotification:releaseBgLocation("carplay")`));
+    delete g.require;
+  }
+
+  // ── M · map.tsx's phone-watcher effect, extracted from the source and run ───────────────────────────────────────
+  {
+    const ts = (await import("typescript")).default;
+    const vm = await import("node:vm");
+    const raw = read("app/(app)/map.tsx"); const bl = blank(raw);
+    const wAt = bl.indexOf("Location.watchPositionAsync(");
+    const eAt = bl.lastIndexOf("useEffect(", wAt);
+    const open = bl.indexOf("() => {", eAt) + "() => ".length;
+    const close = closeOf(bl, open);
+    const code = ts.transpileModule(`var __effect = () => ${raw.slice(open, close + 1)};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+    let mclock = 5_000_000; let mtimers: { at: number; fn: () => void }[] = [];
+    const mlater = (fn: () => void, ms: number) => { mtimers.push({ at: mclock + ms, fn }); };
+    const madvance = (ms: number) => { const end = mclock + ms; for (;;) { mtimers.sort((a, b) => a.at - b.at); const x = mtimers[0]; if (!x || x.at > end) break; mtimers.shift(); mclock = x.at; x.fn(); } mclock = end; };
+    const run = (o: { appActive: boolean; nav: boolean; keepPrev: boolean; keep: boolean }) => {
+      const native = new FakeNative(); let ingest = 0;
+      const ctx: any = {
+        ensureLocationPermission: async () => true, appActive: o.appActive, navActiveRef: { current: o.nav },
+        fgWatchKeepRef: { current: o.keepPrev }, fgWatchKeep: o.keep, settings: { liteGps: false },
+        Location: { Accuracy: { High: 4, BestForNavigation: 6 }, watchPositionAsync: (_o: unknown, cb2: (l: any) => void) => native.watch(cb2) },
+        removeWhenSettled: (s2: WatchSub, bornAt: number) => removeWhenSettled(s2, bornAt, () => mclock, mlater),
+        Date: { now: () => mclock },
+        rawCourseHere: () => { ingest++; return null; },   // the first call of the fix-ingest body
+      };
+      vm.runInNewContext(code, ctx);
+      const cleanup = ctx.__effect();
+      return { native, cleanup, ingested: () => ingest };
+    };
+    const active = { appActive: true, nav: false, keepPrev: true, keep: true };
+    {
+      const r = run(active); await flush(); await flush();
+      const made = r.native.created.length;
+      r.cleanup();                                   // the effect is torn down while the start is in flight
+      r.native.resolveAll(); await flush(); await flush();
+      const heldAtResolve = r.native.live();
+      let threw = false;
+      try { r.native.deliver(1); } catch { threw = true; }   // a fix for the dead effect (an unguarded ingest throws here: no map.tsx scope)
+      const afterDelivery = r.native.live();
+      ok("M1 cleanup while the watch start is in flight → the late watch is removed (a `sub = await` shape leaves it running)",
+        made === 1 && heldAtResolve === 1 && afterDelivery === 0 && r.ingested() === 0 && !threw, JSON.stringify({ made, heldAtResolve, afterDelivery, ingested: r.ingested(), threw }));
+    }
+    {
+      const r = run(active); await flush(); await flush();
+      r.cleanup(); r.native.resolveAll(); await flush(); await flush();
+      madvance(CAR_FEED_SETTLE_MS - 1); const before = r.native.live();
+      madvance(1);
+      ok("M2 …and with no delivery it is removed once the native start has settled", before === 1 && r.native.live() === 0, `before=${before} after=${r.native.live()}`);
+    }
+    {
+      const r = run(active); await flush(); await flush(); r.native.resolveAll(); await flush(); await flush();
+      madvance(5_000); r.cleanup();
+      ok("M3 cleanup of a settled watch removes it at once (a cleanup that forgets to remove fails here)", r.native.live() === 0 && r.native.created[0].removeCalls === 1, `live=${r.native.live()}`);
+    }
+    {
+      const r = run(active); await flush(); await flush(); r.native.resolveAll(); await flush(); await flush();
+      madvance(300); r.cleanup();
+      const atCleanup = r.native.created[0].removeCalls;
+      madvance(CAR_FEED_SETTLE_MS);
+      ok("M4 cleanup 300 ms after the watch resolved waits for the settle, then removes it (the zombie-race rule)", atCleanup === 0 && r.native.live() === 0, `removeCallsAtCleanup=${atCleanup} live=${r.native.live()}`);
+    }
+    {
+      const mk = async (o: typeof active) => { const r = run(o); await flush(); await flush(); await flush(); return r.native.created.length; };
+      const bgIdle = await mk({ appActive: false, nav: false, keepPrev: true, keep: false });
+      const bgNavNoPrev = await mk({ appActive: false, nav: true, keepPrev: false, keep: true });
+      const bgNavPrev = await mk({ appActive: false, nav: true, keepPrev: true, keep: true });
+      const fg = await mk(active);
+      ok("M5 the gate: background + no route → no watch; a background start after a run that had none → no watch; a continuing background route → watch; foreground → watch",
+        bgIdle === 0 && bgNavNoPrev === 0 && bgNavPrev === 1 && fg === 1, JSON.stringify({ bgIdle, bgNavNoPrev, bgNavPrev, fg }));
+    }
   }
   Date.now = realNow;
 }

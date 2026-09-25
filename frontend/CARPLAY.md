@@ -277,30 +277,62 @@ to run every 3s forever on every phone that never connects to CarPlay.
 > me when i discconect from car play... this is a privacy concern. fix it and lock it."* What followed him:
 > *"My icon moved on the map."*
 
-**The rule: once CarPlay / Android Auto disconnects, Hairpin collects no location unless the app is open on the
-phone or the phone is navigating — and the driver stays pinned at the car until a head unit reconnects or the car
-provably drives away.**
+**The rule: once CarPlay / Android Auto disconnects, Hairpin runs no GPS watcher or location stream unless the app is
+open on the phone or the phone is navigating — and the shared position and the marker stay pinned at the car until a
+head unit reconnects or the phone provably drives away.** Exactly one thing still reaches the app after a disconnect
+with the app closed: iOS **visit** events (`src/visitMonitor.ts`, CLVisit monitoring, always on since it was added —
+not changed here). A visit can wake the app and POST `/location`, but what it posts is `shareablePositionAsync(null)`:
+the car spot or nothing, never the visit's own coordinate (the server does see a fresh `last_seen`).
 
 What was measured (crash_reports): fresh car-store fixes for minutes to hours after `carplay-disconnect` +
 `loc-bgsess op=stop` (09-23: 110 min and 2 h 09; 09-25: 10:08→10:14), raw walking coordinates in
 `draw-cmp surf=car` / `cam-apply surf=car`, two `nav-loc src=car` rows in the same second at every connect, and at
 10:13:10 one 26 km/h fix while walking that armed the driving latch and un-pinned him (`latch=0→1 hu=1→0`).
+Review 2026-09-25: on iOS a COLD CarPlay drive (the phone app never opened) was never witnessed at all — Rodrigo
+poi7m7-227888 `draw-cmp … latch=1 parked=1 hu=0` 282 s after `carplay-disconnect`.
 
 | mechanism | fix | gate |
 |---|---|---|
-| The car GPS watch started twice per connect (guard before the await, assignment after it); `stop` reached one, the other ran on with background delivery | `src/carFeedOwner.ts` is the ONLY creator: single-flight start, stop removes every subscription with no delivery needed, a fix arriving with no lock holder removes its watch and is dropped | `tools/sim-qc/car_feed_leak_test.mts` (G0 reproduces the leak on the pre-fix `navNotification.ts`) |
-| map.tsx's phone watcher: `sub = await watchPositionAsync(…)` lost a watch that resolved after cleanup; its background gate was never re-evaluated when a route ended behind the head unit | a `cancelled` flag + `removeWhenSettled`; `fgWatchKeep` in the deps re-runs the gate when nav ends while the app is not active | `car_feed_leak_test` F11–F16 |
-| After a witnessed park one fast fix re-armed the latch and cleared the witness | `src/parkRearm.ts`: re-arm needs ≥ 15 km/h held 15 s AND 150 m from where that run began; a reconnect still clears it at once | `tools/sim-qc/park_rearm_test.mts` (his 10:12–10:14 fixes; N reproduces it on the pre-fix module) |
-| The drive's latch outlived the disconnect by up to 90 s, so `shareablePosition`'s `movingNow` shared any ≥ 9 km/h fix LIVE on it; a relaunch inside that window restored it over a witnessed spot | the witness drops the latch (`noteCarConnected` true→false); hydrate never restores the latch over a `hu=1` spot | `park_rearm_test` W, H2 (negative controls on the pre-fix module) |
-| Car-surface telemetry rows kept printing coordinates after the disconnect (CarMapView stays mounted) | `drawTelemetry.setCarSurfaceLive` — set only by `carPlayBootstrap` onConnect/onDisconnect and `AndroidAutoRoot` mount/disconnect/unmount, never by `headUnitAttachedRaw()` | — |
+| The car GPS watch started twice per connect (guard before the await, assignment after it); `stop` reached one, the other ran on with background delivery | `src/carFeedOwner.ts` is the ONLY creator: single-flight start, stop removes every subscription with no delivery needed, a fix arriving with no lock holder removes its watch and is dropped | `tools/sim-qc/car_feed_leak_test.mts` A–E, G (G0 reproduces the leak on the pre-fix `navNotification.ts`; G6 = a failed background start) |
+| map.tsx's phone watcher: `sub = await watchPositionAsync(…)` lost a watch that resolved after cleanup; its background gate was never re-evaluated when a route ended | a `cancelled` flag + `removeWhenSettled` (also in the cleanup); `fgWatchKeep` = app active OR phone route OR head unit, in the deps | `car_feed_leak_test` M (the effect extracted from map.tsx and run), F15–F16 |
+| iOS reported a head unit only from map.tsx, so a cold CarPlay disconnect was never witnessed and a cold connect never cleared yesterday's witness | `carPlayBootstrap` (the CarPlay session lifecycle) is a head-unit SOURCE and, once it has reported, the only iOS one; map.tsx is a fallback mirror that cannot create or cancel a witness; hydrate never adopts a witness while attached | `car_feed_leak_test` CP (the bootstrap run for real), `park_rearm_test` K |
+| After a witnessed park one fast fix re-armed the latch and cleared the witness | `src/parkRearm.ts` v2: within the last 120 s, 15 s credited at ≥ 15 km/h (only fixes that moved as their speed claims), 250 m of robust (median-of-3) net displacement, and 250 m from the spot; a reconnect still clears it at once; every new witness starts it over | `park_rearm_test` J, O, E, R, L, G, S (his 09-25 and 08-29 walks; grids; stop-and-go) |
+| The drive's latch outlived the disconnect by up to 90 s, so `movingNow` shared any ≥ 9 km/h fix LIVE on it; a relaunch inside that window restored it over a witnessed spot | the witness drops the latch (`noteCarConnected`); hydrate never restores the latch over a `hu=1` spot, and adopting one drops a racing latch | `park_rearm_test` W, H2, S2 |
+| Car-surface telemetry rows kept printing coordinates after the disconnect (CarMapView stays mounted) | `drawTelemetry.setCarSurfaceLive` (set only by `carPlayBootstrap` and `AndroidAutoRoot`); every coordinate-bearing car row — draw-cmp, pose-fix, corner-trace, snap-mode, cam-apply (`reportCamApply`) — is emitted from `drawTelemetry` only | `car_feed_leak_test` T; trap-check `car-row-outside-drawtelemetry` |
 
-`scripts/trap-check.py` rule `watch-assigned-after-await` forbids the orphan shape anywhere in `src/` and `app/`.
+`scripts/trap-check.py` rule `watch-assigned-after-await` flags the orphan shape where it is spelled
+`= await Location.watchPositionAsync(` in `src/` and `app/` (text, not calls: an alias or a different location API
+would pass it — `car_feed_leak_test` F17b forbids a named import of `watchPositionAsync`, F18 inventories the creators).
+The values in `src/carFeedOwner.ts` and `src/parkRearm.ts` are pinned by `car_feed_leak_test` P1 and
+`park_rearm_test` V1 (those files are outside `nav-lock.json`; the lock tool cannot add a file today).
+
 Every release writes `loc-release tag=<t> fgLive=<n> task=<0|1>` (bounded, reliable): the field receipt after a
 drive is `carplay-disconnect` → `loc-release tag=carplay fgLive=0 task=0` → no `loc-src feed=fg`, no fresh
 `draw-cmp surf=car` until the app is opened. Phone-only navigation still tracks in the background by design (the
-`nav` consumer). Consequence, accepted and privacy-favouring: a CarPlay / Android Auto unplug **mid-drive** shares
-the unplug-point car spot (and pins the marker there) until the re-arm proof — ~15–20 s at city speed — or a
-reconnect. The 90 s parked STATUS label (`isParked`, `_lastDrivingAt`) is unchanged: only the position is pinned.
+`nav` consumer), and so does the phone watcher while a head unit is attached (a second route started from the car).
+
+Consequences, accepted and privacy-favouring:
+- a CarPlay / Android Auto unplug **mid-drive** shares the unplug-point car spot (and pins the marker there) until the
+  re-arm proof — ~15–30 s on an open road, ~35–50 s on a stop-sign grid, up to ~70 s in slow stop-and-go
+  (park_rearm_test E) — or a reconnect. The 90 s parked STATUS label (`isParked`, `_lastDrivingAt`) is unchanged.
+- a cold iOS CarPlay drive now counts as head-unit attached, exactly like a warm one: shared live while connected,
+  spots recorded with `att=1` and witnessed with `hu=1` at the disconnect — so, as on the warm path, a drive whose
+  process dies before the disconnect leaves no adoptable pin (`unwitnessed-attached`).
+
+**Build 80 (native, HYPOTHESIS until a device receipt — Codex + review 2026-09-25).** JS cannot guarantee native
+teardown: expo-location 19.0.8 `ios/LocationModule.swift` `watchPositionImplAsync` stores `locationStreamers[watchId]`
+and starts `streamLocations()` in a detached `Task {}`; `removeWatchAsync` stops and NILS the entry. A remove that
+lands before that Task runs lets `manager.startUpdatingLocation()` start a stream nothing tracks (and the JS
+`remove()` is idempotent, so no second call reaches native). The JS side does what it can — neutralise at once,
+remove on the first delivery, on the 1 s settle timer, and on every owner start/stop/live() call — but a young
+subscription with frozen timers and no delivery waits. Fix in `patches/expo-location+19.0.8.patch`: serialize start
+and remove per watchId (a `removed` flag on the streamer checked inside `streamLocations()` before
+`startUpdatingLocation()`, set by `stopStreaming()`; or keep the Task handle and cancel it in `removeWatchAsync`), so a
+removed streamer can never start. Receipt owed: a bench run that removes a watch within 1 ms of its start and checks
+`CLLocationManager` is not updating. Separately (review, refuted as unreachable today): a watch from a previous JS
+context survives an in-process reload; the reload paths are gated off while CarPlay / Android Auto or turn-by-turn
+is live.
+
 Not verified on a device or a head unit yet — the gates run the real modules in node with a fake expo-location.
 
 ## 7. Open / next

@@ -504,6 +504,88 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
     ok(`CF1${android ? "a" : ""}`, `Crew frames the crew for the measured ${w}×${hh} canvas, not render #1's 400×240 fallback (${android ? "Android" : "iOS"})`, Math.abs(h.cam.zoom - want) < 0.02, `(overview zoom ${f3(h.cam.zoom)}, want ${f3(want)})`);
   }
 
+  // ── TL: a write at the TAIL of a native animation (Codex's final pass [high], 2026-09-25) ─────────────────────────
+  // crewFit's 600 ms easeTo, a fly home, a re-aimed fly: each ends natively up to a frame after its JS deadline, and on
+  // iOS MapboxMap.setCamera(to:) does not cancel it — a 'none' write in that tail is overwritten by the animation's last
+  // frame. Codex: park, a nearby crew, Crew, recenter 600 ms later → the edge's snap lost to the easeTo's last frame,
+  // stuck at z 15 / pitch 0 / heading 0 with nothing owed. Each gesture −20 … +120 ms around each animation's JS end ·
+  // a NEARBY crew (fits z 15 — its 7 s return is a snap, no animation) and the WIDE crew (fits below z 14 — its 7 s return
+  // is the 1.8 s fly) · parked · iOS and Android. Asserted: from 3 s to 20 s after the gesture, whenever nothing animates
+  // the camera shows exactly the owner's framing (zoom = carZoomDest, pitch = followPitch, heading = the north-up
+  // override or the car's) and is never off it for more than 250 ms; then for 5 s it HOLDS the independent end framing
+  // (16.8, or the relayout's 17.8 · pitch 45 · heading 90, north for the compass) with nothing owed and the pump idle.
+  type TAnchor = "crewFit's easeTo" | "a fly started inside the easeTo" | "a re-aimed fly" | "the 7 s return";
+  const TG: { key: string; act: (h: ReturnType<typeof makeHeadUnit>) => void; z: number; hdg: number }[] = [
+    { key: "recenter", act: (h) => h.gesture({ kind: "recenter" }), z: 16.8, hdg: 90 },
+    { key: "compass", act: (h) => h.gesture({ kind: "compass" }), z: 16.8, hdg: 0 },
+    { key: "pinch (begin · scale 1 · end)", act: (h) => { h.gesture({ kind: "zoomBegin" }); h.gesture({ kind: "zoom", scale: 1, velocity: 0 }); h.gesture({ kind: "zoomEnd" }); }, z: 16.8, hdg: 90 },
+    { key: "+ press", act: (h) => h.press(0.5), z: 16.8, hdg: 90 },
+    { key: "− press", act: (h) => h.press(-0.5), z: 16.8, hdg: 90 },
+    { key: "AppState re-assert", act: (h) => h.reassert(), z: 16.8, hdg: 90 },
+    { key: "relayout (→ 17.8)", act: (h) => h.relayout(17.8), z: 17.8, hdg: 90 },
+  ];
+  const TL_OFFSETS = [-20, -10, -5, 0, 5, 10, 17, 40, 80, 120];
+  const angOff = (a: number, b: number) => { const d = (((a - b) % 360) + 540) % 360 - 180; return Math.abs(d); };
+  // The anchor's JS end (harness ms), or NaN when this crew has no such animation.
+  const tlSetup = (h: ReturnType<typeof makeHeadUnit>, anchor: TAnchor): number => {
+    const off = h.abs - h.now, C = h.C;
+    const tap = h.now + 100; at(h, tap); h.crew();
+    if (anchor === "crewFit's easeTo") return C.crewEaseUntilRef.current - off;
+    if (anchor === "the 7 s return") {
+      at(h, tap + 7000 + 40);
+      return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : C.camHoldWasActiveRef.current ? NaN : tap + 7000;
+    }
+    at(h, tap + 300); h.gesture({ kind: "recenter" }); at(h, tap + 340);
+    if (anchor === "a fly started inside the easeTo") return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : NaN;
+    const f0 = flies(h, tap)[0]; if (!f0) return NaN;
+    at(h, f0.t + 100); h.press(0.5); at(h, h.now + 40);
+    return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : NaN;
+  };
+  let tli = 0;
+  for (const anchor of ["crewFit's easeTo", "a fly started inside the easeTo", "a re-aimed fly", "the 7 s return"] as TAnchor[])
+  for (const crewKind of ["nearby", "wide"] as const) for (const g of TG) for (const dt of TL_OFFSETS) for (const android of [false, true]) {
+    const h = park(unit({ android }));
+    if (crewKind === "nearby") h.C.__peers = [];
+    let netAt = 0;   // did the re-apply net engage (a write inside a native animation's tail)?
+    const rr = h.C.reapplyAfterRef; let rv = rr.current;
+    Object.defineProperty(rr, "current", { get: () => rv, set: (v: number) => { if (v !== 0 && !netAt) netAt = h.now; rv = v; }, configurable: true });
+    const tap0 = h.now;
+    const A = tlSetup(h, anchor);
+    const id = `TL${++tli}`;
+    const name = `${g.key} ${dt >= 0 ? "+" : "−"}${Math.abs(dt)} ms from the end of ${anchor}${anchor === "the 7 s return" && crewKind === "nearby" ? " (a snap)" : ""}, ${crewKind} crew, parked (${android ? "Android" : "iOS"})`;
+    if (!Number.isFinite(A)) { ok(id, name, false, "(the anchor animation never started)"); continue; }
+    const tg = A + dt; at(h, tg); g.act(h);
+    const C = h.C;
+    let run = 0, worst = 0, worstAt = 0, checked = 0, worstWhat = "";
+    for (let t = tg + 3000; t <= tg + 20000; t += 50) {
+      at(h, t);
+      const last = h.frames[h.frames.length - 1];
+      const busy = !!C.zoomChRef.current.ease || C.returnFlyRef.current !== 0 || C.camHoldWasActiveRef.current || C.pinchActiveRef.current || !!last?.animating;
+      if (busy) { run = 0; continue; }
+      checked++;
+      const fz = C.camInputsRef.current.followZoom, fp = C.camInputsRef.current.followPitch;
+      const wz = src.mods.carZoomDest(C.manualZoomRef.current, fz, C.userZoomRef.current, 10.5, 20);
+      const wh = C.camHdgOverrideRef.current ?? C.drawHdgRef.current;
+      const dz = Math.abs(h.cam.zoom - wz), dp = Math.abs(h.cam.pitch - fp), dh = angOff(h.cam.heading, wh);
+      if (dz > 0.02 || dp > 0.5 || dh > 0.5) {
+        run += 50;
+        if (run > worst) { worst = run; worstAt = t - tg; worstWhat = `camera ${f3(h.cam.zoom)}/${h.cam.pitch.toFixed(1)}/${h.cam.heading.toFixed(1)} vs owner ${f3(wz)}/${fp}/${wh}`; }
+      } else run = 0;
+    }
+    // The end framing, held: 5 more seconds, every sample on it, nothing owed, no camera push.
+    const n0 = h.counts.noteCam; let held = true, endWhat = "";
+    for (let t = tg + 20050; t <= tg + 25000; t += 250) {
+      at(h, t);
+      const off = Math.abs(h.cam.zoom - g.z) > 0.02 || Math.abs(h.cam.pitch - 45) > 0.5 || angOff(h.cam.heading, g.hdg) > 0.5;
+      if (off && held) { held = false; endWhat = `at +${Math.round(t - tg)} ms ${f3(h.cam.zoom)}/${h.cam.pitch.toFixed(1)}/${h.cam.heading.toFixed(1)}`; }
+    }
+    const owed = C.carCamJob() || C.returnFlyRef.current !== 0 || C.camHoldWasActiveRef.current || rv !== 0;
+    const idle = h.counts.noteCam === n0;
+    const ovZ = Math.min(...h.frames.filter((f) => f.t >= tap0).map((f) => f.zoom));   // lowest zoom since the Crew tap
+    const pass = worst <= 250 && checked > 0 && held && !owed && idle;
+    ok(id, name, pass, `(lowest zoom since Crew ${f3(ovZ)}; ${checked ? `off the owner's framing ${worst} ms${worst ? ` at +${worstAt} ms: ${worstWhat}` : ""}` : "NEVER CHECKED — always busy"}; end ${held ? `held ${f3(g.z)}/45/${g.hdg}` : `NOT held (${endWhat})`}; ${owed ? "something still OWED" : "nothing owed"}; pump ${idle ? "idle" : "RUNNING"}; net ${netAt ? `engaged at +${Math.round(netAt - tg)} ms` : "-"})`);
+  }
+
   // ── the harness itself: every identifier the lifted production code read resolved ─────────────────────────────
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);
   ok("Z1", "the lifted production code resolved every identifier it read", unres.size === 0, unres.size ? `(unresolved: ${[...unres].join(", ")})` : "");

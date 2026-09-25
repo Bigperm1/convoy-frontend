@@ -159,7 +159,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, followHeadingDeg: 90, markPainted: () => {}, setStyleGen: () => {},
     camInputsRef: ref({ followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, mapH: 480, mapW: 800, previewMulti: false, uiScale: 1, mapScale: 1 }),
     paintedRef: ref(true), lockReadyRef: ref(true), aaLiveRef: ref({ hasFix: true, lat: cam.lat, lng: cam.lng, followZoom: o.followZoom ?? 16.8, followPitch: 45 }),
-    camHoldUntilRef: ref(0), crewEaseUntilRef: ref(0), camHoldWasActiveRef: ref(false), crewOverviewRef: ref(false), returnFlyRef: ref(0), zoomSnapRef: ref(false),
+    camHoldUntilRef: ref(0), crewEaseUntilRef: ref(0), reapplyAfterRef: ref(0), camHoldWasActiveRef: ref(false), crewOverviewRef: ref(false), returnFlyRef: ref(0), zoomSnapRef: ref(false),
     zoomHoldUntilRef: ref(0), userZoomRef: ref(0), zoomBaseRef: ref(0), pinchActiveRef: ref(false),
     manualZoomRef: ref(null), zoomChRef: ref(M.newCarZoomChannel()), zoomLogRef: ref(M.newCarZoomLog()),
     camZoomRef: ref(null), camPitchRef: ref(null), carLiveZoomRef: ref(null), lastRefreshZoomRef: ref(null),
@@ -170,7 +170,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   const CP = scopeProxy(C, unresolved);
   for (const n of ["clampBias", "zoomLog", "zoomHoldRelease", "carCamJob", "getCam", "applyZoomNow", "applyZoomEased", "reassertAaFollow"]) C[n] = bind(liftVar(csf, "CarMapView", n), CP);
   // Present since 2026-09-25 round 3 (an older revision replayed as a negative control has no such closure).
-  for (const n of ["takeOverNativeCam", "ownerSetPose"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
+  for (const n of ["takeOverNativeCam", "ownerSetPose", "nativeTailUntil", "noteWriteInTail"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
   // The render-time EFFECTS that write the camera (they run after a render whose deps changed):
   const layoutEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| mapW <= 0\) return;/.test(t)), CP);        // 🔒 car-zoom-apply-now
   const coldStartEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| !hasFix \|\| !cameraRef\.current\) return;/.test(t)), CP);   // 🔒 car-cam-coldstart-snap

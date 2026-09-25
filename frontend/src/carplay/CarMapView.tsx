@@ -1177,6 +1177,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const camHoldUntilRef = useRef(0);
   // When crewFit's native easeTo into the overview ends (epoch ms) — a return inside it must fly, not push (getCam).
   const crewEaseUntilRef = useRef(0);
+  // A write that landed inside a native animation's tail is re-applied after it (epoch ms; 0 = none) — see nativeTailUntil.
+  const reapplyAfterRef = useRef(0);
   // Crew overview → return fly (2026-09-24, src/returnFly.ts): crewFit sets the flag; the hold's expiry edge in getCam
   // arms ONE flyTo that pushCam (SelfCarModel) runs instead of the one-frame snap.
   const crewOverviewRef = useRef(false);
@@ -1408,6 +1410,21 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     manualZoomRef.current = null;
     zoomLog(now, `car-zoom op=release z=${from.toFixed(2)} to=${liveDest.toFixed(2)} fz=${fz.toFixed(2)} via=${via} held=0`);
   };
+  // ── A LOST WRITE IS RE-APPLIED, NEVER DROPPED (2026-09-25, Codex's final pass [high]) ─────────────────────────
+  // Every native animation the owner starts — crewFit's easeTo into the overview, a return fly, a re-aimed fly — owns the
+  // camera until its NATIVE end + RETURN_FLY_GRACE_MS (the native animation starts on the frame after the call, so it ends
+  // after the JS deadline). An instant write or a push that still lands inside such a tail can be overwritten on iOS
+  // (MapboxMap.setCamera does not cancel animations) — Codex: Crew, a nearby crew, recenter 600 ms later → the edge's
+  // snap push lost to the easeTo's last frame, stuck at z 15 / pitch 0 / heading 0 with nothing owed. So such a write
+  // books ONE re-apply push right after the tail: carCamJob owes it and pushCam writes the lockstep pose again.
+  const nativeTailUntil = (): number => {
+    const rf = returnFlyRef.current;
+    return Math.max(crewEaseUntilRef.current + RETURN_FLY_GRACE_MS, rf > 0 ? rf + RETURN_FLY_GRACE_MS : 0);
+  };
+  const noteWriteInTail = (now: number) => {
+    const tail = nativeTailUntil();
+    if (now < tail) reapplyAfterRef.current = Math.max(reapplyAfterRef.current, tail);
+  };
   // ── ONE CAMERA OWNER, PARKED TOO (2026-09-25) ────────────────────────────────────────────────────────────────
   // SelfCarModel asks this on every PARKED tick (its bgTick — the 33 ms watchdog and, on iOS, the CarPlay screen's own
   // frame pump — its parked rAF branch, and the wake effect after each render): "does the driver's camera still owe
@@ -1435,7 +1452,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if ((crewDue || flyArmed) && !lockReadyRef.current && paintedRef.current && aaLiveRef.current.hasFix &&
         now >= camHoldUntilRef.current) lockReadyRef.current = true;
     if (!lockReadyRef.current) return false;   // nothing can push yet (overview still on, no paint, no fix): never spin
-    return crewDue || flyArmed || landingDue || carZoomJobOwed(zoomChRef.current, zoomHoldUntilRef.current, now, pinchActiveRef.current);
+    const reapplyDue = reapplyAfterRef.current !== 0 && now >= reapplyAfterRef.current;   // a write lost in a tail
+    return crewDue || flyArmed || landingDue || reapplyDue || carZoomJobOwed(zoomChRef.current, zoomHoldUntilRef.current, now, pinchActiveRef.current);
   }).current;
   const getCam = useRef(() => {
     const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv, uiScale: us, mapScale: ms } = camInputsRef.current;
@@ -1472,12 +1490,14 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // crewReturnEdge (src/crewReturn.ts, moved verbatim 2026-09-25 so the sim gate replays it); it fires once per Crew
     // press — wasActive/overview come back false — whichever path pushed first (a parked tick or a moving frame).
     const nowC = Date.now();
+    if (reapplyAfterRef.current !== 0 && nowC >= reapplyAfterRef.current) reapplyAfterRef.current = 0;   // this push re-applies
+    noteWriteInTail(nowC);   // this push itself may land in a native animation's tail → re-apply after it
     const edge = crewReturnEdge(camHoldWasActiveRef.current, crewOverviewRef.current, camHoldUntilRef.current, nowC, carLiveZoomRef.current);
     if (edge.snap) {
       zoomSnapRef.current = true;
       // Receipt, once per Crew press: why it came home, how late after the deadline, fly or cut, parked or moving.
       const until = camHoldUntilRef.current;
-      try { logEvent(`crew-home surf=car why=${until > 0 ? 'deadline' : 'ended'} late=${until > 0 ? nowC - until : 0} fly=${edge.fly ? 1 : nowC < crewEaseUntilRef.current ? 'short' : 0} via=${nowC - zoomChRef.current.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park'}`); } catch {}
+      try { logEvent(`crew-home surf=car why=${until > 0 ? 'deadline' : 'ended'} late=${until > 0 ? nowC - until : 0} fly=${edge.fly ? 1 : nowC < crewEaseUntilRef.current + RETURN_FLY_GRACE_MS ? 'short' : 0} via=${nowC - zoomChRef.current.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park'}`); } catch {}
     }
     // The fly carries the zoom too: a +/- press that ended the overview set the framing (getCam's zoomLevel, which the
     // fly aims at), so its ease is dropped — no ease left owed through the fly, no cut at touchdown.
@@ -1486,7 +1506,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // 'none' pushes cannot stop it on iOS (MapboxMap.setCamera does not cancel animations), so the lockstep would be
     // invisible until it ended and then cut. Take the camera back with one short fly instead — it cancels the easeTo and
     // starts from where the camera is. Carries the zoom too (same as the long fly).
-    else if (edge.snap && nowC < crewEaseUntilRef.current) { returnFlyRef.current = -CAR_ZOOM_STEP_MS; zoomChRef.current.ease = null; }
+    // …owned until its NATIVE end + RETURN_FLY_GRACE_MS, not its JS deadline (Codex's final pass: a snap at +600 ms lost to
+    // the easeTo's last frame on iOS).
+    else if (edge.snap && nowC < crewEaseUntilRef.current + RETURN_FLY_GRACE_MS) { returnFlyRef.current = -CAR_ZOOM_STEP_MS; zoomChRef.current.ease = null; }
     crewOverviewRef.current = edge.overview;
     camHoldWasActiveRef.current = edge.wasActive;
     camHdgOverrideRef.current = (carNorthUpRef.current || Date.now() < camHoldUntilRef.current)
@@ -1615,6 +1637,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // if a direct camera write appears anywhere else in this file. true = written now.
   const applyZoomNow = (kind: 'gesture' | 'system' = 'gesture'): boolean => {
     if (takeOverNativeCam(Date.now(), kind)) return false;
+    noteWriteInTail(Date.now());   // inside a native animation's tail → re-applied after it, never lost
     const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
     // The SAME destination getCam returns (carZoomDest), so the two still "can never disagree" with a +/- framing on.
     // Pinch, recenter, compass and the AA re-assert clear the framing first, so for them this is exactly the old
@@ -1635,6 +1658,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
    *  given, not the override, seeds the lag). */
   const ownerSetPose = (kind: 'gesture' | 'system', pose: { centerCoordinate?: number[]; heading?: number; pitch?: number; padding?: any }): boolean => {
     if (takeOverNativeCam(Date.now(), kind)) return false;
+    noteWriteInTail(Date.now());   // inside a native animation's tail → re-applied after it, never lost
     const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
     const zoom = carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX);
     const ov = camHdgOverrideRef.current;

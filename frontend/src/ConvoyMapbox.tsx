@@ -34,6 +34,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { overviewSizePt, isOverviewZoom } from "./overviewSize";
 import { RETURN_FLY_MS, predictAhead, returnFlyStep } from "./returnFly";
+import { carZoomApply, type CarZoomChannel } from "./carZoomStep";
 import { reportDraw, reportPoseFix, resetPoseFixBudget, reportCamApply } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
 import { createFramePacer, frameDue, msUntilDue, navMapFps } from "./framePacer";
@@ -1234,7 +1235,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, returnFlyRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, returnFlyRef, camJob, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1257,8 +1258,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // OPT-IN to the native CarPlay display-link pump below. ONLY CarMapView passes true.
   carFramePump?: boolean;
   // ── DELIBERATE ZOOM CHANNEL (2026-08-14) ─────────────────────────────────────
-  // Set true by a caller when the DRIVER changed the zoom (a +/- button, a pinch, a
-  // double-tap). pushCam then lands that change immediately instead of low-passing it.
+  // Set true by a caller when the DRIVER changed the zoom INSTANTLY (a pinch, recenter, compass; and the head unit's
+  // crew-hold expiry edge). pushCam then lands that change immediately instead of low-passing it. Since 2026-09-25 the
+  // head unit's +/- buttons and double-tap do NOT use it: they ease through getCam's zoomCh (src/carZoomStep.ts).
   //
   // WHY IT HAS TO EXIST: getCam() returns followZoom + the driver's bias as ONE number,
   // so both ride the same filter. That filter is deliberately slow (CAM_SMOOTH_TAU_MS
@@ -1270,7 +1272,14 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // Return-from-overview fly (src/returnFly.ts): -1 armed → the next push is ONE flyTo to the chase frame, > 0 = flying
   // until then (pushes stand down), 0 idle. Armed by the car's crew-hold expiry and the phone's recenter after a crew fit.
   returnFlyRef?: React.MutableRefObject<number>;
-  getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any };
+  // DRIVER CAMERA JOB (2026-09-25, src/carZoomStep.ts + src/crewReturn.ts). The head unit's "is a driver camera job owed
+  // right now?" — a +/- zoom easing, the zoom hold's eased release, or the Crew overview's 7 s return. While it answers
+  // true, the PARKED branches below (step / bgTick / the wake effect — the camGlide parked pump) keep pushing the
+  // camera at the drawn pose, so pushCam stays the ONLY camera writer even for a stopped car. Cheap (ref reads); called
+  // per parked tick. Only CarMapView passes it — the phone is unchanged.
+  camJob?: () => boolean;
+  // zoomCh (car only): the driver-zoom channel pushCam applies on every push (carZoomApply) — see src/carZoomStep.ts.
+  getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any; zoomCh?: CarZoomChannel };
   // Optional CAMERA-heading override (the MODEL keeps its real heading). Read live
   // per frame; undefined = normal heading-up chase. CarPlay's compass north-up
   // hold sets it to 0. Phone callers never pass it — zero behaviour change.
@@ -1547,6 +1556,11 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // at the CURRENT drawn pose while this holds, so a parked pose ease no longer freezes the glide.
   // 🔒 NAV-LOCK begin mbx-cam-glide-pending — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const camGlidePending = (): boolean => {
+    // A DRIVER camera job on the head unit (camJob, see its prop note): asked FIRST and independent of the ship switch
+    // below, which holds the AUTOMATIC glide pump. The job is short and bounded (a 0.28 s press, a 1.2 s release, one
+    // push that starts the crew fly home) and camJob answers false unless the lockstep can push. Jeff, 2026-09-25: "the
+    // carplay zoomout seems like its capped at a distance and is not smooth" — a parked car did not come home at all.
+    if (camJob && cameraRef?.current && camJob()) return true;
     if (!CAM_GLIDE_PUMP_ENABLED) return false;   // ship switch, src/camGlide.ts
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return false;
     if (camZoom.current == null || camPitch.current == null) return false;
@@ -1570,6 +1584,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // 🔒 NAV-LOCK begin mbx-pushcam-glide-noselead — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     if (drawPosOutRef) drawPosOutRef.current = { lat: la, lng: ln };
     drawSinkRef?.current?.(la, ln);
+    // A lapsed Crew hold re-arms the lockstep HERE too (camJob), not only at the head unit's next render: a MOVING car
+    // comes home on the first frame after the 7 s, not up to a store tick later (2026-09-25).
+    if (camJob && !(readyRef?.current)) camJob();
     if (!cameraRef?.current || !getCam || !(readyRef?.current)) return;
     // Counted AFTER the bail, so this measures camera pushes that actually cross the
     // bridge — each one is a JSON encode here and a JSON decode in native.
@@ -1645,6 +1662,22 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       }, c.zoomLevel, c.pitch, dt, CAM_GLIDE);
       camZoomGoal.current = g.zoomGoal; camPitchGoal.current = g.pitchGoal;
       camZoom.current = g.zoom; camPitch.current = g.pitch;
+    }
+    // DRIVER ZOOM EASE (head unit, 2026-09-25 — src/carZoomStep.ts). Jeff: "the carplay zoomout seems like its capped at
+    // a distance and is not smooth" → each +/- press eases in 0.28 s, the framing holds exactly where he put it for the
+    // 15 s hold, then eases home in 1.2 s. The ZOOM ONLY follows the ease: camPitch and camHdgLag are not touched here,
+    // so a press no longer snaps the pitch or the heading lag (the zoomSnapRef branch above did; presses no longer set
+    // zoomSnapRef — pinch, recenter, compass, the layout correction and the AA re-assert still do, unchanged). The goal
+    // rides with it, so when the ease lands the glide carries on from exactly there. Stamps the push (zoomCh.pushAt).
+    const zoomCh = c.zoomCh;
+    const eased = zoomCh ? carZoomApply(zoomCh, now, c.zoomLevel) : null;
+    if (eased != null) {
+      camZoom.current = eased; camZoomGoal.current = eased;
+      // The self car's per-tick size is computed at RENDER, and the parked pump and the sub-pixel-skip frames push
+      // without re-rendering — so re-render on every eased push, or the car would drift in size while the map zooms
+      // and pop back at the next render. (A moving frame already re-renders: React batches the two into one.)
+      if (!anim.current) noteTick();
+      setTick((n) => (n + 1) & 0xffff);
     }
     // Publish the zoom the camera is ACTUALLY at. The route trim converts a fixed
     // screen distance to metres and must use this, not the speed-derived TARGET —

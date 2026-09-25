@@ -183,7 +183,7 @@ State: `passPrompt`, `promptedHazardsRef` (once per hazard per map mount), `pass
 |---|---|---|
 | Report panel auto-close (phone + both head units) | 8 s `HAZARD_PANEL_AUTO_CLOSE_MS` | `hazardPanel.ts`; `HazardSheet` timer; `carActions.ts` `armHazardsAutoPop` |
 | Pin card / prompt fold-away | 15 s | `HazardCard` effect; `passPromptTimer` |
-| Crew button → back to the car | 7 s `CREW_RETURN_MS` | `src/crewReturn.ts`; phone: armed in the Crew FAB's `onPress` after the 🔒 block → `recenterNow()`; head units (2026-09-25): the `crewFit` hold deadline in CarMapView 🔒 `car-gesture-crewfit` → the 1.8 s fly home when it lapses (a stopped car waits for its next fix) |
+| Crew button → back to the car | 7 s `CREW_RETURN_MS` | `src/crewReturn.ts`; phone: armed in the Crew FAB's `onPress` after the 🔒 block → `recenterNow()`; head units (2026-09-25): the `crewFit` hold deadline in CarMapView 🔒 `car-gesture-crewfit` → the 1.8 s fly home when it lapses, moving or stopped (the parked pump, `carCamJob`; a stopped car no longer waits for its next fix). The head unit's zoom −/+ are a separate 15 s hold, now eased — CARPLAY.md §4 |
 | Report pill (phone) | 4 s | `reportHazard` `setTimeout(() => setAlertConfirm(null), 4000)` |
 | Report pill (CarPlay / Android Auto) | 15 s `HAZARD_REPORT_PILL_MS` | `hazardPanel.ts` `reportPillPatch` → `carReportUntil`; `CarSurface` compares the timestamp at render (`reportPillLive`) plus ONE local re-render at expiry (a stopped car writes no store); a new report restarts it |
 | Head-unit toast / tap pill / tap dedupe | 3 s `TOAST_MS` / 1.6 s / 50 ms `TAP_DEDUPE_MS` | `carActions.ts` — a head-unit report's success is the 15 s pill now, not a toast; the 3 s toast carries only its failures |

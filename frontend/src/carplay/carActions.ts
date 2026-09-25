@@ -1676,16 +1676,16 @@ export function handleCarMapButton(id: string, src = "?"): void {
   if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
   if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }
   if (id === HAZARD_BUTTON_ID) { openHazardPanel(); return; }
-  // One zoom level per tap — CarMapView applies it through the same applyZoomNow the
-  // tap-zoom gesture uses, so a PARKED car responds (no camera ease is armed when
-  // stationary, which is what made build 65's zoom buttons look dead).
+  // One zoom step per tap — CarMapView applies it through the same eased entry the tap-zoom gesture uses
+  // (applyZoomEased), and a PARKED car responds: SelfCarModel's parked pump pushes the camera while the ease is owed (no
+  // pose ease is armed when stationary, which is what made build 65's zoom buttons look dead).
   // ── STEP SIZE (Jeff, 2026-08-14: "i also want to add more zoom increments") ──
   // Was a FULL zoom level per tap — one press roughly halved or doubled the ground
   // covered, which is why it read as coarse rather than premium. 0.5 gives twice as many
   // stops across the same range, so the driver can actually settle on a framing.
   // CAR_USER_ZOOM_BIAS_LIMIT (4 levels) is unchanged, so the range is the same — there
-  // are simply more steps inside it, and each one now LANDS immediately (zoomSnapRef)
-  // instead of crawling behind the slow automatic-framing filter.
+  // are simply more steps inside it. Each one used to LAND in one frame (zoomSnapRef); since 2026-09-25 it EASES in
+  // 0.28 s and holds as an absolute framing (CarMapView applyZoomEased, src/carZoomStep.ts — Jeff: "not smooth").
   // 🔒 NAV-LOCK begin act-zoom-step — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (id === 'car-zoom-in') { emitCarGesture({ kind: 'zoomStep', delta: 0.5 }); return; }
   if (id === 'car-zoom-out') { emitCarGesture({ kind: 'zoomStep', delta: -0.5 }); return; }

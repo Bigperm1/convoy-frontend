@@ -19,8 +19,9 @@
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
-import { overviewSizePt, isOverviewZoom } from '../overviewSize';
-import { CREW_RETURN_MS } from '../crewReturn';
+import { overviewSizePt } from '../overviewSize';
+import { CREW_RETURN_MS, crewReturnEdge, crewReturnDue } from '../crewReturn';
+import { carZoomPress, carZoomRelease, carZoomDest, carZoomRest, carZoomHoldLapsed, carZoomJobOwed, carZoomLogGate, newCarZoomChannel, newCarZoomLog, CAR_ZOOM_MOVING_PUSH_MS } from '../carZoomStep';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, rfPredict, rfFix, rfPose, type RfState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
@@ -121,10 +122,11 @@ const CAR_ZOOM_OUT = 0;
 // fan-out reads on the head unit. Added to CAR_ZOOM_OUT only in multi-route preview; the
 // car stays pinned (the proven lockstep chase is untouched — this is purely a zoom value).
 const PREVIEW_ZOOM_OUT = 2.2;
-// iOS-26 pinch/zoom: how far (in Mapbox zoom levels, log2) the driver's pinch may
-// bias the auto follow-zoom, and the absolute clamp on the resulting camera zoom.
-// The bias is ADDED to followZoom inside getCam, so the speed-aware chase still
-// modulates around wherever the driver pinched to. Holds until 'recenter'.
+// iOS-26 pinch/zoom and the +/- buttons: how far (in Mapbox zoom levels, log2) the driver may
+// move the framing away from the auto follow-zoom (🔒 car-zoom-bias-clamp), and the absolute clamp on the result.
+// A PINCH's bias is ADDED to followZoom inside getCam, so the speed-aware chase still modulates around it; a +/- or
+// tap press (2026-09-25, src/carZoomStep.ts) is clamped by this at the press and then held ABSOLUTE for the
+// CAR_ZOOM_HOLD_MS hold — speed no longer moves it. Both end when the hold lapses (eased home) or at 'recenter'.
 const CAR_USER_ZOOM_BIAS_LIMIT = 4;
 // PARITY (2026-07-29): the clamp now comes from the phone (ConvoyMapbox exports it),
 // so the two surfaces cannot drift apart again. These were 3 / 20 against the
@@ -1258,6 +1260,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // because CarPlay's pinch `scale` is cumulative from the gesture's begin.
   const userZoomRef = useRef(0);
   const zoomBaseRef = useRef(0);
+  // ── +/- AND TAP ZOOM ARE AN EASE WITH AN ABSOLUTE FRAMING (2026-09-25, src/carZoomStep.ts) ─────────────
+  // Jeff: "the carplay zoomout seems like its capped at a distance and is not smooth" → "It creeps back in". The fix he
+  // approved: each press animates in about 0.3 s, the map stays exactly where he put it (no speed drift) during the
+  // hold, then eases home in about 1 s after the hold. manualZoomRef is that framing (an absolute zoom, set by a press,
+  // cleared when the hold lapses or by pinch / recenter / compass / Crew / the AA re-assert); zoomChRef carries the ease
+  // to SelfCarModel.pushCam, the one camera writer (getCam hands it over on every push). Pinch keeps the bias above.
+  const manualZoomRef = useRef<number | null>(null);
+  const zoomChRef = useRef(newCarZoomChannel());
+  const zoomLogRef = useRef(newCarZoomLog());
   // ── APPLE HAS THREE ZOOM GESTURES, NOT ONE (2026-08-05) ────────────────────
   // Jeff has asked for CarPlay zoom ~15 times and it has never worked. Disassembly of
   // the iOS 26.5 CarPlaySupport host settles why. CPSMapTemplateViewController has THREE
@@ -1368,6 +1379,54 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // 🔒 NAV-LOCK begin car-getcam — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   const camInputsRef = useRef({ followZoom, followPitch, mapH, mapW, previewMulti, uiScale, mapScale });
   camInputsRef.current = { followZoom, followPitch, mapH, mapW, previewMulti, uiScale, mapScale };
+  // `car-zoom` receipt (2026-09-25): ≤ 1 row per 2 s, and the last press of a burst once the floor allows (row = null
+  // flushes it). op=step|release · z = where the ease starts · to = the framing (release: the live follow zoom) ·
+  // fz = the speed zoom · via = push (the moving lockstep drives it) | park (the parked pump does) · held = hold ms ·
+  // clamp=1 when the press limit bit · n = presses folded into the row.
+  const zoomLog = (now: number, row: string | null) => {
+    const out = carZoomLogGate(zoomLogRef.current, now, row);
+    if (out) { try { logEvent(out); } catch {} }
+  };
+  // THE HOLD'S WAY HOME (2026-09-25): when the 15 s hold lapses, ease from wherever the camera is to the LIVE follow
+  // zoom over 1.2 s (src/carZoomStep.ts) — it used to zero the bias and leave the 0.5 level/s glide to crawl home
+  // (~9 s from −3), and a parked car did not come home until it moved (09-21: 20 s, then a 3.5-level cut). Called from
+  // getCam, i.e. inside a camera push; a parked car gets that push from the parked pump (carCamJob below).
+  const zoomHoldRelease = (now: number) => {
+    if (!carZoomHoldLapsed(zoomHoldUntilRef.current, now, pinchActiveRef.current)) return;
+    const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
+    const lo = pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN;
+    const zc = zoomChRef.current;
+    const via = now - zc.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park';
+    const prevDest = carZoomDest(manualZoomRef.current, fz, userZoomRef.current, lo, CAR_ZOOM_MAX);
+    const from = carZoomRelease(zc, now, prevDest, carZoomRest(now, zc.pushAt, camZoomRef.current, carLiveZoomRef.current, prevDest));
+    zoomHoldUntilRef.current = 0;
+    userZoomRef.current = 0;
+    zoomBaseRef.current = 0;
+    manualZoomRef.current = null;
+    zoomLog(now, `car-zoom op=release z=${from.toFixed(2)} to=${carZoomDest(null, fz, 0, lo, CAR_ZOOM_MAX).toFixed(2)} fz=${fz.toFixed(2)} via=${via} held=0`);
+  };
+  // ── ONE CAMERA OWNER, PARKED TOO (2026-09-25) ────────────────────────────────────────────────────────────────
+  // SelfCarModel asks this on every PARKED tick (its bgTick — the 33 ms watchdog and, on iOS, the CarPlay screen's own
+  // frame pump — its parked rAF branch, and the wake effect after each render): "does the driver's camera still owe
+  // something?" While it says yes, those branches push the camera at the drawn pose, so SelfCarModel.pushCam stays the
+  // ONLY writer of this camera even for a stopped car — no native ease racing it, no hand-over. Owed = a zoom ease not
+  // yet landed, a lapsed zoom hold not yet released, or a lapsed / ended Crew hold whose way home has not run yet.
+  // THE CREW HALF (Codex [high] on f6f9e99e; field 09-20: tap 14:46:48.524 while stopped → first camera push
+  // 14:47:12.274, +23.75 s): the lockstep is re-armed HERE when the hold is over — it used to wait for this surface's
+  // next render and then for a pose ease a stopped car never arms. The push that follows runs getCam's edge
+  // (crewReturnEdge) → the 1.8 s fly home, once. Every check is a deadline compared per tick — never a lone timer.
+  const carCamJob = useRef((): boolean => {
+    const now = Date.now();
+    zoomLog(now, null);
+    const crewDue = crewReturnDue(camHoldWasActiveRef.current, camHoldUntilRef.current, now);
+    // An ARMED fly (-1) is owed too: getCam also runs outside a push (the re-assert and cold-start snap read its
+    // padding), and an edge it consumed there must not wait for the car to move before the fly starts.
+    const flyArmed = returnFlyRef.current === -1;
+    if ((crewDue || flyArmed) && !lockReadyRef.current && paintedRef.current && aaLiveRef.current.hasFix &&
+        now >= camHoldUntilRef.current) lockReadyRef.current = true;
+    if (!lockReadyRef.current) return false;   // nothing can push yet (overview still on, no paint, no fix): never spin
+    return crewDue || flyArmed || carZoomJobOwed(zoomChRef.current, zoomHoldUntilRef.current, now, pinchActiveRef.current);
+  }).current;
   const getCam = useRef(() => {
     const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv, uiScale: us, mapScale: ms } = camInputsRef.current;
     // ── CREW OVERVIEW RELEASE (2026-07-29) ────────────────────────────────────
@@ -1399,41 +1458,38 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // recovery doing. Fire the one-shot deliberate-zoom flag on the expiry EDGE so the
     // chase zoom LANDS, same as a button press. This runs at frame rate (getCam), so the
     // edge is caught within one frame of expiring.
-    const holdActive = Date.now() < camHoldUntilRef.current;
-    if (camHoldWasActiveRef.current && !holdActive) {
+    // A crew overview just lapsed: fly home instead of cutting (only if the map is still zoomed out). The rule lives in
+    // crewReturnEdge (src/crewReturn.ts, moved verbatim 2026-09-25 so the sim gate replays it); it fires once per Crew
+    // press — wasActive/overview come back false — whichever path pushed first (a parked tick or a moving frame).
+    const nowC = Date.now();
+    const edge = crewReturnEdge(camHoldWasActiveRef.current, crewOverviewRef.current, camHoldUntilRef.current, nowC, carLiveZoomRef.current);
+    if (edge.snap) {
       zoomSnapRef.current = true;
-      // A crew overview just lapsed: fly home instead of cutting (only if the map is still zoomed out).
-      if (crewOverviewRef.current) {
-        crewOverviewRef.current = false;
-        const lz = carLiveZoomRef.current;
-        if (typeof lz === 'number' && isOverviewZoom(lz)) returnFlyRef.current = -1;
-      }
+      // Receipt, once per Crew press: why it came home, how late after the deadline, fly or cut, parked or moving.
+      const until = camHoldUntilRef.current;
+      try { logEvent(`crew-home surf=car why=${until > 0 ? 'deadline' : 'ended'} late=${until > 0 ? nowC - until : 0} fly=${edge.fly ? 1 : 0} via=${nowC - zoomChRef.current.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park'}`); } catch {}
     }
-    camHoldWasActiveRef.current = holdActive;
+    if (edge.fly) returnFlyRef.current = -1;
+    crewOverviewRef.current = edge.overview;
+    camHoldWasActiveRef.current = edge.wasActive;
     camHdgOverrideRef.current = (carNorthUpRef.current || Date.now() < camHoldUntilRef.current)
       ? 0
       : undefined;
     // Retire a lapsed manual zoom, here, for the same reason the heading override is
     // derived here: this is the one place that runs at FRAME rate, so the chase cam takes
     // the framing back on the very next drawn frame. Not while a pinch is still in
-    // progress. Zeroing the bias does not jump the camera — the ease in pushCam animates
-    // it, exactly as it does when a crew overview lapses.
-    if (
-      zoomHoldUntilRef.current !== 0 &&
-      !pinchActiveRef.current &&
-      Date.now() >= zoomHoldUntilRef.current
-    ) {
-      zoomHoldUntilRef.current = 0;
-      userZoomRef.current = 0;
-      zoomBaseRef.current = 0;
-    }
+    // progress. Since 2026-09-25 it EASES home in 1.2 s (zoomHoldRelease above), parked or moving.
+    zoomHoldRelease(nowC);
+    zoomLog(nowC, null);
     return {
-      // followZoom + driver pinch bias, clamped. userZoomRef is read live (a ref,
-      // deliberately not a dep) so a pinch takes effect on the very next frame.
+      // The driver's +/- framing while the hold is on (ABSOLUTE — speed no longer pulls it; this also suspends the
+      // corner/roundabout zoom-in in followZoom for the hold), else followZoom + driver pinch bias, clamped.
+      // userZoomRef/manualZoomRef are read live (refs, deliberately not deps) so a change lands on the very next frame.
       // Chase framing shares the phone's floor; the multi-route preview keeps its own,
       // lower one because fitting the whole fan-out legitimately goes wider.
-      zoomLevel: Math.max(pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN,
-                          Math.min(CAR_ZOOM_MAX, fz + userZoomRef.current)),
+      zoomLevel: carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX),
+      // The eased channel pushCam applies on every push (src/carZoomStep.ts carZoomApply).
+      zoomCh: zoomChRef.current,
       pitch: fp,
       heading: camHdgRef.current,
       // paddingTop drops the car DOWN the wide head-unit; paddingRight shifts it LEFT of
@@ -1531,8 +1587,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // are deliberately omitted so Mapbox keeps whatever the lockstep last set, and the
   // next eased frame pushes the same value anyway (getCam adds the same bias), so the
   // two can never disagree.
-  // Set on every DRIVER-initiated zoom so pushCam lands it immediately rather than
-  // low-passing it with the slow automatic-framing filter. See zoomSnapRef in SelfCarModel.
+  // Set on an INSTANT driver zoom (pinch, recenter, compass, the layout correction, the AA re-assert — applyZoomNow)
+  // and on the crew-hold expiry edge, so pushCam lands it rather than low-passing it with the slow automatic-framing
+  // filter. See zoomSnapRef in SelfCarModel. The +/- buttons and tap-zoom no longer set it (2026-09-25): they EASE
+  // through zoomChRef (applyZoomEased), which moves the zoom only — no pitch or heading-lag snap.
   const zoomSnapRef = useRef(false);
   // Was the crew-overview hold active on the previous frame? (expiry-edge detector)
   const camHoldWasActiveRef = useRef(false);
@@ -1542,14 +1600,44 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     try {
       const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
       cameraRef.current?.setCamera({
-        zoomLevel: Math.max(
-          pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN,
-          Math.min(CAR_ZOOM_MAX, fz + userZoomRef.current),
-        ),
+        // The SAME destination getCam returns (carZoomDest), so the two still "can never disagree" with a +/- framing
+        // on (the layout correction below can land mid-hold). Pinch, recenter, compass and the AA re-assert clear the
+        // framing first, so for them this is exactly the old followZoom + bias, clamped. Still instant.
+        zoomLevel: carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX),
         animationDuration: 0,
         animationMode: 'none',
       });
     } catch {}
+  };
+
+  // ── THE SEPARATE EASED ENTRY (2026-09-25) — the +/- buttons and the two tap-zoom gestures ONLY ──────────────
+  // Jeff: "the carplay zoomout seems like its capped at a distance and is not smooth" → "It creeps back in". Approved:
+  // each press animates in about 0.3 s, the map stays exactly where he put it during the hold, then eases home in
+  // about 1 s. applyZoomNow above stays the INSTANT path for its other callers (pinch 1:1, the layout correction here,
+  // recenter, compass, the AA re-assert). This one sets no zoomSnapRef and calls no setCamera: it records the absolute
+  // framing (clamped by 🔒 car-zoom-bias-clamp exactly as before — the 4-level press limit relative to the speed zoom),
+  // re-aims the ease from where the camera is NOW, and wakes SelfCarModel, whose pushCam is the one camera writer —
+  // while moving its own loop applies the ease every frame; while parked its parked pump does (carCamJob).
+  // What the absolute framing also means: for the 15 s hold the corner/roundabout zoom-in inside followZoom is
+  // suspended too (the speed zoom is ignored, turns included) — it comes back with the release.
+  const applyZoomEased = (delta: number, src: string) => {
+    const now = Date.now();
+    const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
+    const lo = pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN;
+    const zc = zoomChRef.current;
+    const via = now - zc.pushAt < CAR_ZOOM_MOVING_PUSH_MS ? 'push' : 'park';
+    const prevDest = carZoomDest(manualZoomRef.current, fz, userZoomRef.current, lo, CAR_ZOOM_MAX);
+    const rest = carZoomRest(now, zc.pushAt, camZoomRef.current, carLiveZoomRef.current, prevDest);
+    // fromChase: a press that ends a Crew overview (on, or lapsed with its way home still owed) steps from the chase
+    // framing — the overview's wide zoom is not where the driver is zooming from.
+    const r = carZoomPress(zc, now, delta, { manual: manualZoomRef.current, followZoom: fz, bias: userZoomRef.current, lo, hi: CAR_ZOOM_MAX, rest, fromChase: camHoldWasActiveRef.current }, clampBias);
+    manualZoomRef.current = r.to;
+    userZoomRef.current = 0;                     // the framing is absolute now; a later pinch starts from it (zoomBegin)
+    zoomBaseRef.current = 0;
+    camHoldUntilRef.current = 0;                 // a deliberate zoom ends crew overview — its way home runs at once
+    zoomHoldUntilRef.current = now + CAR_ZOOM_HOLD_MS;
+    selfRefreshRef.current?.();                  // wake SelfCarModel now (a parked car's pump starts on this render)
+    zoomLog(now, `car-zoom op=step src=${src} z=${r.from.toFixed(2)} to=${r.to.toFixed(2)} fz=${fz.toFixed(2)} via=${via} held=${CAR_ZOOM_HOLD_MS} clamp=${r.clamped ? 1 : 0}`);
   };
 
   // ── APPLY THE CANVAS CORRECTION THE MOMENT IT IS KNOWN (2026-07-31) ─────────
@@ -1573,6 +1661,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // 🔒 NAV-LOCK begin car-gesture-zoom-compass — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         case 'zoomBegin':
           pinchActiveRef.current = true;
+          // A pinch takes over from a +/- framing: it starts FROM it (carried as the pinch's bias) and ends the ease.
+          if (manualZoomRef.current != null) userZoomRef.current = clampBias(manualZoomRef.current - camInputsRef.current.followZoom);
+          manualZoomRef.current = null;
+          zoomChRef.current.ease = null;
           zoomBaseRef.current = userZoomRef.current;
           break;
         case 'zoomEnd':
@@ -1584,11 +1676,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // velocity: +1 = one-finger double tap = in, -1 = two-finger tap = out.
             // scale is the constant 1.0 and carries nothing, so it is ignored entirely.
             const dir = (g.velocity ?? 0) >= 0 ? 1 : -1;
-            userZoomRef.current = clampBias(userZoomRef.current + dir * ZOOM_TAP_STEP);
-            zoomBaseRef.current = userZoomRef.current;   // a later pinch rebases from here
-            camHoldUntilRef.current = 0;                 // a deliberate zoom ends crew overview
-            zoomHoldUntilRef.current = Date.now() + CAR_ZOOM_HOLD_MS;
-            applyZoomNow();
+            // Eased like the +/- buttons (2026-09-25): one level in 0.28 s, the framing held, eased home.
+            applyZoomEased(dir * ZOOM_TAP_STEP, 'tap');
             break;
           }
           // Real pinch: scale is cumulative from gesture start (the host never calls
@@ -1602,22 +1691,21 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         }
         case 'zoomStep': {
           // The +/- map buttons on CarPlay and Android Auto. Same destination as the
-          // tap-zoom path: bias the follow-zoom and push it immediately. applyZoomNow is
-          // MANDATORY here, not an optimisation — every pushCam sits behind an active
+          // tap-zoom path. A PARKED car must still respond — every pushCam sits behind an active
           // camera ease and a stationary car arms none, which is exactly why build 65's
           // zoom buttons were pulled as "dead on the head unit" (abad793): at that commit
           // the handler only mutated the ref and waited for an ease that never came.
-          userZoomRef.current = clampBias(userZoomRef.current + (g.delta || 0));
-          zoomBaseRef.current = userZoomRef.current;   // a later pinch rebases from here
-          camHoldUntilRef.current = 0;                 // a deliberate zoom ends crew overview
-          zoomHoldUntilRef.current = Date.now() + CAR_ZOOM_HOLD_MS;
-          applyZoomNow();
+          // Since 2026-09-25 that is the parked pump's job (carCamJob → SelfCarModel pushes at the drawn pose), and the
+          // press EASES (applyZoomEased) instead of cutting 0.5 of a level in one frame (Jeff: "not smooth").
+          applyZoomEased(g.delta || 0, 'btn');
           break;
         }
         case 'recenter':
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
           zoomHoldUntilRef.current = 0;
+          manualZoomRef.current = null;       // no +/- framing or ease survives a recenter
+          zoomChRef.current.ease = null;
           applyZoomNow();   // same reason as 'zoom' — parked, nothing else will push it
           // A recenter also cancels any crew-overview hold — the driver asked to
           // come home, so the chase cam takes back over immediately.
@@ -1648,6 +1736,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           userZoomRef.current = 0;
           zoomBaseRef.current = 0;
           zoomHoldUntilRef.current = 0;
+          manualZoomRef.current = null;       // no +/- framing or ease survives the compass
+          zoomChRef.current.ease = null;
           camHoldUntilRef.current = 0;
           applyZoomNow();
           try {
@@ -1699,6 +1789,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // kept pushing frames over the overview and it never landed.
             camHoldUntilRef.current = Date.now() + CREW_RETURN_MS;
             crewOverviewRef.current = true;
+            // A Crew tap ends any driver zoom (2026-09-25): no +/- framing, ease, hold or pinch bias survives it, so the
+            // way home (7 s later, parked or moving — carCamJob) lands on the plain speed zoom, not a stale framing.
+            userZoomRef.current = 0;
+            zoomBaseRef.current = 0;
+            zoomHoldUntilRef.current = 0;
+            manualZoomRef.current = null;
+            zoomChRef.current.ease = null;
             // The expiry edge lives in getCam, which pushCam skips while the lockstep stands down — so on a plain
             // crew hold nothing would ever record the hold as active and the edge (snap + fly) would be missed
             // (Codex, 2026-09-24). Record it here.
@@ -1833,6 +1930,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     userZoomRef.current = 0;
     zoomBaseRef.current = 0;
     zoomHoldUntilRef.current = 0;
+    manualZoomRef.current = null;   // 2026-09-25: no stale +/- framing or zoom ease survives a phone background/foreground
+    zoomChRef.current.ease = null;
     camHoldUntilRef.current = 0; // release any crew-overview hold too
     const live = aaLiveRef.current; // never the render-#1 closure — see the Codex receipt above
     if (paintedRef.current && live.hasFix && cameraRef.current) {
@@ -2540,6 +2639,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           carFramePump
           zoomSnapRef={zoomSnapRef}
           returnFlyRef={returnFlyRef}
+          // The driver-camera-job question the parked pump asks (carCamJob): +/- ease, eased release, Crew way home.
+          camJob={carCamJob}
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}

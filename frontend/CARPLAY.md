@@ -145,7 +145,7 @@ Exact at 240/280/320pt. **If you change `NAV_STACK_BOTTOM`, `TURN_ROW_H` or `NAV
 | Search | CPBarButton text | pushes CPSearchTemplate; empty query lists saved places |
 | End | CPBarButton text | **full stop** — `endNavFromCar` also clears destination + route |
 | crew | CPMapButton | `crewFit` — frames self + all peers, north-up, 15s camera hold |
-| hazards | CPMapButton | pushes the Report grid (`openHazardPanel`, `src/carplay/hazardPanel.ts`): Police / Crash / Hazard / Traffic report at the car's position from 5 s ago (`reportHazardFromCar`), Compass fires `compass`; a tile pops the grid (2026-09-24, replaced the compass button on Jeff's word) |
+| hazards | CPMapButton | pushes the Report grid (`openHazardPanel`, `src/carplay/hazardPanel.ts`): Police / Crash / Hazard / Traffic report at the car's position from 5 s ago (`reportHazardFromCar`), Compass fires `compass`; a tile pops the grid, and an untouched grid pops itself after 8 s (`HAZARD_PANEL_AUTO_CLOSE_MS`, both head units and the phone sheet — Jeff, 2026-09-25) (2026-09-24, replaced the compass button on Jeff's word) |
 | compass (tile) | CPGridButton | `compass` — recenter + face north, toggles, auto-releases on nav start |
 
 Flow: `onMapButtonPressed`/`onBarButtonPressed` → `handleCarMapButton`/`handleCarBarButton`

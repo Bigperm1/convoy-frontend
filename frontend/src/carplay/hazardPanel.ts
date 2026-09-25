@@ -42,6 +42,11 @@ export const HAZARD_PANEL_TITLE = 'Report';
 /** CPGridTemplate shows at most 8 buttons (CPGridTemplateMaximumItems); androidx's grid list defaults to 6. */
 export const CARPLAY_GRID_MAX = 8;
 export const AA_GRID_MAX = 6;
+/** A Report panel nobody taps folds itself away after this — phone sheet and both head-unit grids alike (Jeff,
+ *  2026-09-25: "MAKE SURE THE PANEL AUTO DISAPPEARS TOO"). Long enough to read four tiles, short enough never to sit
+ *  over guidance. On a locked phone CarPlay's JS timers can be frozen (memory: js-timers-frozen-on-locked-carplay), so the
+ *  head-unit pop may wait for the next tick; the back chevron and the tiles always work. */
+export const HAZARD_PANEL_AUTO_CLOSE_MS = 8000;
 
 export function hazardTile(id: string | null | undefined): HazardTile | null {
   if (!id) return null;

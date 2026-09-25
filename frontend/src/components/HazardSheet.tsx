@@ -19,12 +19,13 @@
 // the same translucent floor rgba(24,24,28,0.66), the same hairline, the same GlassFill tinted by hudTint(), the same
 // pop (opacity + 12 pt rise + 0.94 scale). WeatherHUD.tsx styles.forecastCard is the reference — change both or neither.
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, BackHandler, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { GlassFill, hudTint } from "../Glass";
 import { PressableScale } from "../ui/PressableScale";
 import { useAppSkin } from "../appSkin";
 import { haptics } from "../haptics";
-import { HAZARD_TILES, type HazardKind, type HazardGlyph } from "../carplay/hazardPanel";
+import { logEvent } from "../crashBreadcrumb";
+import { HAZARD_TILES, HAZARD_PANEL_AUTO_CLOSE_MS, type HazardKind, type HazardGlyph } from "../carplay/hazardPanel";
 import type { VisualTier } from "../tierTheme";
 
 /** The report glyphs per metal — the same PNGs the head unit bakes into carButtonIcons.ts. */
@@ -79,25 +80,40 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
   // Close on the TRANSITION into turn-by-turn only (Codex review r2, 2026-09-24): a panel opened DURING a drive —
   // the whole point of a hazard report — must stay up; one left open when the drive auto-starts must not sit
   // over guidance. The previous value rides a ref, so the component stays mounted across visible=false.
+  // map.tsx hands us a fresh onClose arrow every render (it re-renders on every location tick), so timers and
+  // listeners read it through a ref and depend on `visible` only — otherwise each tick would restart the auto-close.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // Receipts (the head units log the same op= rows): open / close why=nav|auto|back|tap. Bounded by the user's taps.
+  const close = (why: string) => { try { logEvent(`hazard-panel op=close surf=phone why=${why}`); } catch {} onCloseRef.current(); };
   const prevDismiss = useRef(!!dismiss);
   useEffect(() => {
     const was = prevDismiss.current;
     prevDismiss.current = !!dismiss;
-    if (visible && dismiss && !was) onClose();
-  }, [visible, dismiss, onClose]);
+    if (visible && dismiss && !was) close("nav");
+  }, [visible, dismiss]);
+  // Auto-close (Jeff, 2026-09-25: "MAKE SURE THE PANEL AUTO DISAPPEARS TOO"): a panel nobody taps folds itself away
+  // after HAZARD_PANEL_AUTO_CLOSE_MS. The head units' grids do the same (carActions.ts armHazardsAutoPop).
+  useEffect(() => {
+    if (!visible) return;
+    const t = setTimeout(() => close("auto"), HAZARD_PANEL_AUTO_CLOSE_MS);
+    return () => clearTimeout(t);
+  }, [visible]);
   // The weather forecast card's pop, exactly (WeatherHUD.tsx cardAnim): no bounce, nothing was thrown.
   const a = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (!visible) { a.setValue(0); return; }
     Animated.spring(a, { toValue: 1, useNativeDriver: true, tension: 150, friction: 13 }).start();
   }, [visible, a]);
-  // Android Back closes the panel (Codex r2, 2026-09-25): the Modal used to do this through onRequestClose; without it
-  // Back reaches React Navigation and can pop the map screen out from under the driver.
+  // ⛔ NO BackHandler here (2026-09-25, measured 4-of-4 on the iPhone 16 Pro sim): with a hardwareBackPress listener
+  // registered in an effect while the panel is up, the panel opened in STATE (op=open … op=close why=auto receipts, 8 s
+  // apart) but never PAINTED — the same bundle with the listener removed paints every time. Mechanism unexplained
+  // (RN's BackHandler.ios.js is a stub), so the listener is gone on both platforms rather than shipped blind to Android.
+  // Codex r2's concern (Android Back reaching React Navigation with the panel open) is covered by the auto-close above.
   useEffect(() => {
     if (!visible) return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => { onClose(); return true; });
-    return () => sub.remove();
-  }, [visible, onClose]);
+    try { logEvent(`hazard-panel op=open surf=phone anchor=${Math.round(anchorBottom)} winH=${Math.round(winH)}`); } catch {}
+  }, [visible]);  // eslint-disable-line react-hooks/exhaustive-deps -- one row per open, not per tick
   if (!visible) return null;
   const cardW = Math.min(CARD_W, winW - RIGHT_INSET * 2);
   // Above the stack — unless that would push the card into the top bar (short phone, Drive drawer up): then it stops
@@ -107,7 +123,7 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
     <>
       {/* Tap anywhere outside the card to close. Transparent on purpose: the map stays readable, the way the weather
           forecast card leaves it. Covers the FAB stack too, so a stray tap on Crew while the panel is up just closes it. */}
-      <Pressable testID="hazard-sheet-backdrop" style={[StyleSheet.absoluteFill, { zIndex: Z_CARD - 1 }]} onPress={onClose} accessibilityLabel="Close" />
+      <Pressable testID="hazard-sheet-backdrop" style={[StyleSheet.absoluteFill, { zIndex: Z_CARD - 1 }]} onPress={() => close("tap")} accessibilityLabel="Close" />
       <Animated.View
         testID="hazard-sheet"
         onLayout={(e) => { const h = Math.round(e.nativeEvent.layout.height); if (h > 0 && h !== cardH) setCardH(h); }}

@@ -27,6 +27,7 @@ import { haptics } from "../../src/haptics";
 import { ReportToast, MusicToast, HailToast, InfoToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import HazardSheet, { HAZARD_FAB_ART } from "../../src/components/HazardSheet";
+import { hazardAheadLeadM, bearingDeg, isAheadOf, hazardAheadLine, HAZARD_AHEAD_REARM_EXTRA_M, HAZARD_AHEAD_MIN_KMH } from "../../src/hazardAhead";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
@@ -446,41 +447,8 @@ function shareRelTime(ms?: number): string {
 // drive; the camera line is now spoken ONCE per trip and carries the live distance, so there is
 // one line and it lives with the rest of them in src/aheadAlertRules.ts — aheadLine().)
 
-// Hazard-ahead callouts keyed by hazard kind, so the phrasing fits each kind,
-// with a generic fallback for anything else.
-const HAZARD_AHEAD_LINES: Record<string, string[]> = {
-  police: [
-    "Heads up, police reported ahead.",
-    "Police spotted ahead, mind your speed.",
-    "Cops reported up ahead.",
-    "Heads up — police on the road ahead.",
-    "Police ahead, keep it clean.",
-  ],
-  accident: [
-    "Accident reported ahead.",
-    "Heads up, crash reported up ahead.",
-    "There's an accident on the road ahead.",
-    "Accident ahead, take it easy.",
-    "Collision reported ahead, stay sharp.",
-  ],
-  traffic: [
-    "Traffic reported ahead.",
-    "Heads up, slow traffic ahead.",
-    "Congestion reported up ahead.",
-    "Traffic building ahead.",
-    "Slowdown reported on the road ahead.",
-  ],
-};
-const HAZARD_AHEAD_FALLBACK = [
-  "Hazard on the road ahead.",
-  "Heads up, hazard reported ahead.",
-  "Something on the road ahead, stay alert.",
-  "Hazard reported up ahead.",
-  "Watch out, hazard ahead.",
-];
-function hazardAheadLine(kind: string): string {
-  return pick(HAZARD_AHEAD_LINES[kind] ?? HAZARD_AHEAD_FALLBACK);
-}
+// Hazard-ahead callouts moved to src/hazardAhead.ts (2026-09-25): they now carry the distance, so the openers and
+// the sentence live with the lead / cone rules they belong to.
 
 // Report-confirmation lines. `label` is the hazard kind ("Police", "Hazard", …).
 function reportConfirmLine(label: string): string {
@@ -4464,31 +4432,32 @@ export default function MapScreen() {
   // src/aheadAlertRules.ts under tools/sim-qc/ahead_alerts_test.mts — a better home for it than an
   // inline effect in a 6,300-line file.
 
-  // ----- Hazard / police proximity voice alert (Nova) -----
-  // Mirror of the speed-camera alert, but for community hazards: announce ONCE
-  // when we come within ~500 m of a hazard while moving (>= 20 km/h), re-arming
-  // a given hazard only after we've left a wider ~800 m radius. Police get a
-  // "police reported ahead" callout; other kinds get their own phrasing.
-  // Respects the nav mute toggle and the Hazards layer toggle. NOTE: distance-
-  // only (no heading cone yet), matching the camera alert — a hazard 500 m
-  // behind you can still trigger; a forward-cone filter can be added later.
+  // ----- Hazard / police proximity voice alert (Scout) -----
+  // Jeff, 2026-09-25: "MAKE SURE THAT THERE IS A SCOUT NOTIFICATION THAT A SPECIFIC HAZARD IS AHEAD AND MAKE IT A
+  // GOOD DISTANCE AWAY." This was a FIXED 500 m with no heading test — 18 s of warning at 100 km/h, and a pin 500 m
+  // BEHIND the car fired too. Now (src/hazardAhead.ts, gate hazard_ahead_test): the lead is 45 s of travel, 1–2 km;
+  // the pin must sit in a ±50° cone of the fix's course (no course → no cone, the old behaviour); the line names the
+  // kind AND the distance ("Heads up, police reported about 1 kilometer ahead."); once per hazard, re-armed only
+  // 500 m beyond the lead. Respects the nav mute and the Hazards layer toggle. Receipt: `hazard-ahead kind= d= lead=`.
   const announcedHazardsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!coords || !showHazards || hazards.length === 0) return;
     const kmh = (coords.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
+    const leadM = hazardAheadLeadM(coords.speed ?? 0);
+    const course = coords.course ?? coords.heading ?? null;
     const announced = announcedHazardsRef.current;
     for (const h of hazards) {
       if (!h || !h.id) continue;
       const dM = distanceKm(coords.lat, coords.lng, h.lat, h.lng) * 1000;
-      if (dM > 800) { announced.delete(h.id); continue; }   // re-arm once well past
-      if (dM <= 500 && kmh >= 20 && !announced.has(h.id)) {
-        announced.add(h.id);
-        if (!navMuted) {
-          try { announce(hazardAheadLine(h.kind)); } catch {}
-        }
-      }
+      if (dM > leadM + HAZARD_AHEAD_REARM_EXTRA_M) { announced.delete(h.id); continue; }   // re-arm once well past
+      if (announced.has(h.id) || dM > leadM || kmh < HAZARD_AHEAD_MIN_KMH) continue;
+      if (!isAheadOf(course, bearingDeg(coords.lat, coords.lng, h.lat, h.lng))) continue;   // beside or behind: not "ahead"
+      announced.add(h.id);
+      let spoke = false;
+      if (!navMuted) { try { spoke = announce(hazardAheadLine(h.kind, dM, settings.speedUnit === "mph" ? "mi" : "km")); } catch {} }
+      try { logEvent(`hazard-ahead kind=${h.kind} d=${Math.round(dM)} lead=${Math.round(leadM)} kmh=${Math.round(kmh)} spoke=${spoke ? 1 : 0}`); } catch {}
     }
-  }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted]);
+  }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted, settings.speedUnit]);
 
   // ----- DriveBC road-event proximity voice alert (Nova) -----
   // Official incidents from the Open511 feed. Same distance/re-arm shape as the
@@ -6151,7 +6120,8 @@ export default function MapScreen() {
           }}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <SkinFade render={(t) => <Image source={HAZARD_FAB_ART[t]} style={{ width: 26, height: 26 }} resizeMode="contain" />} />
+          {/* 30 pt, a tad over the crew glyph's 26 (Jeff, 2026-09-25: "MAKE THE TRIANGLE JUST A TAD BIGGER"). */}
+          <SkinFade render={(t) => <Image source={HAZARD_FAB_ART[t]} style={{ width: 30, height: 30 }} resizeMode="contain" />} />
           <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Hazards</Text>
         </PressableScale>
         {/* 2D / 3D VIEW TOGGLE (Jeff, 2026-08-14) — sits directly ABOVE Crew, exactly

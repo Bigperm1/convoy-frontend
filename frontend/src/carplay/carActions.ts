@@ -37,7 +37,7 @@ import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGest
 import { toggleMapView2D, setMapView2D, isMapView2DLocked } from '../mapViewMode';
 import { getDepartureBearing, departureBearingSource, orderRoutesForward, routeInitialBearing } from '../departureBearing';
 import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_HAZARDS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, CAR_ICON_VIEW_3D, carIcon } from './carButtonIcons';
-import { HAZARD_BUTTON_ID, HAZARD_BUTTON_GLYPH, HAZARD_TEMPLATE_ID, HAZARD_PANEL_TITLE, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA, type HazardKind } from './hazardPanel';
+import { HAZARD_BUTTON_ID, HAZARD_BUTTON_GLYPH, HAZARD_TEMPLATE_ID, HAZARD_PANEL_TITLE, HAZARD_PANEL_AUTO_CLOSE_MS, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA, type HazardKind } from './hazardPanel';
 import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
@@ -230,6 +230,13 @@ let _hazards: any = null;
 let _hazardsPushed = false;
 let _aaHazardsArmed = false;
 let _hazardsDisconnectArmed = false;
+let _hazardsAutoPop: ReturnType<typeof setTimeout> | null = null;
+// A grid nobody taps pops itself after HAZARD_PANEL_AUTO_CLOSE_MS (Jeff, 2026-09-25: "MAKE SURE THE PANEL AUTO
+// DISAPPEARS TOO") — the phone sheet's twin. Re-armed on every push, cleared by any pop.
+function armHazardsAutoPop(): void {
+  if (_hazardsAutoPop) clearTimeout(_hazardsAutoPop);
+  _hazardsAutoPop = setTimeout(() => { _hazardsAutoPop = null; popHazardPanel('auto'); }, HAZARD_PANEL_AUTO_CLOSE_MS);
+}
 // A disconnect ends the interface-controller stack but this module flag survives it — the same trap
 // armSearchAutoDismiss guards for the keyboard: without the reset a panel that was up at unplug reads
 // "already pushed" for the rest of the process and the Hazards button is dead until the app restarts.
@@ -265,11 +272,12 @@ function getHazardTemplateIOS(): any | null {
   }
   return _hazards;
 }
-function popHazardPanel(): void {
+function popHazardPanel(why: 'user' | 'auto' = 'user'): void {
+  if (_hazardsAutoPop) { clearTimeout(_hazardsAutoPop); _hazardsAutoPop = null; }
   if (!_hazardsPushed) return;
   _hazardsPushed = false;
   try { getCarLib()?.CarPlay?.popTemplate?.(true); } catch {}
-  try { logEventReliable(`hazard-panel op=pop surf=${Platform.OS === 'android' ? 'aa' : 'carplay'}`); } catch {}
+  try { logEventReliable(`hazard-panel op=pop surf=${Platform.OS === 'android' ? 'aa' : 'carplay'} why=${why}`); } catch {}
 }
 function onHazardTile(id: string | undefined, surf: 'carplay' | 'aa'): void {
   const tile = hazardTile(id);
@@ -309,7 +317,7 @@ export function openHazardPanel(): void {
       bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(hazardIconFor), (res: any) => {
         if (res?.error) { _hazardsPushed = false; try { logEvent(`hazard-panel create-failed:${res.error}`); } catch {} toast('Report unavailable'); return; }
         if (!_hazardsPushed) return;
-        try { bridge.pushTemplate(HAZARD_TEMPLATE_ID, true); try { logEventReliable('hazard-panel op=push surf=aa'); } catch {} }
+        try { bridge.pushTemplate(HAZARD_TEMPLATE_ID, true); armHazardsAutoPop(); try { logEventReliable('hazard-panel op=push surf=aa'); } catch {} }
         catch { _hazardsPushed = false; toast('Report unavailable'); }
       });
     } catch { _hazardsPushed = false; toast('Report unavailable'); }
@@ -319,7 +327,7 @@ export function openHazardPanel(): void {
   if (!t) { toast('Report unavailable'); return; }
   _hazardsPushed = true;                   // claim BEFORE the push so a double tap cannot double-push
   try { logEventReliable('hazard-panel op=push surf=carplay'); } catch {}
-  try { lib?.CarPlay?.pushTemplate?.(t, true); } catch { _hazardsPushed = false; toast('Report unavailable'); }
+  try { lib?.CarPlay?.pushTemplate?.(t, true); armHazardsAutoPop(); } catch { _hazardsPushed = false; toast('Report unavailable'); }
 }
 
 // ── destination search (Google Places API v1 — the New API; the legacy

@@ -76,11 +76,11 @@ const map = read("app/(app)/map.tsx");
 const mapCode = noComments(map);
 const fabAt = mapCode.indexOf('testID="view-2d-3d-fab"');
 ok("T0 found the view-2d-3d-fab", fabAt > 0);
-// The gate is the last `{navMode === … && (` before the FAB's <PressableScale.
+// 2026-09-25 (Jeff: "The compass needs to be 2D/3D on the phone"): the FAB is ALWAYS shown, like the head units' view
+// button — there must be NO `{navMode === … && (` (and no view2DLocked) gate immediately before its <PressableScale.
 const pressAt = mapCode.lastIndexOf("<PressableScale", fabAt);
-const gateAt = mapCode.lastIndexOf("{navMode", pressAt);
-const gate = gateAt >= 0 ? mapCode.slice(gateAt, pressAt).replace(/\s+/g, " ").trim() : "";
-ok("T1 the FAB shows during turn-by-turn for everyone (no view2DLocked in its gate)", gate === '{navMode === "turn-by-turn" && (', gate);
+const before = mapCode.slice(Math.max(0, pressAt - 120), pressAt).replace(/\s+/g, " ").trim();
+ok("T1 the FAB is always shown, for everyone (no navMode / view2DLocked gate right before it)", !/\{navMode[^}]*&& \($/.test(before) && !before.includes("view2DLocked &&"), before.slice(-60));
 const fabEnd = mapCode.indexOf("</PressableScale>", fabAt);
 const fab = mapCode.slice(fabAt, fabEnd);
 ok("T2 it still shows what you GET: \"3D\" art while the view is 2D (and a locked view IS 2D — map_view_lock_test V1/V2)", /source=\{view2D \? VIEW3D_ART\[t\] : VIEW2D_ART\[t\]\}/.test(fab));
@@ -99,15 +99,17 @@ if (opAt >= 0) {
   handler = fab.slice(opAt + "onPress={".length, i);
 }
 ok("T3 found the FAB's onPress", handler.includes("=>"));
-type Calls = { snap: number; toggle: number; toasts: string[] };
-const run = (locked: boolean): Calls | null => {
+type Calls = { snap: number; toggle: number; toasts: string[]; set2D?: boolean };
+const run = (locked: boolean, navMode: string = "turn-by-turn"): Calls | null => {
   const calls: Calls = { snap: 0, toggle: 0, toasts: [] };
   try {
-    const fn = new Function("haptics", "view2DLocked", "showInfoToast", "toggleMapView2D", `return (${stripTypeScriptTypes(handler)});`)(
+    const fn = new Function("haptics", "view2DLocked", "showInfoToast", "toggleMapView2D", "navMode", "setMapView2D", `return (${stripTypeScriptTypes(handler)});`)(
       { snap: () => { calls.snap++; } },
       locked,
       (m: string) => { calls.toasts.push(m); },
       () => { calls.toggle++; return true; },
+      navMode,
+      (v: boolean) => { calls.set2D = v; },
     );
     fn();
     return calls;
@@ -116,6 +118,9 @@ const run = (locked: boolean): Calls | null => {
     return null;
   }
 };
+// Idle (2026-09-25): the tap answers "2D view" word for word like the car surfaces and pins 2D — never a toggle.
+const I = run(false, "idle");
+if (I) ok("T6 idle + unlocked: \"2D view\" toast, setMapView2D(true), no toggle (= carActions act-view-2d-when-idle)", I.toasts.length === 1 && I.toasts[0] === "2D view" && I.set2D === true && I.toggle === 0, JSON.stringify(I));
 const L = run(true);
 if (L) {
   // "locked" = a 2D car on the road (mapViewMode isMapView2DLocked is keyed to the CAR, not the paid tier).

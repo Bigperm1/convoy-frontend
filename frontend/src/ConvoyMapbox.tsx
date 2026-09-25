@@ -66,8 +66,11 @@ import RibbonNear, { type DrawSinkRef } from "./RibbonNear";
 import { buildRibbonPartition, buildRibbonFeatures, buildRibbonFarFeatures, nextRibbonSeam, type RibbonSeamState, alongMOnPartition, quantiseM, ribbonStepM, RIBBON_CASING, RIBBON_CORE, type LngLat } from "./routeRibbon";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { RoadEvent, RoadEventKind } from "./driveBcEvents";
-import { NeonPin, hazardPin, hazardPinImage, HAZARD_PIN_KINDS, HAZARD_PIN_DEFAULT, CAMERA_PIN, INCIDENT_PIN, INCIDENT_PIN_KINDS, NEON_TONE, NEON_PIN_H, NEON_PIN_HOLE_ABOVE_TIP } from "./components/NeonPin";
+import { NeonPin, CAMERA_PIN, INCIDENT_PIN, INCIDENT_PIN_KINDS, NEON_TONE, NEON_PIN_H, NEON_PIN_HOLE_ABOVE_TIP } from "./components/NeonPin";
 import { POI_PIN_IMAGES, POI_PIN_SCALE, POI_PIN_NUM_PT, POI_PIN_HEAD_ABOVE_TIP, POI_PIN_HEAD_R, POI_PIN_W, POI_PIN_H, poiPinUri, poiPinImageName } from "./poiPinImages";
+// The crew-report pins (2026-09-25): the category teardrop with the Report panel's glyph, baked like the place pins.
+import { HAZARD_PIN_IMAGES, hazardPinUri } from "./hazardPinImages";
+import { hazardPinImageName } from "./hazardPalette";
 import { getVehiclePngOrDefault, getVehicleMapModelUrl, getVehicleModelKey, vehicleHasLitBake, isLitPreset, vehiclePngScale, CLASS_TOPDOWN } from "./vehicleAssets";
 import { ClassSprite } from "./classLayers";
 import { scanMapUrl } from "./carScan";
@@ -2571,12 +2574,14 @@ function CarMarker({ car, mapHeading = 0, onPress, sizePt = 44 }: { car: CarPoin
 // ===== HazardMarker =====
 // Community hazard / police pin — a flat icon image (police.png for police,
 // hazard.png otherwise). Tap → details; long-press → the standard hazard menu.
+// 2026-09-25: the same baked category-coloured pin the phone's gl-hazards layer draws (src/hazardPinImages.ts), so
+// CarPlay / Android Auto show the identical pixels — the PlaceMarker pattern.
 export function HazardMarker({ hazard, onPress, onLongPress, scale = 1 }: { hazard: Hazard; onPress?: () => void; onLongPress?: () => void; scale?: number }) {
-  const pin = hazardPin(hazard.kind);
+  const w = POI_PIN_W * scale, h = POI_PIN_H * scale;
   return (
     <MarkerView coordinate={[hazard.lng, hazard.lat]} anchor={{ x: 0.5, y: 1 }} allowOverlap>
-      <Pressable onPress={onPress} onLongPress={onLongPress} hitSlop={6}>
-        <NeonPin tone={pin.tone} glyph={pin.glyph} size={NEON_PIN_H * scale} />
+      <Pressable onPress={onPress} onLongPress={onLongPress} hitSlop={6} style={{ width: w, height: h }}>
+        <Image source={{ uri: hazardPinUri(hazard.kind) }} style={{ position: "absolute", left: 0, top: 0, width: w, height: h }} resizeMode="contain" />
       </Pressable>
     </MarkerView>
   );
@@ -2720,6 +2725,9 @@ const PIN_IMAGE_MAP: Record<string, any> = {
   // The search-category pins ride the bundle as data URIs (like the weather callouts): one baked PNG
   // per category × deep/bright, registered by name (poi_<cat>_<variant>) for the gl-places SymbolLayer.
   ...POI_PIN_IMAGES,
+  // Crew reports (Jeff, 2026-09-25): hz_pin_<kind> — Police in EV teal, Crash in Hospital red, Hazard in Fast Food amber,
+  // Traffic in Gas orange, the Apple-symbol glyph on the head (src/hazardPalette.ts, tools/poi-pins/bake_hazards.py).
+  ...HAZARD_PIN_IMAGES,
 };
 
 // ── NEON PIN SIZING (2026-09-10) ─────────────────────────────────────────────────────────
@@ -2799,7 +2807,7 @@ function GLPinLayers({
   // make this the author of a frame gap like the 25 s one after Jeff's exit-ramp reroute.
   useEffect(() => {
     if (!glyphsReady) return;
-    try { logEvent(`pin-imgs gen=${imgGen} n=${HAZARD_PIN_KINDS.length + INCIDENT_PIN_KINDS.length + 8}`); } catch {}
+    try { logEvent(`pin-imgs gen=${imgGen} n=${INCIDENT_PIN_KINDS.length + 7}`); } catch {}
   }, [glyphsReady, imgGen]);
   // A cluster tap: ask the source where the cluster splits and hand the camera there.
   const zoomToCluster = useCallback(async (srcRef: React.MutableRefObject<any>, feature: any) => {
@@ -2809,7 +2817,7 @@ function GLPinLayers({
       if (typeof z === "number" && Array.isArray(c)) onClusterPress?.(c[0], c[1], Math.max(z, 14));
     } catch {}
   }, [onClusterPress]);
-  const hazardFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: hazards.map((h) => fcPoint(h.id, h.lng, h.lat, { icon: hazardPinImage(h.kind), near: 0, minor: 0 })) }), [hazards]);
+  const hazardFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: hazards.map((h) => fcPoint(h.id, h.lng, h.lat, { icon: hazardPinImageName(h.kind), near: 0, minor: 0 })) }), [hazards]);
   const cameraFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: cameras.map((c) => fcPoint(c.id, c.lng, c.lat, { near: nearIds.has(c.id) ? 1 : 0, minor: 0 })) }), [cameras, nearIds]);
   const incidentFC = useMemo<PinFC>(() => ({ type: "FeatureCollection", features: incidents.map((e) => fcPoint(e.id, e.lng, e.lat, {
     icon: `neon_inc_${INCIDENT_PIN[e.kind] ? e.kind : "event"}`, kind: e.kind, road: e.road || "", headline: e.headline,
@@ -2836,10 +2844,7 @@ function GLPinLayers({
           was). Hazard kinds get one image each plus the default; DriveBC kinds one each; a plain
           ring per tone for cluster counts; the place ring in the page's metal. */}
       {glyphsReady && <Images key={`neon-imgs-${imgGen}`} images={PIN_IMAGE_MAP}>
-        {HAZARD_PIN_KINDS.map((k) => (
-          <MBXImage key={k} name={`neon_hz_${k}`}><NeonPin tone={hazardPin(k).tone} glyph={hazardPin(k).glyph} /></MBXImage>
-        ))}
-        <MBXImage name="neon_hz_default"><NeonPin tone={HAZARD_PIN_DEFAULT.tone} glyph={HAZARD_PIN_DEFAULT.glyph} /></MBXImage>
+        {/* Crew-report pins are baked PNGs now (HAZARD_PIN_IMAGES above) — no NeonPin snapshot per kind (2026-09-25). */}
         <MBXImage name="neon_cam"><NeonPin tone={CAMERA_PIN.tone} glyph={CAMERA_PIN.glyph} /></MBXImage>
         <MBXImage name="neon_base_camera"><NeonPin tone="camera" /></MBXImage>
         {INCIDENT_PIN_KINDS.map((k) => (
@@ -2865,7 +2870,8 @@ function GLPinLayers({
           tip on the coordinate) and self-lit (the dusk/night light presets would dim it otherwise). */}
       {hazards.length > 0 && (
         <ShapeSource id="gl-hazards" shape={hazardFC} onPress={tapHazard}>
-          <SymbolLayer id="gl-hazards-sym" slot="top" minZoomLevel={NEON_MIN_ZOOM} style={neonSym({ iconImage: ["get", "icon"] })} />
+          {/* The baked 3x PNG at point size, like the place pins (2026-09-25) — not the NeonPin snapshot any more. */}
+          <SymbolLayer id="gl-hazards-sym" slot="top" minZoomLevel={NEON_MIN_ZOOM} style={neonSym({ iconImage: ["get", "icon"], iconSize: 1 / POI_PIN_SCALE, iconOpacity: 1 })} />
         </ShapeSource>
       )}
 

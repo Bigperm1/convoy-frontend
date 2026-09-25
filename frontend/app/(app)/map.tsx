@@ -24,9 +24,10 @@ import TurnByTurnNav, { SpeedPill } from "../../src/components/TurnByTurnNav";
 import { MapNowPlaying } from "../../src/components/MapNowPlaying";
 import { PressableScale } from "../../src/ui/PressableScale";
 import { haptics } from "../../src/haptics";
-import { ReportToast, MusicToast, HailToast, InfoToast } from "../../src/components/AlertToast";
+import { MusicToast, HailToast, InfoToast, ReportPill } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import HazardSheet, { HAZARD_FAB_ART } from "../../src/components/HazardSheet";
+import HazardCard from "../../src/components/HazardCard";
 import { hazardAheadLeadM, bearingDeg, isAheadOf, hazardAheadLine, HAZARD_AHEAD_REARM_EXTRA_M, HAZARD_AHEAD_MIN_KMH } from "../../src/hazardAhead";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
@@ -52,7 +53,7 @@ import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, h
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
 import { type CongestionLevel } from "../../src/mapboxDirections";
-import { useMapView2D, useMapView2DLocked, toggleMapView2D, resetMapView2D } from "../../src/mapViewMode";
+import { useMapView2D, useMapView2DLocked, toggleMapView2D, setMapView2D, resetMapView2D } from "../../src/mapViewMode";
 import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
 import { takeIntent, subscribeIntent } from "../../src/deepLinks";
 import { optimizeStopOrder, isSameOrder, ROUTABLE_MAX_STOPS } from "../../src/routeOptimizer";
@@ -3999,7 +4000,7 @@ export default function MapScreen() {
         setHazards((prev) => (prev.some((h) => h.id === data.id) ? prev : [data, ...prev]));
       }
       setAlertConfirm(kind);
-      setTimeout(() => setAlertConfirm(null), 2500);
+      setTimeout(() => setAlertConfirm(null), 4000)   // 4 s: a glance at a moving phone (2026-09-25);
       if (Platform.OS !== 'web') {
         try {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -4280,7 +4281,7 @@ export default function MapScreen() {
       setShowReport(false);
       // The confirmation pill (ReportToast) for every kind — a tap from the Report sheet had none (2026-09-24).
       setAlertConfirm(kind);
-      setTimeout(() => setAlertConfirm(null), 2500);
+      setTimeout(() => setAlertConfirm(null), 4000)   // 4 s: a glance at a moving phone (2026-09-25);
       // Voice-driven reports get a spoken acknowledgement so the driver can keep eyes on the road
       if (opts?.fromVoice && !navMuted) {
         const label = kind === "police" ? "Police" : kind === "accident" ? "Accident" : kind === "traffic" ? "Traffic" : "Hazard";
@@ -4289,6 +4290,19 @@ export default function MapScreen() {
     } catch (e: any) {
       Alert.alert("Report failed", e?.message || formatErr(e));
     }
+  };
+
+  // The Report panel's Compass tile (Jeff, 2026-09-25): the old compass FAB's tap, its 🔒 north-up toggle verbatim.
+  // Receipt: phone-tap:compass hold=0|1 (unchanged), plus the panel's own pick row.
+  const onCompassTile = () => {
+    try { logEvent("hazard-panel pick surf=phone id=hz-compass kind=compass"); } catch {}
+            // 🔒 NAV-LOCK begin map-compass-northup-toggle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
+            const hold = !northUpHold;
+            setNorthUpHold(hold);
+            if (hold) setNorthSignal((n) => n + 1);
+            recenterNow();
+            // 🔒 NAV-LOCK end map-compass-northup-toggle
+    try { logEvent(`phone-tap:compass hold=${hold ? 1 : 0}`); } catch {}
   };
 
   // Confirm = "still there" -> +1 confirm (backend tracks distinct voters and
@@ -4455,11 +4469,20 @@ export default function MapScreen() {
       if (announced.has(h.id) || dM > leadM || kmh < HAZARD_AHEAD_MIN_KMH) continue;
       if (!isAheadOf(course, bearingDeg(coords.lat, coords.lng, h.lat, h.lng))) continue;   // beside or behind: not "ahead"
       announced.add(h.id);
+      // Jeff, 2026-09-25: "when driving approaching the hazard … it should pop up a window asking if it's still there.
+      // Maybe make it pop up when scout mentions it." → the still-there card rides the call: someone else's pin, once per
+      // hazard, 15 s on screen, and it yields to a tapped pin. The 120 m pass-by below stays as the fallback (no course).
+      if (!(user?.handle && h.reporter_handle === user.handle) && !promptedHazardsRef.current.has(h.id) && !passPrompt) {
+        promptedHazardsRef.current.add(h.id);
+        setPassPrompt(h);
+        if (passPromptTimer.current) clearTimeout(passPromptTimer.current);
+        passPromptTimer.current = setTimeout(() => setPassPrompt((p) => (p && p.id === h.id ? null : p)), 15000);
+      }
       let spoke = false;
       if (!navMuted) { try { spoke = announce(hazardAheadLine(h.kind, dM, settings.speedUnit === "mph" ? "mi" : "km")); } catch {} }
       try { logEvent(`hazard-ahead kind=${h.kind} d=${Math.round(dM)} lead=${Math.round(leadM)} kmh=${Math.round(kmh)} spoke=${spoke ? 1 : 0}`); } catch {}
     }
-  }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted, settings.speedUnit]);
+  }, [coords?.lat, coords?.lng, hazards, showHazards, navMuted, settings.speedUnit, passPrompt, user?.handle]);
 
   // ----- DriveBC road-event proximity voice alert (Nova) -----
   // Official incidents from the Open511 feed. Same distance/re-arm shape as the
@@ -5427,6 +5450,8 @@ export default function MapScreen() {
                 </PressableScale>
               );
             })()}
+            {/* The report confirmation, under the crew pill and dressed like it, in the kind's colour (2026-09-25). */}
+            <ReportPill kind={alertConfirm} />
             {/* Stranded-OTA escape hatch: appears the moment a newer update finishes
                 downloading (expo-updates "pending" state — see UpdateReadyPill).
                 Hidden mid-drive so a tap can never reload during turn-by-turn. */}
@@ -5846,90 +5871,35 @@ export default function MapScreen() {
         );
       })()}
 
-      {selected && !destination && (
-        <Glass radius={20} style={styles.selectedCard}>
-          <View style={styles.selRow}>
-            <View style={styles.hazardImgWrap}>
-              <HazardKindIcon kind={selected.kind} size={46} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.selTitle}>{selected.kind.charAt(0).toUpperCase() + selected.kind.slice(1)}</Text>
-              <Text style={styles.selSub}>by {selected.reporter_handle || "anon"}</Text>
-              <View style={styles.selStatsRow}>
-                <View style={styles.statChip}>
-                  <Ionicons name="thumbs-up" size={11} color={COLORS.success} />
-                  <Text style={[styles.statChipText, { color: COLORS.success }]}>{selected.confirms || 1}</Text>
-                </View>
-                <View style={styles.statChip}>
-                  <Ionicons name="thumbs-down" size={11} color={COLORS.danger} />
-                  <Text style={[styles.statChipText, { color: COLORS.danger }]}>{selected.disputes || 0}</Text>
-                </View>
-              </View>
-            </View>
-            <TouchableOpacity onPress={() => setSelected(null)} style={{ padding: 6 }}>
-              <Ionicons name="close" size={20} color={COLORS.textDim} />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.selBtnRow}>
-            {(!!user?.handle && selected.reporter_handle === user.handle) ? (
-              // Your own pin: tap -> Remove (with a native confirm inside
-              // handleHazardLongPress). This is the "tap to delete on
-              // confirmation" flow for the driver who placed it.
-              <TouchableOpacity testID={`remove-${selected.id}`} onPress={() => handleHazardLongPress(selected)} style={[styles.voteBtn, styles.voteBtnDispute, { flex: 1 }]} activeOpacity={0.85}>
-                <Ionicons name="trash" size={16} color="#fff" />
-                <Text style={styles.voteBtnText}>Remove my alert</Text>
-              </TouchableOpacity>
-            ) : (
-              // Someone else's pin: cast a crowd vote. Two "Gone" votes from
-              // distinct drivers removes it for everyone.
-              <>
-                <TouchableOpacity testID={`dispute-${selected.id}`} onPress={() => disputeHazard(selected)} style={[styles.voteBtn, styles.voteBtnDispute]} activeOpacity={0.85}>
-                  <Ionicons name="thumbs-down" size={16} color="#fff" />
-                  <Text style={styles.voteBtnText}>Gone</Text>
-                </TouchableOpacity>
-                <TouchableOpacity testID={`confirm-${selected.id}`} onPress={() => confirmHazard(selected)} style={[styles.voteBtn, styles.voteBtnConfirm]} activeOpacity={0.85}>
-                  <Ionicons name="thumbs-up" size={16} color="#fff" />
-                  <Text style={styles.voteBtnText}>Still there</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </Glass>
-      )}
+      {/* The tapped-pin card and the pass-by "still there?" prompt: ONE component, the Report panel's twin
+          (src/components/HazardCard.tsx — same Modal, same anchor above the FAB stack, same floor, the kind's category
+          colour on the glyph tile, a full-width Remove for your own pin). Shown during a drive too now (it floats above
+          the stack, not over the drawer) and folds itself away after 15 s. The prompt yields to a tapped pin. */}
+      <HazardCard
+        hazard={selected}
+        mode="detail"
+        mine={!!user?.handle && selected?.reporter_handle === user.handle}
+        anchorBottom={controlsBottom + fabStackH}
+        onClose={() => setSelected(null)}
+        onRemove={() => { if (selected) handleHazardLongPress(selected); }}
+        onGone={() => { if (selected) disputeHazard(selected); }}
+        onStillThere={() => { if (selected) confirmHazard(selected); }}
+      />
+      <HazardCard
+        hazard={selected ? null : passPrompt}
+        mode="passby"
+        mine={false}
+        anchorBottom={controlsBottom + fabStackH}
+        onClose={() => setPassPrompt(null)}
+        onGone={() => { if (passPrompt) disputeHazard(passPrompt); }}
+        onStillThere={() => { if (passPrompt) confirmHazard(passPrompt); }}
+      />
 
       {/* ===== Pass-by "still there?" prompt =====
           One-time card shown when we pass within ~120m of another driver's
           alert. "Gone" casts a dispute vote (2 distinct votes removes the pin
           for everyone); "Still there" confirms it. Auto-dismisses after 15s.
           Gated on !selected so it never stacks on the tapped-pin card. */}
-      {passPrompt && !selected && (
-        <Glass radius={20} style={styles.selectedCard}>
-          <View style={styles.selRow}>
-            <View style={styles.hazardImgWrap}>
-              <HazardKindIcon kind={passPrompt.kind} size={46} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.selTitle}>
-                {passPrompt.kind.charAt(0).toUpperCase() + passPrompt.kind.slice(1)} ahead — still there?
-              </Text>
-              <Text style={styles.selSub}>Help your convoy keep alerts accurate</Text>
-            </View>
-            <TouchableOpacity onPress={() => setPassPrompt(null)} style={{ padding: 6 }}>
-              <Ionicons name="close" size={20} color={COLORS.textDim} />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.selBtnRow}>
-            <TouchableOpacity testID={`pass-gone-${passPrompt.id}`} onPress={() => disputeHazard(passPrompt)} style={[styles.voteBtn, styles.voteBtnDispute]} activeOpacity={0.85}>
-              <Ionicons name="close-circle" size={16} color="#fff" />
-              <Text style={styles.voteBtnText}>Gone</Text>
-            </TouchableOpacity>
-            <TouchableOpacity testID={`pass-stillthere-${passPrompt.id}`} onPress={() => confirmHazard(passPrompt)} style={[styles.voteBtn, styles.voteBtnConfirm]} activeOpacity={0.85}>
-              <Ionicons name="checkmark-circle" size={16} color="#fff" />
-              <Text style={styles.voteBtnText}>Still there</Text>
-            </TouchableOpacity>
-          </View>
-        </Glass>
-      )}
 
       {/* ---- HazardDrawer removed in the Google-Maps-style cleanup ----
           Active alerts (police, hazards, Waze) are now surfaced via the
@@ -6068,49 +6038,16 @@ export default function MapScreen() {
           (settings/map-layers.tsx, settings/map-mode.tsx). */}
 
       <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]} onLayout={(e) => setFabStackH(e.nativeEvent.layout.height)}>
-        {/* ORDER (Jeff, 2026-09-24: "On both surfaces let's do this order: Right side Top - mic, Second from top -
-            hazards, Second from bottom - 2D/3D, Bottom - crew. Phone doesn't have mic"): compass takes the mic's slot
-            (the phone has no mic), then Hazards, then 2D/3D (routing only), Crew at the BOTTOM — the head unit's
-            column [car-comms, car-hazards, car-view, car-crew] (carActions.ts CAR_MAP_BUTTON_CONFIG / AA_MAP_BUTTONS).
-            If you reorder either surface, reorder BOTH. The Report panel anchors ABOVE this stack (fabStackH,
-            measured) so it never covers a button, the weather HUD or the speedo. */}
-        {/* Compass — TOP of the stack: the head unit's top slot is the comms mic and the phone has no mic, so the
-            compass takes it (Jeff, 2026-09-24 order: mic · hazards · 2D/3D · crew). The needle rotates opposite the live map
-            bearing so North always points north as the map turns; tapping it
-            snaps back to the car (recenter) AND faces the map north (heading 0). */}
-        <PressableScale
-          testID="compass-fab"
-          hitSlop={0}
-          style={styles.fab}
-          onPress={() => {
-            // The same snap as its two FAB neighbours — it was the only silent one of the three
-            // (Jeff, 2026-09-23: Apple-feel batch 1). Outside the lock region below, on purpose.
-            haptics.snap();
-            // TOGGLE, like the CarPlay compass (CarMapView 'compass': "holding north-up until
-            // tapped again"). This was ONE-WAY: every tap armed the hold, and only a manual pan
-            // or a NEW route released it — so a recenter tap mid-drive left the map north-up for
-            // the rest of the drive, needle pinned north while the car turned (Rodrigo,
-            // 2026-09-03: "compass shows north but it's going right/left"; CarPlay, which
-            // toggles, "was fine"). Receipt: phone-tap:compass hold=0|1.
-            // 🔒 NAV-LOCK begin map-compass-northup-toggle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
-            const hold = !northUpHold;
-            setNorthUpHold(hold);
-            if (hold) setNorthSignal((n) => n + 1);
-            recenterNow();
-            // 🔒 NAV-LOCK end map-compass-northup-toggle
-            try { logEvent(`phone-tap:compass hold=${hold ? 1 : 0}`); } catch {}
-          }}
-        >
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
-            <CompassNeedle size={54} />
-          </View>
-        </PressableScale>
+        {/* ORDER (Jeff, 2026-09-25, off his screenshot: "The compass needs to be 2D/3D on the phone. And the hazard on the
+            top."): Hazards on TOP, 2D/3D second (always shown now, like the head units' view button), Crew at the
+            BOTTOM — the head unit's column [car-comms, car-hazards, car-view, car-crew] minus the mic the phone has no
+            use for. The compass is a TILE inside the Report panel, exactly as on CarPlay / Android Auto (onCompassTile
+            below keeps the 🔒 north-up toggle verbatim). If you reorder either surface, reorder BOTH. The Report panel
+            anchors ABOVE this stack (fabStackH, measured) so it never covers a button, the weather HUD or the speedo. */}
         {/* HAZARDS (Jeff, 2026-09-24: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?") — the head unit's fourth map
             button, on the phone: opens the Report sheet (src/components/HazardSheet.tsx, the same four tiles in
-            the driver's metal). Second from the top like the head unit's column [comms, hazards, view, crew] (Jeff,
-            2026-09-24); the compass keeps its own FAB here because the phone has the room (on the head unit it
-            rides inside the panel). The panel opens ABOVE this stack, never over it. */}
+            the driver's metal). TOP of the stack (Jeff, 2026-09-25: "the hazard on the top"); the compass rides inside
+            the panel as a tile, as on the head units. The panel opens ABOVE this stack, never over it. */}
         <PressableScale
           testID="hazards-fab"
           hitSlop={0}
@@ -6132,14 +6069,14 @@ export default function MapScreen() {
             Resets to 3D when the drive ends (endNav -> resetMapView2D), so a 2D choice
             lasts exactly as long as the drive. The glyph shows what you GET if you press,
             which is the convention for a view switch — cube while flat, flat while 3D. */}
-        {/* ONLY WHILE ROUTING (Jeff, 2026-08-18): idle is pinned to the 2D sprite view,
-            3D exists only during a drive — so the toggle has nothing to do when no
-            route is running and would only offer a rule-breaking idle 3D. */}
+        {/* ALWAYS SHOWN since 2026-09-25 (Jeff: "The compass needs to be 2D/3D on the phone") — the head units' view
+            button is always there too. Idle is still pinned to 2D (Jeff, 2026-08-18): an idle tap answers "2D view"
+            word for word like CarPlay / AA (carActions act-view-2d-when-idle) and changes nothing; the toggle only
+            works during a drive. */}
         {/* With a 2D car on the road (Free's arrow, Silver's class car — the map is held 2D) the FAB STAYS,
             showing "3D" as the tease: a tap says 3D is Gold's and changes nothing (Jeff, 2026-09-23: "on the
             free/silver 2d maps can we change the 2d button to 3d to entice the free silver users to see 3d and
             when they tap it it says upgrade to gold?"). It already reads "3D" there: view2D is true while locked. */}
-        {navMode === "turn-by-turn" && (
         <PressableScale
           testID="view-2d-3d-fab"
           // 60 pt FABs stacked 10 pt apart: keep today's touch targets, since a default slop would let
@@ -6155,6 +6092,7 @@ export default function MapScreen() {
               showInfoToast("Upgrade to Gold for 3D");
               return;
             }
+            if (navMode !== "turn-by-turn") { setMapView2D(true); showInfoToast("2D view"); return; }   // = the car surfaces
             toggleMapView2D();
           }}
         >
@@ -6174,7 +6112,6 @@ export default function MapScreen() {
             />
           )} />
         </PressableScale>
-        )}
         {/* Crew button (replaced the police FAB, 2026-07-23 — Jeff's call): one tap
             frames self + every live/partial peer in a north-up overview. Same round
             glass FAB as the compass below it. Police reporting still lives in voice
@@ -6207,10 +6144,6 @@ export default function MapScreen() {
             guidance banner overlaps it), so a re-summon FAB isn't needed. */}
       </View>
 
-      {/* ===== Report confirmation toast =====
-          Brief glassy pill at the bottom-center that confirms a Police or
-          Hazard report was sent. Auto-dismisses after 2.5s (set by reportAlert). */}
-      <ReportToast kind={alertConfirm as any} />
       {/* The Report panel (the head unit's grid, on the phone): a card anchored ABOVE the FAB stack, right-aligned with
           it, closed by a tap anywhere else. Closes on a tile tap; the toast confirms. */}
       <HazardSheet
@@ -6219,6 +6152,7 @@ export default function MapScreen() {
         anchorBottom={controlsBottom + fabStackH}
         onClose={() => setShowReport(false)}
         onReport={(kind) => { setShowReport(false); try { logEvent(`hazard-panel pick surf=phone id=hz-${kind} kind=${kind}`); } catch {} return reportHazard(kind); }}
+        onCompass={onCompassTile}
       />
       {/* Music broadcast toast — shows up when the convoy admin pushes a
           track from the Music screen. Sits slightly higher than the report
@@ -6365,15 +6299,6 @@ export default function MapScreen() {
 // reused inside the hazard detail card and the pass-by prompt so the icon is
 // identical everywhere (continuity). Police -> police.png; everything else ->
 // hazard.png. No colored circle, matching the bare-image map markers.
-function HazardKindIcon({ kind, size = 44 }: { kind: string; size?: number }) {
-  return (
-    <Image
-      source={kind === "police" ? require("../../assets/images/police.png") : require("../../assets/images/hazard.png")}
-      style={{ width: size, height: size }}
-      resizeMode="contain"
-    />
-  );
-}
 
 // Plain JS Haversine — KILOMETRES between two lat/lng (callers ×1000 for
 // metres). Used by the hazard/pass-by proximity checks and the saved-place

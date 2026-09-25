@@ -29,22 +29,24 @@ import { HAZARD_TILES, HAZARD_PANEL_AUTO_CLOSE_MS, type HazardKind, type HazardG
 import type { VisualTier } from "../tierTheme";
 
 /** The report glyphs per metal — the same PNGs the head unit bakes into carButtonIcons.ts. */
-export const HAZARD_ART: Record<Exclude<HazardGlyph, "hz_camera" | "hz_compass">, Record<VisualTier, number>> = {
+export const HAZARD_ART: Record<Exclude<HazardGlyph, "hz_camera">, Record<VisualTier, number>> = {
   hz_police:  { brand: require("../../assets/carplay-glyphs/report/police_green.png"),  premium: require("../../assets/carplay-glyphs/report/police_silver.png"),  ultra: require("../../assets/carplay-glyphs/report/police_gold.png"),  diamond: require("../../assets/carplay-glyphs/report/police_diamond.png") },
   hz_crash:   { brand: require("../../assets/carplay-glyphs/report/crash_green.png"),   premium: require("../../assets/carplay-glyphs/report/crash_silver.png"),   ultra: require("../../assets/carplay-glyphs/report/crash_gold.png"),   diamond: require("../../assets/carplay-glyphs/report/crash_diamond.png") },
   hz_hazard:  { brand: require("../../assets/carplay-glyphs/report/hazard_green.png"),  premium: require("../../assets/carplay-glyphs/report/hazard_silver.png"),  ultra: require("../../assets/carplay-glyphs/report/hazard_gold.png"),  diamond: require("../../assets/carplay-glyphs/report/hazard_diamond.png") },
   hz_traffic: { brand: require("../../assets/carplay-glyphs/report/traffic_green.png"), premium: require("../../assets/carplay-glyphs/report/traffic_silver.png"), ultra: require("../../assets/carplay-glyphs/report/traffic_gold.png"), diamond: require("../../assets/carplay-glyphs/report/traffic_diamond.png") },
+  hz_compass: { brand: require("../../assets/carplay-glyphs/report/compass_green.png"), premium: require("../../assets/carplay-glyphs/report/compass_silver.png"), ultra: require("../../assets/carplay-glyphs/report/compass_gold.png"), diamond: require("../../assets/carplay-glyphs/report/compass_diamond.png") },
 };
 /** The map button's own art: the hazard triangle in the metal (the head unit's car-hazards button). */
 export const HAZARD_FAB_ART = HAZARD_ART.hz_hazard;
 
-const REPORT_TILES = HAZARD_TILES.filter((t): t is typeof t & { kind: HazardKind; glyph: keyof typeof HAZARD_ART } => t.kind != null && t.glyph in HAZARD_ART);
-const TILE = 76;                      // pt; the Hairpin square radius is 28 % of it
-const TILE_RADIUS = Math.round(TILE * 0.28);
+// ALL FIVE tiles now, the compass included (Jeff, 2026-09-25: the phone's compass FAB became the 2D/3D button, so the
+// compass rides inside the panel exactly as it does on the head units).
+const PANEL_TILES = HAZARD_TILES.filter((t): t is typeof t & { glyph: keyof typeof HAZARD_ART } => t.glyph in HAZARD_ART);
+const TILE_MAX = 64;                  // pt; the Hairpin square radius is 28 % of it
 const TILE_GAP = 8;
 const PAD_H = 12;
-/** Four faces + gaps + padding: the card's natural width; capped to the window on a small phone. */
-const CARD_W = TILE * 4 + TILE_GAP * 3 + PAD_H * 2;
+/** Five faces + gaps + padding: the card's natural width; capped to the window on a small phone (tiles shrink). */
+const CARD_W = TILE_MAX * 5 + TILE_GAP * 4 + PAD_H * 2;
 /** Side gutter the card keeps on a narrow phone (map.tsx styles.fabStack uses the same 12). */
 const RIGHT_INSET = 12;
 /** Air between the top button and the card. */
@@ -66,11 +68,13 @@ const CARD_H_GUESS = 190;
 // survives the panel unmounting; released when the caller's promise settles.
 let _reportBusy = false;
 
-export default function HazardSheet({ visible, onClose, onReport, dismiss, anchorBottom }: {
+export default function HazardSheet({ visible, onClose, onReport, onCompass, dismiss, anchorBottom }: {
   visible: boolean;
   onClose: () => void;
   /** Returns the report's promise so the panel can hold off a second tap until it settles. */
   onReport: (kind: HazardKind) => Promise<unknown> | void;
+  /** The Compass tile: recenter + face north (the old compass FAB's tap, 🔒 region intact in map.tsx). */
+  onCompass: () => void;
   /** True while turn-by-turn is active: a panel left open at drive start (the speed auto-start, a car-session
    *  adoption) must not sit over guidance (Codex review 2026-09-24). */
   dismiss?: boolean;
@@ -119,6 +123,9 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
   }, [visible]);  // eslint-disable-line react-hooks/exhaustive-deps -- one row per open, not per tick
   if (!visible) return null;
   const cardW = Math.min(CARD_W, winW - RIGHT_INSET * 2);
+  const tile = Math.min(TILE_MAX, Math.floor((cardW - PAD_H * 2 - TILE_GAP * 4) / 5));
+  const tileRadius = Math.round(tile * 0.28);
+  const glyphPt = Math.round(tile * 0.62);
   // Above the stack — unless that would push the card into the top bar (short phone, Drive drawer up): then it stops
   // TOP_CLEAR from the top and may touch the compass FAB, never the Hazards button below it.
   const bottom = Math.min(anchorBottom + GAP_ABOVE_STACK, Math.max(0, winH - TOP_CLEAR - cardH));
@@ -148,22 +155,23 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
         <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
         <Text maxFontSizeMultiplier={1.2} style={styles.title}>Report</Text>
         <View style={styles.row}>
-          {REPORT_TILES.map((t) => (
+          {PANEL_TILES.map((t) => (
             <PressableScale
               key={t.id}
-              testID={`report-${t.kind}`}
-              hitSlop={0}   // the faces are 76 pt with 8 pt gaps; the default 12 pt slop let an edge tap report the neighbour (Codex r3)
+              testID={t.kind ? `report-${t.kind}` : "report-compass"}
+              hitSlop={0}   // the faces sit 8 pt apart; the default 12 pt slop let an edge tap report the neighbour (Codex r3)
               style={styles.tile}
-              accessibilityLabel={`Report ${t.title}`}
+              accessibilityLabel={t.kind ? `Report ${t.title}` : "Compass"}
               onPress={() => {
+                if (t.kind == null) { haptics.snap(); onCompass(); onCloseRef.current(); return; }
                 if (_reportBusy) return;
                 haptics.snap();
                 _reportBusy = true;
                 Promise.resolve(onReport(t.kind)).catch(() => {}).finally(() => { _reportBusy = false; });
               }}
             >
-              <View style={styles.tileFace}>
-                <Image source={HAZARD_ART[t.glyph][metal]} style={styles.glyph} resizeMode="contain" />
+              <View style={[styles.tileFace, { width: tile, height: tile, borderRadius: tileRadius }]}>
+                <Image source={HAZARD_ART[t.glyph][metal]} style={{ width: glyphPt, height: glyphPt }} resizeMode="contain" />
               </View>
               <Text maxFontSizeMultiplier={1.2} style={styles.label}>{t.title}</Text>
             </PressableScale>
@@ -199,11 +207,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", gap: TILE_GAP },
   tile: { flex: 1, alignItems: "center", gap: 6 },
   tileFace: {
-    width: TILE, height: TILE, borderRadius: TILE_RADIUS,
     backgroundColor: "rgba(255,255,255,0.07)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center", justifyContent: "center",
   },
-  glyph: { width: 46, height: 46 },
   label: { color: "#E5E5EA", fontSize: 13, fontWeight: "600" },
   hint: { color: "#8E8E93", fontSize: 11.5, textAlign: "center", marginTop: 10 },
 });

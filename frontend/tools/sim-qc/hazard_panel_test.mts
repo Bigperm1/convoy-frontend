@@ -55,7 +55,7 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
   ok("D9 NO BackHandler in the sheet — Android Back is the Modal's onRequestClose", !sheet.includes("BackHandler.addEventListener") && !/import \{[^}]*BackHandler/.test(sheet) && sheet.includes('onRequestClose={() => close("back")}'));
   ok("D10 an untouched panel closes itself on every surface (Jeff, 2026-09-25: auto disappears) — phone timer + both head-unit pushes arm the pop, any pop clears it", HAZARD_PANEL_AUTO_CLOSE_MS >= 5000 && HAZARD_PANEL_AUTO_CLOSE_MS <= 12000 && sheet.includes("setTimeout(() => close(\"auto\"), HAZARD_PANEL_AUTO_CLOSE_MS)") && sheet.includes("  }, [visible]);") && (readFileSync(new URL("../../src/carplay/carActions.ts", import.meta.url), "utf8").match(/armHazardsAutoPop\(\);/g) || []).length === 2 && readFileSync(new URL("../../src/carplay/carActions.ts", import.meta.url), "utf8").includes("if (_hazardsAutoPop) { clearTimeout(_hazardsAutoPop); _hazardsAutoPop = null; }\n  if (!_hazardsPushed) return;"));
   ok("D11 the Hazards FAB triangle is 30 pt (Jeff, 2026-09-25: a tad bigger than the 26 pt crew glyph)", mapTsx.includes('HAZARD_FAB_ART[t]} style={{ width: 30, height: 30 }}'));
-  ok("D4 phone FAB order top→bottom = compass (the mic's slot) · Hazards · 2D/3D · Crew (Jeff, 2026-09-24)", ['testID="compass-fab"', 'testID="hazards-fab"', 'testID="view-2d-3d-fab"', 'testID="crew-fit-fab"'].map((t) => mapTsx.indexOf(t)).every((v, k, arr) => v >= 0 && (k === 0 || arr[k - 1] < v)));
+  ok("D4 phone FAB order top→bottom = Hazards · 2D/3D (always) · Crew, no compass FAB (Jeff, 2026-09-25: \"The compass needs to be 2D/3D on the phone. And the hazard on the top\")", ['testID="hazards-fab"', 'testID="view-2d-3d-fab"', 'testID="crew-fit-fab"'].map((t) => mapTsx.indexOf(t)).every((v, k, arr) => v >= 0 && (k === 0 || arr[k - 1] < v)) && !mapTsx.includes('testID="compass-fab"') && !/navMode === "turn-by-turn" && \(\s*<PressableScale\s*testID="view-2d-3d-fab"/.test(mapTsx) && mapTsx.includes('if (navMode !== "turn-by-turn") { setMapView2D(true); showInfoToast("2D view"); return; }'));
 }
 
 // E · the head-unit column (Jeff, 2026-09-24: "Top - mic, Second from top - hazards, Second from bottom - 2D/3D, Bottom - crew")
@@ -69,6 +69,23 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
   const aa = ["'car-zoom-in'", "'car-zoom-out'", "HAZARD_BUTTON_ID", "'car-crew'"];
   ok("E3 AA_MAP_BUTTONS puts hazards above crew", JSON.stringify(ids(slice("export const AA_MAP_BUTTONS"))) === JSON.stringify(aa));
   ok("E4 aaMapButtons() (the skinned build) keeps that order", JSON.stringify(ids(slice("export function aaMapButtons()"))) === JSON.stringify(aa));
+}
+
+// G · round three (Jeff, 2026-09-25): compass tile, category-coloured pins, the card, the pill, the Scout-timed prompt
+{
+  const sheet = readFileSync(new URL("../../src/components/HazardSheet.tsx", import.meta.url), "utf8");
+  const card = readFileSync(new URL("../../src/components/HazardCard.tsx", import.meta.url), "utf8");
+  const mapTsx = readFileSync(new URL("../../app/(app)/map.tsx", import.meta.url), "utf8");
+  const mapbox = readFileSync(new URL("../../src/ConvoyMapbox.tsx", import.meta.url), "utf8");
+  const pal = readFileSync(new URL("../../src/hazardPalette.ts", import.meta.url), "utf8");
+  const pins = readFileSync(new URL("../../src/hazardPinImages.ts", import.meta.url), "utf8");
+  const toast = readFileSync(new URL("../../src/components/AlertToast.tsx", import.meta.url), "utf8");
+  ok("G1 the phone panel carries all five tiles, compass included, and the compass tile runs the 🔒 north-up toggle verbatim", sheet.includes("PANEL_TILES = HAZARD_TILES.filter(") && sheet.includes("hz_compass: { brand: require(") && sheet.includes("onCompass: () => void;") && mapTsx.includes("const onCompassTile = () => {") && mapTsx.includes("onCompass={onCompassTile}") && mapTsx.includes("// 🔒 NAV-LOCK begin map-compass-northup-toggle"));
+  ok("G2 the colour family: Police = EV, Crash = Hospital, Hazard = Fast Food, Traffic = Gas", /police:\s*\{ cat: "ev"/.test(pal) && /accident:\s*\{ cat: "hospital"/.test(pal) && /road:\s*\{ cat: "fastfood"/.test(pal) && /traffic:\s*\{ cat: "gas"/.test(pal));
+  ok("G3 four baked pins, and the map draws them on the phone layer AND the head-unit marker (no NeonPin hazard snapshots left)", ["police", "accident", "road", "traffic"].every((k) => new RegExp(`^  ${k}: "iVBOR`, "m").test(pins)) && mapbox.includes("...HAZARD_PIN_IMAGES,") && mapbox.includes("icon: hazardPinImageName(h.kind)") && mapbox.includes("iconImage: [\"get\", \"icon\"], iconSize: 1 / POI_PIN_SCALE") && mapbox.includes("<Image source={{ uri: hazardPinUri(hazard.kind) }}") && !mapbox.includes("name={`neon_hz_${k}`}"));
+  ok("G4 the tapped-pin card and the pass-by prompt are the Report panel's twin (Modal, weather floor, anchored above the stack, big Remove) and the old Glass cards are gone", card.includes("<Modal transparent visible animationType=\"none\"") && card.includes('backgroundColor: "rgba(24,24,28,0.66)"') && card.includes("bottom = Math.min(anchorBottom + GAP_ABOVE_STACK") && card.includes("const BTN_H = 52;") && card.includes("Remove my alert") && mapTsx.includes('<HazardCard\n        hazard={selected}\n        mode="detail"') && mapTsx.includes('hazard={selected ? null : passPrompt}\n        mode="passby"') && !mapTsx.includes("style={styles.selectedCard}"));
+  ok("G5 the report pill sits under the crew pill, dressed like it, in the kind's colour; the bottom toast is gone", toast.includes("export function ReportPill") && toast.includes("backgroundColor: rgba(p.bright, 0.30), borderColor: p.bright") && mapTsx.indexOf("styles.liveOverlayText") < mapTsx.indexOf("<ReportPill kind={alertConfirm} />") && !mapTsx.includes("<ReportToast"));
+  ok("G6 the still-there prompt rides Scout's hazard-ahead call (someone else's pin, once, 15 s)", /announced\.add\(h\.id\);[\s\S]{0,900}setPassPrompt\(h\);[\s\S]{0,300}15000/.test(mapTsx) && mapTsx.includes("!(user?.handle && h.reporter_handle === user.handle) && !promptedHazardsRef.current.has(h.id) && !passPrompt"));
 }
 
 console.log(fails === 0 ? "\nPASS hazard_panel" : `\nFAIL hazard_panel (${fails})`);

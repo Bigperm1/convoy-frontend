@@ -8,6 +8,27 @@
 
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
+import { hazardPaint } from "../hazardPalette";
+
+function rgba(hex: string, a: number): string {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+// ReportPill — the report confirmation, UNDER the crew/version pill and dressed exactly like it (map.tsx
+// styles.liveOverlay), tinted with the reported kind's category colour (Jeff, 2026-09-25: "make this appear under the
+// version pill with the same look as the version but the same colour as the hazard selected"). Replaces the old
+// bottom-of-screen ReportToast for reports.
+export function ReportPill({ kind }: { kind: string | null }) {
+  if (!kind) return null;
+  const p = hazardPaint(kind);
+  return (
+    <View pointerEvents="none" testID="report-pill" style={[styles.pill, { backgroundColor: rgba(p.bright, 0.30), borderColor: p.bright }]}>
+      <View style={[styles.pillDot, { backgroundColor: p.bright }]} />
+      <Text maxFontSizeMultiplier={1} style={styles.pillText}>{p.label} reported</Text>
+    </View>
+  );
+}
 
 export function ReportToast({ kind }: { kind: string | null }) {
   if (!kind) return null;
@@ -62,6 +83,17 @@ export function InfoToast({ message, bottom = 160 }: { message: string | null; b
 }
 
 const styles = StyleSheet.create({
+  // = map.tsx styles.liveOverlay, colour aside.
+  pill: {
+    alignSelf: "center", marginTop: 6,
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 9, paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    zIndex: 5,
+  },
+  pillDot: { width: 6, height: 6, borderRadius: 3 },
+  pillText: { color: "#F4F4F4", fontSize: 10, fontWeight: "600", letterSpacing: 0.2 },
   toast: {
     position: "absolute",
     bottom: 160,

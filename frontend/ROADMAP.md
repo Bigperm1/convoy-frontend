@@ -1066,6 +1066,21 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-BY `bfb8316a` (code `93a0ce41`, 2026-09-24 22:52 PDT, Jeff: "ship the fold fix"; KEY_PRESENT=1 iOS + Android) — THE
+  FOLD (John Mungai's 18:57 CarPlay photo, "the car under the route line"; built `2cd2521a` on `claude/ribbon-fold-0924`, cherry-picked as
+  `7455ee86`, relocked ×2 under his words, 42 approvals).** His reroute went west 11 m, right onto King George, U-turned 239 m up and came
+  back SOUTH past the same corner; he turned left at the corner straight onto the return leg. VERIFIED from his crumbs + a replay of the
+  real route (re-fetched from Mapbox with his bearing; `tools/sim-qc/data/0924_fold_kinggeorge.json`) through the real modules in the
+  surfaces' frame order: `anchorCutM` accepted the outbound corner as the cut anchor up to 80 m (72 m at his light → `ribbon-trim surf=car
+  lag=556 anchorOff=71 hint=prev proj=3` for the whole stop) and the phone's windowed `projectOntoRoute` kept the corner to 120 m
+  (`proj=72` → `101`, 50 s). Both drew the uncut return leg through his car. Fix: `src/ribbonAnchor.ts` `ANCHOR_RECHECK_M = 20` (a local
+  answer > 20 m off is checked against the whole line; the ≤ 80 m "on this line" rule unchanged) + `src/routeFold.ts` (`PROJ_FOLD_M 30`,
+  `PROJ_FOLD_GAIN 2`) inside 🔒 `mbx-route-project-a` (an accepted windowed answer > 30 m off yields to the whole line only when it is 2×
+  closer). Car anchor back on him at 5 s, phone at 6 s. Gate `ribbon_fold_test` (fails on the pre-fix modules: car t=12, phone t=56, proj
+  79 m at the light; divided-road + GPS-spike controls). 57/57 gates · typecheck · eslint 0 · trap-check 0. Sim A/B on the phone sim, same
+  route, same drive, same binary: today's bundle drew the return leg under the car and recovered 50 s later like the field, the fix cut it
+  at the nose (`scratchpad/sim-fold/fold-before-after.png`). Owed: Codex (quota → 23:06 PDT), the field receipt (`ribbon-trim` rows on
+  the next fold). Memory `ribbon-fold-2026-09-24`.
 - **✅ PUBLISHED in OTA-BX `dbc3a19f` (code `d2b9d132`, 2026-09-24 22:35 PDT, Jeff: "build the hazard panel with the apple glyphs i
   mentioned. then do the ota push with everything"; KEY_PRESENT=1 iOS + Android) — THE REPORT PANEL on CarPlay + Android Auto.** The
   fourth map button (was the compass — poll Yes 1 / No 0 / Never 3, 21 head-unit taps in 14 days) is now Hazards: one grid template

@@ -179,8 +179,9 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
     reportPillLive(15000, 14999) && !reportPillLive(15000, 15000) && !reportPillLive(15000, 20000) && !reportPillLive(undefined, 0) && !reportPillLive(null, 0) && !reportPillLive(NaN, 0));
   const rh = body(acts, "export async function reportHazardFromCar("), rhCode = rh.replace(/\/\/.*$/gm, "");
   ok("I4 a head-unit report's success writes the pill (reportPillPatch + car-report-pill src=car) instead of toast(done); failures stay 3 s toasts; TOAST_MS still 3000",
-    rh.includes("setCarState(reportPillPatch(kind, Date.now()))") && rh.includes("logEvent(`car-report-pill kind=${kind} src=car`)") && rh.length > 0 && !rhCode.includes("toast(done)")
+    rh.includes("...reportPillPatch(kind, Date.now())") && rh.includes("logEvent(`car-report-pill kind=${kind} src=car`)") && rh.length > 0 && !rhCode.includes("toast(done)")
     && rh.includes("toast('No GPS fix yet')") && rh.includes("toast('Report failed — no connection')") && /^const TOAST_MS = 3000;$/m.test(acts));
+  ok("I12 a head-unit report clears the 1.6 s 'Hazards ✓' tap receipt so the pill is not covered (Codex 2026-09-25: no timer needed), and only that receipt", (() => { const a = readFileSync(new URL("../../src/carplay/carActions.ts", import.meta.url), "utf8"); return a.includes("const receipt = `${hazardTapLabel(HAZARD_BUTTON_ID)} ✓`;") && a.includes("getCarState().carToast === receipt ? { carToastUntil: 0 } : null"); })());
   const phoneWrite = "try { setCarState(reportPillPatch(kind, Date.now())); logEvent(`car-report-pill kind=${kind} src=phone`); } catch {}";
   const ra = body(mapTsx, "const reportAlert = async ("), rz = body(mapTsx, "const reportHazard = async (");
   ok("I5 both phone report functions write the head-unit pill right after the phone pill, and keep the phone's own 4 s",

@@ -211,7 +211,14 @@ export async function reportHazardFromCar(kind: HazardKind, done: string): Promi
     // Success = the kind-coloured REPORT PILL under the crew pill for 15 s (Jeff, 2026-09-25 — hazardPanel.ts
     // reportPillPatch), not the 3 s grey `toast(done)` it replaces: both at once would say the same thing twice. `done`
     // stays each tile's text contract (gate A5); the failure toasts below stay 3 s.
-    try { setCarState(reportPillPatch(kind, Date.now())); } catch {}
+    // The 1.6 s "Hazards ✓" tap receipt (carTap) outranks the pill in the status slot, and Jeff picks a tile ~1.3 s after
+    // opening the grid (09-25 09:29: push 36.38 → pick 37.66). Clear THAT receipt here so the pill shows the moment the
+    // grid pops instead of waiting for a re-render timer (Codex 2026-09-25: a paused JS timer on a locked phone could keep
+    // it covered). Only the tap receipt is cleared — an unrelated toast keeps its own 3 s.
+    try {
+      const receipt = `${hazardTapLabel(HAZARD_BUTTON_ID)} ✓`;
+      setCarState({ ...reportPillPatch(kind, Date.now()), ...(getCarState().carToast === receipt ? { carToastUntil: 0 } : null) });
+    } catch {}
     try { logEvent(`car-report-pill kind=${kind} src=car`); } catch {}
   } catch {
     toast('Report failed — no connection');

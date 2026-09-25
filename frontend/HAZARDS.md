@@ -200,7 +200,7 @@ kmh= spoke=0|1` · `crew-return ms=7000` · `car-report-pill kind=<kind> src=pho
 `reportAlert` — the head-unit pill's write; the only success row either logs). A failure is an `Alert` and logs nothing.
 Head units: `carplay-tap:car-hazards` (pill "Hazards ✓") · `hazard-panel op=push surf=carplay|aa` · `hazard-panel op=pop
 surf=… why=user|auto` · `hazard-panel pick surf=carplay|aa id= kind=` · `hazard-panel op=reset why=disconnect` ·
-`hazard-panel create-failed:<err>` · `car-report-pill kind=<kind> src=car` (a successful tile report wrote the pill) ·
+`hazard-panel create-failed:<err>` · `car-report-pill kind=<kind> src=car` (a successful tile report wrote the pill and cleared the 1.6 s "Hazards ✓" tap receipt, so the pill is never covered by it — Codex 2026-09-25) ·
 `car-report-drawn kind=<kind> surf=carplay|aa` (`logEventReliable`, from `CarSurface`'s commit when the status slot
 switches TO the pill — a new report, or the pill coming back after something above it; never while covered; ≤ 8 per
 surface mount; a render-commit row, not pixel proof). Toasts: "Report unavailable", "No GPS fix yet", "Report failed — no

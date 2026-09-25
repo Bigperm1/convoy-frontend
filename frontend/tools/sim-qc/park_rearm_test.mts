@@ -67,7 +67,13 @@
 //      rule across clock jumps (V8b-0 = without its restart); HF10a–d the witness is restored from the record alone —
 //      a park 25 h old, a device clock +25 h, a process that died with CarPlay attached — and a drive after it still
 //      goes live (HF10a-0 / HF10c-0 = 36c17f1e); KF1 the paused-monotonic residual, pinned and bounded; CLK1 the privacy
-//      clock does not drift with dense calls (CLK1-0 = 36c17f1e), CLK2 a rollback logs a bounded row; HF9f a stale latch
+//      clock does not drift with dense calls (CLK1-0 = 36c17f1e) nor with coarse clocks (CLK1b), CLK2 a rollback logs a
+//      bounded row; CLK3 / CLK3b round 12 — a rollback hidden in an awake gap, then a sleep with performance.now() paused
+//      and a string of sub-second sleeps: every one counted (CLK3-0 = d72b0ae8); CLK4 the fallbacks (no usable monotonic
+//      step, a forward correction, a NaN wall clock, garbage from both clocks, NaN on every other read); CLK5 the clock's
+//      constants; HF11 / HF12 the lead's C3 / C4 through the real module on a fresh clock — a lost Android Auto disconnect
+//      or a phone-only park, then 10 min asleep: the walk / jog is never live and the spot never moves (HF11-0 / HF12-0 =
+//      d72b0ae8's clock: 89 s / 120 s live), HF12+ a drive after that wake is live; HF9f a stale latch
 //      is expired before noteFix reads it —
 //      the first fast fix after it is not recorded as the car spot (HF9f-0 = 90dd1484); HF9g an expired Android Auto
 //      attachment stays expired when the device clock is set back into its window (HF9g-0 = b286ad9b); PT a property
@@ -101,6 +107,7 @@ registerHooks({
     if (s === "react" || s === "react-native" || s.startsWith("expo-")) return { url: EMPTY, shortCircuit: true };
     // The pre-fix copy lives in a temp dir: its relative imports are the worktree's modules.
     if (s === "./parkRearm.r3.ts" || s === "./parkRearm.r4.ts") return n(s, c);   // an earlier round's rule, beside its locationPrivacy copy
+    if (s === "./privacyClock.copy.ts") return n(s, c);                             // a FRESH clock instance beside a locationPrivacy copy (HF11 / HF12)
     if (s.startsWith(".") && /locationPrivacy\.base\.ts(\?.*)?$/.test(c.parentURL ?? "")) return { url: new URL(`${s.slice(2)}.ts`, SRC).href, shortCircuit: true };
     if (s.startsWith(".") && !/\.[a-z]+$/i.test(s)) { try { return n(s + ".ts", c); } catch {} }
     return n(s, c);
@@ -1390,6 +1397,91 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
     ok("KF1b …and the revived attachment ends within its remaining counted 90 s", endedAfter != null && endedAfter <= 30, `ended after ${endedAfter} s of awake walking`);
   }
   {
+    // ── HF11 / HF12 · A ROLLBACK HIDDEN IN AN AWAKE GAP, THEN A SLEEP (privacy round 12, the lead's C3 / C4 on acd506e1) ──
+    // The device clock is set back 14 min inside a 15 min gap in which nothing read the privacy clock, so no read ever
+    // sees a backward step (no penalty). Later the phone sleeps 10 min with performance.now() paused (the HYPOTHESIS that
+    // makes the wall clock necessary at all). Round 11's clock, max(Σ monotonic, Σ forward wall), kept the 14 min as a
+    // debt for the life of the process and the 10 min sleep counted 0 s.
+    //   HF11 (C3) Android Auto asserted every second of a drive, its disconnect LOST; the rollback came 8 h earlier; 10 min
+    //        asleep; then a 1.4 m/s walk for 3 min → never shared live, the car spot never moves.
+    //   HF12 (C4) a phone-only drive and park (no head unit), 10 min asleep, then a 3 m/s jog for 2 min → never live, the
+    //        spot never moves. HF12+ the same wake, then a real phone-only drive-away → live (liveness).
+    // Each run is this locationPrivacy.ts wired to a FRESH privacy clock (a copy beside it — a process start), because the
+    // suite's shared clock has seen every earlier test's jumps and would decide the outcome by history (measured: with
+    // d72b0ae8's clock as the shared one, both scenarios passed). HF11-0 / HF12-0 = the same wiring to d72b0ae8's
+    // privacyClock.ts (the lead measured 89 s / 120 s live).
+    const withClock = async (clk: string | null, tag: string): Promise<{ lp: LP; dir: string } | "wiring" | null> => {
+      if (!clk) return null;
+      const lpSrc = readFileSync(new URL("locationPrivacy.ts", SRC), "utf8");
+      const wired = lpSrc.replace(`from "./privacyClock";`, `from "./privacyClock.copy.ts";`);
+      if (wired === lpSrc) return "wiring";
+      const dir = mkdtempSync(join(tmpdir(), `park-rearm-clk-${tag}-`));
+      writeFileSync(join(dir, "privacyClock.copy.ts"), clk); writeFileSync(join(dir, "locationPrivacy.base.ts"), wired);
+      return { lp: await import(pathToFileURL(join(dir, "locationPrivacy.base.ts")).href + `?i=${++inst}`), dir };
+    };
+    let clkD72: string | null = null;
+    try { clkD72 = execFileSync("git", ["show", "d72b0ae8:frontend/src/privacyClock.ts"], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+    const clkNow = readFileSync(new URL("privacyClock.ts", SRC), "utf8");
+    const sleepMonoPaused = (ms: number) => { monoPaused = true; clock += ms; (globalThis as any).performance.now(); monoPaused = false; };
+    const hiddenRollback = (lp: LP) => { lp.isParked(); clock += 15 * 60 * S; wallSkew -= 14 * 60 * S; lp.isParked(); };
+    const livePos = (sh: any, p: { lat: number; lng: number }) => !!(sh.share && sh.lat === p.lat && sh.lng === p.lng);
+    const hf11 = async (lp: LP) => {
+      LOC_V.__os = "android"; LOC_V.__store = {}; wallSkew = 0; clock = utc(9, 0, 0);
+      await lp.hydrateLocationPrivacy();
+      hiddenRollback(lp);
+      for (let h = 0; h < 8; h++) { clock += 3600 * S; lp.isParked(); }             // 8 h of ordinary use
+      let p = north(SPOT, -1200);
+      for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteCarConnected(true, "androidauto"); lp.noteFix(p.lat, p.lng, 20, 0); }
+      for (let i = 0; i < 10; i++) { clock += S; lp.noteCarConnected(true, "androidauto"); lp.noteFix(p.lat, p.lng, 0, null); }
+      const spot0 = lp.carSpot();
+      sleepMonoPaused(600 * S);                                                        // the disconnect is LOST; 10 min asleep
+      let w = north(p, 30); let liveS = 0;
+      for (let i = 1; i <= 180; i++) { clock += S; w = north(w, 1.4); lp.noteFix(w.lat, w.lng, 1.4, null); if (livePos(lp.shareablePosition({ ...w, speed: 1.4, heading: 0 }), w)) liveS++; }
+      const sp = lp.carSpot(); const attached = lp.headUnitAttachedNow();   // (read while still Android: the TTL applies)
+      LOC_V.__os = undefined; wallSkew = 0;
+      return { liveS, spotMovedM: sp && spot0 ? Math.round(metres(sp, spot0)) : sp === spot0 ? 0 : -1, attached };
+    };
+    const hf12 = async (lp: LP, then: "jog" | "drive") => {
+      LOC_V.__os = undefined; LOC_V.__store = {}; wallSkew = 0; clock = utc(9, 0, 0);
+      await lp.hydrateLocationPrivacy();
+      hiddenRollback(lp);
+      let p = north(SPOT, -1200);
+      for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }      // phone-only drive
+      for (let i = 0; i < 10; i++) { clock += S; lp.noteFix(p.lat, p.lng, 0, null); }                      // parked
+      const spot0 = lp.carSpot();
+      sleepMonoPaused(600 * S);                                                                             // 10 min asleep
+      let w = north(p, 30); let liveS = 0; let liveAt: number | null = null;
+      for (let i = 1; i <= 120; i++) {
+        clock += S; const v = then === "jog" ? 3.0 : Math.min(i * 1.0, 11); w = north(w, v);
+        lp.noteFix(w.lat, w.lng, v, then === "jog" ? null : 0);
+        if (livePos(lp.shareablePosition({ ...w, speed: v, heading: 0 }), w)) { liveS++; liveAt ??= i; }
+      }
+      const sp = lp.carSpot();
+      wallSkew = 0;
+      return { liveS, liveAt, spotMovedM: sp && spot0 ? Math.round(metres(sp, spot0)) : sp === spot0 ? 0 : -1 };
+    };
+    const onClock = async <T,>(clk: string | null, tag: string, run: (lp: LP) => Promise<T>): Promise<T | "wiring" | null> => {
+      const b = await withClock(clk, tag);
+      if (b === "wiring" || b === null) return b;
+      try { return await run(b.lp); } finally { rmSync(b.dir, { recursive: true, force: true }); }
+    };
+    for (const [tag, run] of [["HF11", (lp: LP) => hf11(lp)], ["HF12", (lp: LP) => hf12(lp, "jog")]] as const) {
+      const r0: any = await onClock(clkD72, `${tag}-d72`, run);
+      if (r0 === "wiring") ok(`${tag}-0 wiring: locationPrivacy.ts no longer imports "./privacyClock" — the negative control cannot be built`, false);
+      else if (r0) ok(`${tag}-0 NEGATIVE CONTROL (d72b0ae8's clock): the sleep after the hidden rollback is not counted — the walk is shared LIVE and the car spot moves`, r0.liveS > 0 && r0.spotMovedM > 0, JSON.stringify(r0));
+      else console.log(`  skip ${tag}-0 negative control: d72b0ae8 unavailable`);
+    }
+    const r11: any = await onClock(clkNow, "hf11", (lp) => hf11(lp));
+    ok("HF11 (C3) a hidden rollback 8 h earlier, a lost Android Auto disconnect, 10 min asleep (monotonic paused), a 3 min walk: never live, the car spot never moves",
+      !!r11 && r11 !== "wiring" && r11.liveS === 0 && r11.spotMovedM === 0 && !r11.attached, JSON.stringify(r11));
+    const r12: any = await onClock(clkNow, "hf12", (lp) => hf12(lp, "jog"));
+    ok("HF12 (C4) a hidden rollback, a phone-only park, 10 min asleep (monotonic paused), a 2 min 3 m/s jog: never live, the car spot never moves",
+      !!r12 && r12 !== "wiring" && r12.liveS === 0 && r12.spotMovedM === 0, JSON.stringify(r12));
+    const r12d: any = await onClock(clkNow, "hf12d", (lp) => hf12(lp, "drive"));
+    ok("HF12+ liveness: the same wake, then a real phone-only drive-away (1 m/s² to 40 km/h) is live within 10 s and stays live",
+      !!r12d && r12d !== "wiring" && r12d.liveAt != null && r12d.liveAt <= 10 && r12d.liveS === 120 - r12d.liveAt + 1, JSON.stringify(r12d));
+  }
+  {
     // ── CLK · the privacy clock itself (fresh instances of src/privacyClock.ts, so the suite's shared one is untouched) ──
     // CLK1 DRIFT: calls 0.3 ms and 1.7 ms apart (the monotonic clock sub-millisecond, the wall clock in whole ms) must not
     // run the clock fast — summing max(Δmono, Δwall) per call ran 1.70× / 1.12× (CLK1-0 = 36c17f1e's clock).
@@ -1425,6 +1517,139 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
       perf.now = harnessPerf; Date.now = harnessDate;
       const rows = (LOC_V.__rows as string[]).filter((r) => r.startsWith("priv-clock-back"));
       ok("CLK2 a device-clock rollback closes every window (+1 h) and logs `priv-clock-back`, bounded at 5 rows", e1 - e0 >= 3_600_000 && rows.length === 5 && rows[0] === "priv-clock-back by=2s n=1", JSON.stringify({ jump: e1 - e0, rows }));
+    }
+    {
+      // CLK1b DRIFT with coarser clocks (round 12): a 16 ms wall clock, a monotonic clock quantized to 1 ms or 0.1 ms (an
+      // EQUAL reading is a valid zero step, not a fallback to the wall clock — that would count the same time twice).
+      const driftQ = async (url: string, stepMs: number, n: number, monoQ: number, wallQ: number, wallPhase: number) => {
+        const C: any = await import(url);
+        let tt = 1_000_000.37; perf.now = () => Math.floor(tt / monoQ) * monoQ; Date.now = () => Math.floor((tt + wallPhase) / wallQ) * wallQ;
+        const e0 = C.privacyNow(); for (let i = 0; i < n; i++) { tt += stepMs; C.privacyNow(); }
+        const ratio = (C.privacyNow() - e0) / (n * stepMs);
+        perf.now = harnessPerf; Date.now = harnessDate;
+        return ratio;
+      };
+      // (The wall clock ticks out of phase with the monotonic one, so a wall tick lands inside an equal-monotonic interval.)
+      const q1 = await driftQ(cur("q1"), 0.3, 20_000, 1, 16, 0.5), q2 = await driftQ(cur("q2"), 0.3, 20_000, 1, 1, 0.5);
+      const q3 = await driftQ(cur("q3"), 1.7, 5_000, 1, 1, 0.5), q4 = await driftQ(cur("q4"), 1000 / 60, 3_000, 0.1, 16, 7);
+      ok("CLK1b no drift with coarse clocks (0.3 ms calls on a 1 ms monotonic + a 16 ms / 1 ms wall out of phase; 1.7 ms on 1 ms + 1 ms; 60 Hz on 0.1 ms + 16 ms: within 1 %)",
+        [q1, q2, q3, q4].every((r) => Math.abs(r - 1) <= 0.01), `×${q1.toFixed(4)} ×${q2.toFixed(4)} ×${q3.toFixed(4)} ×${q4.toFixed(4)}`);
+    }
+    {
+      // CLK3 A ROLLBACK HIDDEN IN AN AWAKE GAP, THEN A SLEEP (round 12, the lead's C1 on acd506e1): 15 min pass with no
+      // read while the device clock is set back 14 min (every read sees the wall move FORWARD: no penalty); 8 h of 1 Hz
+      // reads; then a 10 min sleep with performance.now() paused. The awake gap counts its true 15 min and the sleep its
+      // 10 min. CLK3b then 10 min of SHORT sleeps — 0.2 s awake, 0.8 s asleep, a read after each, every one under the
+      // 1 s threshold — count all but < 1 s (a per-call threshold would drop every one: 120 of 600 s).
+      // CLK3-0 = d72b0ae8's clock: the 14 min debt swallows the sleep (0 s).
+      const hidden = async (url: string) => {
+        const C: any = await import(url);
+        let mono = 3_000_000, wall = 1_790_000_000_000; perf.now = () => mono; Date.now = () => wall;
+        C.privacyNow(); const g0 = C.privacyNow();
+        mono += 15 * 60 * S; wall += 60 * S; const g1 = C.privacyNow();
+        for (let i = 0; i < 8 * 3600; i++) { mono += 1000; wall += 1000; C.privacyNow(); }
+        const s0 = C.privacyNow();
+        wall += 600 * S; const s1 = C.privacyNow();
+        for (let i = 0; i < 600; i++) { mono += 200; wall += 200; C.privacyNow(); wall += 800; C.privacyNow(); }
+        const s2 = C.privacyNow();
+        perf.now = harnessPerf; Date.now = harnessDate;
+        return { gapS: (g1 - g0) / 1000, sleepS: (s1 - s0) / 1000, shortSleepsS: (s2 - s1) / 1000 };
+      };
+      let old12: string | null = null;
+      try { old12 = execFileSync("git", ["show", "d72b0ae8:frontend/src/privacyClock.ts"], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+      if (old12) {
+        const d = mkdtempSync(join(tmpdir(), "privclock-d72-")); const f = join(d, "privacyClock.old.ts"); writeFileSync(f, old12);
+        const h0 = await hidden(pathToFileURL(f).href);
+        ok("CLK3-0 NEGATIVE CONTROL (d72b0ae8's clock): after the hidden rollback a 10 min sleep counts nothing", h0.sleepS < 1, JSON.stringify(h0));
+        rmSync(d, { recursive: true, force: true });
+      } else console.log("  skip CLK3-0 negative control: d72b0ae8 unavailable");
+      const h = await hidden(cur("h"));
+      ok("CLK3 a rollback hidden in an awake gap, then a 10 min sleep with performance.now() paused: the gap counts its true 15 min, the sleep all 10 min",
+        Math.abs(h.gapS - 900) <= 1 && h.sleepS >= 599.999, JSON.stringify(h));
+      ok("CLK3b …then 600 short sleeps (0.8 s each, under the 1 s threshold) between 0.2 s awake reads: all but < 1 s of the 600 s is counted",
+        h.shortSleepsS >= 599 && h.shortSleepsS <= 601, JSON.stringify(h));
+    }
+    {
+      // CLK4 NO USABLE MONOTONIC STEP → that interval runs on the wall clock's forward step, so time still passes and a
+      // window still expires: performance.now() missing / throwing / NaN (60 × 1 s reads → 60 s, a 10 min gap → 600 s, a
+      // 5 s rollback → +1 h, +1 ms → 1 ms), and one reading BEHIND the last (−10 s while the wall moves +1 s → 1 s, then
+      // back on the monotonic clock). CLK4b a forward wall correction of 5 s over a 1 s monotonic step counts all 6 s.
+      // CLK4c a NaN wall clock with a working monotonic clock: 1 s per 1 s read. CLK4d 200 × 2 000 reads of random
+      // garbage (NaN / ±Infinity / undefined readings, steps from −5 s to +50 s on the monotonic clock and ±10^7 ms on
+      // the wall): never backwards, never non-finite.
+      const modes: [string, any][] = [["missing", undefined], ["throws", () => { throw new Error("no clock"); }], ["NaN", () => NaN]];
+      const res: string[] = []; let good = true;
+      for (const [name, fn] of modes) {
+        const C: any = await import(cur(`m-${name}`));
+        let wall = 1_790_000_000_000; perf.now = fn; Date.now = () => wall;
+        C.privacyNow(); const e0 = C.privacyNow();
+        for (let i = 0; i < 60; i++) { wall += 1000; C.privacyNow(); }
+        const e1 = C.privacyNow(); wall += 600_000; const e2 = C.privacyNow(); wall -= 5000; const e3 = C.privacyNow(); wall += 1; const e4 = C.privacyNow();
+        perf.now = harnessPerf; Date.now = harnessDate;
+        const steps = [e1 - e0, e2 - e1, e3 - e2, e4 - e3];
+        if (!(steps[0] === 60_000 && steps[1] === 600_000 && steps[2] >= 3_600_000 && steps[3] === 1)) good = false;
+        res.push(`${name}:${steps.join("/")}`);
+      }
+      {
+        const C: any = await import(cur("m-behind"));
+        let mono = 5_000_000, wall = 1_790_000_000_000; perf.now = () => mono; Date.now = () => wall;
+        C.privacyNow(); const e0 = C.privacyNow();
+        mono -= 10_000; wall += 1000; const e1 = C.privacyNow();
+        mono += 1000; wall += 1000; const e2 = C.privacyNow();
+        perf.now = harnessPerf; Date.now = harnessDate;
+        if (!(e1 - e0 === 1000 && e2 - e1 === 1000)) good = false;
+        res.push(`behind:${e1 - e0}/${e2 - e1}`);
+      }
+      ok("CLK4 no usable monotonic step (missing, throws, NaN, behind): the wall clock's forward step carries time; a rollback still closes every window", good, res.join(" "));
+      {
+        const C: any = await import(cur("fwd"));
+        let mono = 5_000_000, wall = 1_790_000_000_000; perf.now = () => mono; Date.now = () => wall;
+        C.privacyNow(); const e0 = C.privacyNow();
+        mono += 1000; wall += 6000; const e1 = C.privacyNow();
+        perf.now = harnessPerf; Date.now = harnessDate;
+        ok("CLK4b a forward wall correction (+6 s over a 1 s monotonic step) is counted in full — things expire sooner", e1 - e0 === 6000, `+${e1 - e0} ms`);
+      }
+      {
+        const C: any = await import(cur("wnan"));
+        let mono = 5_000_000; let wallNaN = true; perf.now = () => mono; Date.now = () => (wallNaN ? NaN : 1_790_000_000_000 + mono);
+        C.privacyNow(); const e0 = C.privacyNow();
+        for (let i = 0; i < 5; i++) { mono += 1000; C.privacyNow(); }
+        wallNaN = false; for (let i = 0; i < 5; i++) { mono += 1000; C.privacyNow(); }
+        const e1 = C.privacyNow();
+        perf.now = harnessPerf; Date.now = harnessDate;
+        ok("CLK4c a NaN wall clock with a working monotonic clock: 10 × 1 s reads advance 10 s", e1 - e0 === 10_000, `+${e1 - e0} ms`);
+      }
+      {
+        // CLK4e performance.now() NaN on every other read: the interval after a NaN runs on the wall clock and the next
+        // monotonic step starts from the NaN read, so no second is counted twice (1.5× if it spanned two intervals).
+        const C: any = await import(cur("alt"));
+        let mono = 5_000_000, wall = 1_790_000_000_000, k = 0; perf.now = () => (k++ % 2 ? NaN : mono); Date.now = () => wall;
+        C.privacyNow(); const e0 = C.privacyNow();
+        for (let i = 0; i < 100; i++) { mono += 1000; wall += 1000; C.privacyNow(); }
+        const e1 = C.privacyNow();
+        perf.now = harnessPerf; Date.now = harnessDate;
+        ok("CLK4e performance.now() NaN on every other read: 100 × 1 s reads advance 100 s (no interval counted twice)", Math.abs((e1 - e0) - 100_000) <= 1000, `+${e1 - e0} ms`);
+      }
+      {
+        const rnd2 = (seed: number) => { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) | 0; let t2 = Math.imul(a ^ (a >>> 15), 1 | a); t2 = (t2 + Math.imul(t2 ^ (t2 >>> 7), 61 | t2)) ^ t2; return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296; }; };
+        const junk = [NaN, Infinity, -Infinity, undefined];
+        let bad = 0, n = 0;
+        for (let trial = 0; trial < 200; trial++) {
+          const u = rnd2(7000 + trial); const C: any = await import(cur(`fz${trial}-`));
+          let t = 1e6, w = 1.7e12;
+          perf.now = () => (u() < 0.05 ? junk[(u() * 4) | 0] : (t += (u() - 0.1) * 5000));
+          Date.now = () => (u() < 0.05 ? junk[(u() * 4) | 0] : (w += (u() - 0.3) * 1e7));
+          let prev = -Infinity;
+          for (let i = 0; i < 2000; i++) { const v = C.privacyNow(); n++; if (!Number.isFinite(v) || v < prev) bad++; prev = v; }
+        }
+        perf.now = harnessPerf; Date.now = harnessDate;
+        ok("CLK4d random garbage from both clocks never makes the privacy clock go backwards or non-finite", bad === 0, `${bad} of ${n} reads`);
+      }
+    }
+    {
+      const C: any = await import(cur("v"));
+      const v = { SLEEP_EXCESS_MS: C.SLEEP_EXCESS_MS, ROLLBACK_STEP_MS: C.ROLLBACK_STEP_MS, ROLLBACK_PENALTY_MS: C.ROLLBACK_PENALTY_MS, CLOCK_BACK_ROWS_MAX: C.CLOCK_BACK_ROWS_MAX };
+      ok("CLK5 the privacy clock's constants are the approved values", JSON.stringify(v) === JSON.stringify({ SLEEP_EXCESS_MS: 1000, ROLLBACK_STEP_MS: 1000, ROLLBACK_PENALTY_MS: 3_600_000, CLOCK_BACK_ROWS_MAX: 5 }), JSON.stringify(v));
     }
   }
 }

@@ -305,11 +305,21 @@ poi7m7-227888 `draw-cmp … latch=1 parked=1 hu=0` 282 s after `carplay-disconne
 **⏱ The privacy clock (Codex delta review 4 — the clock class, closed).** Every in-process privacy window — the Android
 head-unit TTL, driving-evidence freshness (`drivingEvidenceFresh`), the 90 s hysteresis, the re-arm proof's windows, the
 hydrate backoff, the save throttles — is measured on `src/privacyClock.ts` `privacyNow()`: elapsed time that never runs
-backwards, = max(Σ monotonic `performance.now()` steps, Σ forward wall-clock steps) — the two totals kept separately,
-never maxed per call (round 11: per-call max ran 1.70× fast at 0.3 ms call spacing; `park_rearm_test` CLK1) — so a sleep
-still counts even if the monotonic clock pauses (HYPOTHESIS per platform, unmeasured); a wall clock that jumps forward
-ages everything, and one set BACK by more than a second adds an hour, closing every window, and logs a bounded
-`priv-clock-back by=<s> n=<k>` row (5 per process; CLK2). An expiry is therefore irreversible until a NEW event
+backwards. Each read advances it by the monotonic `performance.now()` step plus every SLEEP the wall clock saw and the
+monotonic clock did not: the wall's excess over the monotonic step (Δwall − Δmono) is CARRIED across reads, floored at
+zero, and counted in full once it passes 1 s (`SLEEP_EXCESS_MS`). So a sleep counts even if the monotonic clock pauses
+(HYPOTHESIS per platform, unmeasured), a string of sub-second sleeps adds up (CLK3b), and a rollback hidden inside an
+AWAKE gap — the clock set back by R during a gap longer than R, so no read ever sees a backward step — is forgotten
+instead of swallowing the next R of sleep (round 12, the lead's C3/C4: round 11's max(Σ monotonic, Σ forward wall)
+carried it as a debt for the life of the process, a later 10 min sleep counted 0 s, a lost Android Auto attachment
+stayed alive and a walk was shared live for 89 s — a phone-only park's jog for 120 s; `park_rearm_test` CLK3, HF11,
+HF12, with HF11-0 / HF12-0 / CLK3-0 = d72b0ae8's clock). The carry telescopes — it is the wall-minus-monotonic offset
+now less its lowest value since the last count — so the clocks' different granularities cannot drift it (round 11:
+summing max(Δmono, Δwall) per read ran 1.70× fast at 0.3 ms spacing, and at 1.25× a real car's re-arm could never prove;
+CLK1, CLK1b ≤ 1 %). A read with no usable monotonic step (missing, throwing, NaN, behind its last reading) advances by
+the wall's forward step alone (CLK4). A wall clock that jumps forward more than a second ages everything, and one set
+BACK by more than a second adds an hour, closing every window, and logs a bounded `priv-clock-back by=<s> n=<k>` row
+(5 per process; CLK2). An expiry is therefore irreversible until a NEW event
 (an assertion, a vehicular fix under the latch rules, a proven re-arm). The wall clock is kept only for what is written
 to disk (the spot's `t`, `LAST_DRIVING_KEY`), converted once at hydrate with future-dated or too-old stamps restoring
 nothing. The car-feed settle rule uses plain monotonic time (`carFeedOwner.settleNow`, and map.tsx's `subAt`), whose
@@ -345,10 +355,13 @@ one 26 km/h walking fix shared the walk and wrote it as the spot (`park_rearm_te
    only, and its observation is restored from the spot's persisted `t`.
 8. JS cannot guarantee native GPS teardown (expo-location start/remove race) — the build-80 native item below.
 9. Not verified on a device or a head unit (below).
-10. A device-clock ROLLBACK that happens while the device sleeps AND `performance.now()` is paused: both clocks then
-    agree on a short interval, and a lost Android Auto attachment can look alive for the rest of its 90 s — a walking
-    fix shared as "attached" (`park_rearm_test` KF1a pins it; KF1b bounds it: the revival ends within the remaining
-    counted 90 s — 20 s in the model). JS cannot see it with two clocks that both lie. Build 80 (native): expose a
+10. A device-clock ROLLBACK and a sleep with `performance.now()` paused INSIDE THE SAME interval between two
+    privacy-clock reads (the rollback during the sleep, or while the app is suspended around it): that interval's two
+    steps cancel up to the rollback's size of the sleep, both clocks agree on a short interval, and a lost Android Auto
+    attachment can look alive for the rest of its 90 s — a walking fix shared as "attached" (`park_rearm_test` KF1a
+    pins it; KF1b bounds it: the revival ends within the remaining counted 90 s — 20 s in the model). JS cannot see it
+    with two clocks that both lie. (A rollback in one interval and a sleep in a LATER one is NOT this residual: closed
+    in round 12 — CLK3, HF11, HF12.) Build 80 (native): expose a
     boot-time clock that counts sleep — Android `SystemClock.elapsedRealtime()` (CLOCK_BOOTTIME), iOS
     `mach_continuous_time()` — and use it in `privacyNow()`. Trigger HYPOTHESIS (whether performance.now pauses in sleep
     on each platform is unmeasured).

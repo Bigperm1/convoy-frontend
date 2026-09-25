@@ -52,6 +52,11 @@
 //   H  a witness restored from disk (hydrate, hu=1) is protected the same way; H2 with a driving stamp < 90 s old
 //      too (no latch is restored over a witness — negative control on the pre-fix module); H3 without a witness the
 //      restore is unchanged.
+//   HF a relaunch whose storage read FAILS (rejects once; rejects 3× then succeeds; a record that does not parse, twice;
+//      a read that hangs): walking fixes with 26 / 29 km/h readings are never shared live and write nothing, the saved
+//      witness is adopted once a retry reads it (>= 5 s apart), the record on disk is byte-identical, and a bounded
+//      `priv-hydrate` row names each outcome (HF0 = 0255f36a sharing the walk live and overwriting the record); HF5 the
+//      retry backoff; HF6 a hung read settling after the retry changes nothing.
 //   W  the drive's latch still inside its 90 s window at the disconnect: a 12 km/h and a 26 km/h fix share the car
 //      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
@@ -67,13 +72,16 @@ const EMPTY = js(`const f = () => {}; export const Platform = { OS: "ios", selec
   export const useEffect = f, useState = (v) => [v, f], useRef = (v) => ({ current: v }), useCallback = (x) => x;`);
 // AsyncStorage reads come from globalThis.__store (scenario H); writes are recorded there too.
 // getItem waits for globalThis.__delay when a test sets it (a slow storage read at a relaunch — section Y).
+// A test may replace reads outright with globalThis.__getItem(key, store) (a rejected, corrupt or hung read — section HF).
 const STORAGE = js(`const S = () => (globalThis.__store ??= {});
   const later = (v) => (globalThis.__delay ? globalThis.__delay.then(() => v()) : Promise.resolve(v()));
-  export default { getItem: (k) => later(() => S()[k] ?? null), setItem: (k, v) => { S()[k] = v; return Promise.resolve(); },
+  export default { getItem: (k) => (globalThis.__getItem ? globalThis.__getItem(k, S()) : later(() => S()[k] ?? null)), setItem: (k, v) => { S()[k] = v; return Promise.resolve(); },
     removeItem: (k) => { delete S()[k]; return Promise.resolve(); }, multiRemove: () => Promise.resolve() };`);
+const ROWS = js(`export const logEventReliable = (r) => { (globalThis.__rows ??= []).push(String(r)); }; export const logEvent = logEventReliable;`);
 registerHooks({
   resolve(s: string, c: any, n: any) {
     if (s === "@react-native-async-storage/async-storage") return { url: STORAGE, shortCircuit: true };
+    if (s === "./crashBreadcrumb") return { url: ROWS, shortCircuit: true };   // rows land in globalThis.__rows
     if (s === "react" || s === "react-native" || s.startsWith("expo-")) return { url: EMPTY, shortCircuit: true };
     // The pre-fix copy lives in a temp dir: its relative imports are the worktree's modules.
     if (s === "./parkRearm.r3.ts" || s === "./parkRearm.r4.ts") return n(s, c);   // an earlier round's rule, beside its locationPrivacy copy
@@ -773,6 +781,95 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
       r.hu === false && (r.after as any).lat !== SPOT.lat, JSON.stringify({ hu: r.hu, latch: r.latch, after: r.after }));
     rmSync(d, { recursive: true, force: true });
   } else console.log("  skip Y0 negative control: 732c8a6e unavailable");
+}
+
+// ── HF · a FAILED storage read at a relaunch is not "hydrated" (Codex final review, 2026-09-25) ─────────────────────
+// Trigger (HYPOTHESIS): iOS relaunching the app in the background before the first unlock after a reboot, when the
+// data-protected AsyncStorage manifest cannot be read. The app launch calls hydrate; then the phone, on foot, delivers
+// 1 Hz walking fixes (1.4 m/s) with a 26 and a 29 km/h reading at +3/+4 s and again at +30/+31 s, and 12 km/h at +5 s.
+{
+  const SPOT_KEY = "convoy.lastCarSpot.v1";
+  const tick = () => new Promise<void>((r) => setImmediate(r));
+  const walkAfterFailedRead = async (lpP: Promise<LP | null>, getItem: (k: string, store: Record<string, string>) => Promise<string | null>) => {
+    clock = utc(23, 10, 0);
+    const lp = await lpP; if (!lp) return null;
+    const record = JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 15 * 60 * S, att: 0, mv: 0, hu: 1 });
+    LOC_V.__store = { [SPOT_KEY]: record }; LOC_V.__rows = []; LOC_V.__getItem = getItem;
+    void lp.hydrateLocationPrivacy();                               // the app launch
+    await tick();
+    const live: string[] = []; let adoptedAt: number | null = null;
+    for (let i = 1; i <= 60; i++) {
+      clock += S;
+      const v = i === 3 || i === 30 ? kmh(26) : i === 4 || i === 31 ? kmh(29) : i === 5 ? kmh(12) : 1.4;
+      const p = north(SPOT, 30 + 1.4 * i);
+      lp.noteFix(p.lat, p.lng, v, null);
+      await tick(); await tick();
+      const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+      if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`+${i}s@${(v * 3.6).toFixed(0)}`);
+      if (adoptedAt == null && lp.parkEndedByHeadUnit()) adoptedAt = i;
+    }
+    const out = { live, adoptedAt, hu: lp.parkEndedByHeadUnit(), latch: lp.privacyDebug().latch, spot: lp.carSpot(), diskIntact: LOC_V.__store[SPOT_KEY] === record, rows: [...(LOC_V.__rows as string[])] };
+    LOC_V.__getItem = undefined;
+    return out;
+  };
+  // Storage fault models: `n` = which attempt this is (counted on the spot key's read).
+  const faulty = (fault: (n: number) => "reject" | "garbage" | "hang" | "ok") => {
+    let n = 0;
+    return (k: string, store: Record<string, string>) => {
+      const attempt = k === SPOT_KEY ? ++n : n;
+      const f = fault(attempt);
+      if (f === "reject") return Promise.reject(new Error("storage unavailable"));
+      if (f === "hang") return new Promise<string | null>(() => {});
+      if (f === "garbage" && k === SPOT_KEY) return Promise.resolve('{"lat":49.17293');
+      return Promise.resolve(store[k] ?? null);
+    };
+  };
+  const cases: [string, (n: number) => "reject" | "garbage" | "hang" | "ok", RegExp][] = [
+    ["a read that rejects once", (n) => (n <= 1 ? "reject" : "ok"), /priv-hydrate ok=0 why=read[\s\S]*priv-hydrate ok=1 why=spot/],
+    ["a read that rejects 3 times, then succeeds", (n) => (n <= 3 ? "reject" : "ok"), /(priv-hydrate ok=0 why=read[\s\S]*){3}priv-hydrate ok=1 why=spot/],
+    ["a saved record that does not parse, twice", (n) => (n <= 2 ? "garbage" : "ok"), /priv-hydrate ok=0 why=parse[\s\S]*priv-hydrate ok=1 why=spot/],
+    ["a read that hangs", (n) => (n <= 1 ? "hang" : "ok"), /priv-hydrate ok=1 why=spot/],
+  ];
+  {
+    // NEGATIVE CONTROL: 0255f36a (the round-5b commit) on the reject-once case.
+    let base: string | null = null;
+    try { base = execFileSync("git", ["show", "0255f36a:frontend/src/locationPrivacy.ts"], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+    if (base) {
+      const d = mkdtempSync(join(tmpdir(), "park-rearm-hf0-")); const f = join(d, "locationPrivacy.base.ts"); writeFileSync(f, base);
+      LOC_V.__store = {};
+      const r = await walkAfterFailedRead(import(pathToFileURL(f).href + `?i=${++inst}`), faulty((n) => (n <= 1 ? "reject" : "ok")));
+      ok("HF0 NEGATIVE CONTROL (0255f36a): a read that rejects once → the saved witness is never adopted, the walk is shared LIVE and the record on disk is overwritten",
+        !!r && r.hu === false && r.live.length > 0 && r.diskIntact === false, JSON.stringify(r && { live: r.live, hu: r.hu, disk: r.diskIntact }));
+      rmSync(d, { recursive: true, force: true });
+    } else console.log("  skip HF0 negative control: 0255f36a unavailable");
+  }
+  for (const [i, [name, fault, rowsRe]] of cases.entries()) {
+    const r = await walkAfterFailedRead(fresh(false), faulty(fault));
+    ok(`HF${i + 1} ${name}: never shared live, the saved witness adopted by a retry, the record on disk intact, the rows name it`,
+      !!r && r.live.length === 0 && r.hu === true && r.latch === false && r.adoptedAt != null && r.spot?.lat === SPOT.lat && r.spot?.lng === SPOT.lng
+        && r.diskIntact && rowsRe.test(r.rows.join("\n")) && r.rows.length <= 5,
+      JSON.stringify(r && { live: r.live, adoptedAt: r.adoptedAt, hu: r.hu, latch: r.latch, disk: r.diskIntact, rows: r.rows }));
+  }
+  {
+    // HF6 a read that hung and settles AFTER a retry succeeded applies nothing and reports nothing (it is "late").
+    let releaseHung: (v: string | null) => void = () => {};
+    const hung = new Promise<string | null>((r) => { releaseHung = r; });
+    let n = 0;
+    const r = await walkAfterFailedRead(fresh(false), (k, store) => { if (k === SPOT_KEY) n++; return n <= 1 ? hung : Promise.resolve(store[k] ?? null); });
+    const lpState = r && { hu: r.hu, latch: r.latch, spot: r.spot, rows: r.rows.length };
+    releaseHung(JSON.stringify({ lat: SPOT.lat + 0.01, lng: SPOT.lng, t: clock - 60 * S, att: 0, mv: 0, hu: 1 }));
+    await tick(); await tick(); await tick();
+    const rowsAfter = (LOC_V.__rows as string[]).length;
+    ok("HF6 a read that hung and settles after a retry succeeded changes nothing (no second adoption, no row)", !!r && r.hu === true && rowsAfter === lpState!.rows && r.rows.filter((x) => x.includes("ok=1")).length === 1,
+      JSON.stringify({ before: lpState, rowsAfter }));
+  }
+  {
+    // HF5 BACKOFF: a read that always rejects — attempts are >= 5 s apart (≤ 13 in 60 s of 1 Hz fixes), rows stop at 5.
+    let reads = 0;
+    const r = await walkAfterFailedRead(fresh(false), (k) => { if (k === SPOT_KEY) reads++; return Promise.reject(new Error("storage unavailable")); });
+    ok("HF5 a read that never succeeds: fail-closed for 60 s, retried at most every 5 s, at most 5 rows", !!r && r.live.length === 0 && r.latch === false && r.spot == null && r.diskIntact && reads >= 2 && reads <= 13 && r.rows.length === 5,
+      JSON.stringify(r && { live: r.live, reads, rows: r.rows.length, spot: r.spot }));
+  }
 }
 
 // Round 3 (732c8a6e) as a pair — its locationPrivacy.ts AND its parkRearm.ts — for the negative controls below.

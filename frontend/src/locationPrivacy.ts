@@ -31,6 +31,7 @@ import { spotAdoptVerdict, spotHeadingFor, headingTrackStep, HEADING_TRACK_EMPTY
 import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 import { createParkRearm } from "./parkRearm";
+import { logEventReliable } from "./crashBreadcrumb";
 
 // Same key map.tsx has always used, so an existing install keeps its car spot and there
 // is no migration to get wrong.
@@ -155,9 +156,12 @@ let _spotDrop: string | null = null;   // why hydrate refused the persisted spot
 let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
 // Hydration is SINGLE-FLIGHT (Codex 3rd pass, 2026-09-25): every caller awaits the same read, and until it has
-// resolved `_hydrateDone` is false and noteFix trusts no fix on its own (see the head of noteFix).
+// SUCCEEDED `_hydrateDone` is false and noteFix trusts no fix on its own (see the head of noteFix). A failed read is
+// retried, never counted as done (Codex final review, 2026-09-25) — see hydrateLocationPrivacy.
 let _hydrating: Promise<void> | null = null;
 let _hydrateDone = false;
+let _hydrateAt = 0;       // when the latest attempt started: the retry backoff (no timer — the next caller retries)
+let _hydrateRows = 0;     // `priv-hydrate` rows this process (bounded)
 let _drivingLatched = false;
 // True when the latch was RESTORED from disk on hydrate rather than earned by a real
 // >= 15 km/h fix in this process. A provisional latch cannot refresh _lastDrivingAt —
@@ -191,18 +195,54 @@ export function subscribeHeadUnit(fn: (attached: boolean) => void): () => void {
   return () => { _huListeners.delete(fn); };
 }
 
-/** Hydrate the persisted car spot + driving stamp. Single-flight: every caller gets the same promise, and it resolves
- * only once the persisted park (and its witness) is known. Safe to call anywhere. */
+/** Hydrate the persisted car spot + driving stamp. Single-flight: every caller during an attempt gets the same promise.
+ * It resolves when that attempt settles; `_hydrateDone` turns true only when the saved park (and its witness) was
+ * actually READ. Safe to call anywhere.
+ *
+ * ── A FAILED READ IS NOT "DONE" (Codex final review, 2026-09-25) ───────────────────────────────────────────────────
+ * Jeff: "it should not follow me when i discconect from car play... fix it and lock it." `_hydrateOnce` used to swallow
+ * a rejected storage read and `.finally` marked hydration done anyway — for the life of the process: the saved hu=1
+ * witness was never adopted, the next >= 15 km/h walking fix armed the ordinary latch, the walk was shared LIVE and the
+ * car spot on disk was overwritten (review-priv4/hydrate_attack.mts, reproduced on the real module). The plausible
+ * trigger is HYPOTHESIS: iOS relaunching the app in the background before the first unlock after a reboot, when the
+ * data-protected AsyncStorage manifest cannot be read (RNCAsyncStorage `_ensureSetup`). Now: success = both keys READ
+ * (a missing key is a successful read of "nothing") and a present spot record that parses. A rejected read, a present
+ * record that is not JSON, or an exception while adopting it is a FAILURE: nothing is marked done, so noteFix stays
+ * in its pre-hydration state (no latch armed, no spot written and nothing shared live on fix evidence — a head unit
+ * asserted now still counts), and the next caller retries — no sooner than 5 s after the previous attempt started,
+ * whether that one failed or is still hanging (no timer: noteFix and every caller ask). Every outcome writes a
+ * bounded `priv-hydrate ok=0|1 why=read|parse|apply|spot|empty` row (5 per process). While not hydrated the only
+ * writes of the saved record are a head unit's (a newer drive, or its own witnessed disconnect) — never a walk's.
+ * Gate: tools/sim-qc/park_rearm_test.mts HF (reject once, reject 3× then succeed, a record that does not parse, a
+ * read that hangs; HF0 = 0255f36a sharing the walk live and overwriting the record). */
 export function hydrateLocationPrivacy(): Promise<void> {
-  if (!_hydrating) _hydrating = _hydrateOnce().finally(() => { _hydrateDone = true; });
+  if (_hydrateDone) return Promise.resolve();   // (not the attempt: a newer one may still be hanging)
+  const now = Date.now();
+  // One attempt per 5 s: callers inside the window share it — in flight (single flight) or failed (the backoff: they
+  // proceed un-hydrated, i.e. fail-closed). After the window the next caller starts a new one, whether the last one
+  // failed or is still hanging.
+  if (_hydrating && now >= _hydrateAt && now - _hydrateAt < 5_000) return _hydrating;
+  _hydrateAt = now;
+  _hydrating = _hydrateOnce().then((why) => {
+    const ok = why === "spot" || why === "empty" || why === "late";
+    if (ok) _hydrateDone = true;
+    if (why !== "late" && _hydrateRows < 5) { _hydrateRows += 1; try { logEventReliable(`priv-hydrate ok=${ok ? 1 : 0} why=${why}`); } catch {} }
+  });
   return _hydrating;
 }
-async function _hydrateOnce(): Promise<void> {
+/** One attempt. Returns "spot" / "empty" (or "late": a newer attempt already applied) on success, "read" / "parse" /
+ * "apply" on failure — never throws. */
+async function _hydrateOnce(): Promise<string> {
+  let spotRaw: string | null = null, drivingRaw: string | null = null;
   try {
-    const [spotRaw, drivingRaw] = await Promise.all([
+    [spotRaw, drivingRaw] = await Promise.all([
       AsyncStorage.getItem(CAR_SPOT_KEY),
       AsyncStorage.getItem(LAST_DRIVING_KEY),
     ]);
+  } catch { return "read"; }
+  if (_hydrateDone) return "late";   // an attempt that hung past its retry settled late: the newer one already applied
+  if (spotRaw) { try { JSON.parse(spotRaw); } catch { return "parse"; } }
+  try {
     // Never clobber a fresher in-memory value written while this was in flight.
     // 🔒 NAV-LOCK begin priv-hydrate-spot-adopt — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     if (spotRaw && !_carSpot) {
@@ -287,7 +327,8 @@ async function _hydrateOnce(): Promise<void> {
       _latchProvisional = true;
     }
     // 🔒 NAV-LOCK end priv-hydrate-latch-restore
-  } catch {}
+  } catch { return "apply"; }
+  return spotRaw ? "spot" : "empty";
 }
 
 /** Head unit attached/detached, per SOURCE (see _huSources): carPlayBootstrap ('carplay', iOS), map.tsx ('map',
@@ -433,8 +474,8 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // Jeff: "it should not follow me when i discconect from car play... fix it and lock it." Reproduced on the real module:
   // at a relaunch, two >= 15 km/h fixes that land before storage resolves first arm the latch, then write `_carSpot` —
   // and hydrate's adopt (`if (spotRaw && !_carSpot)`) then skips the saved hu=1 witness, so a later 12 km/h walking
-  // fix was shared live. Until hydration resolves, a fix may not arm the latch, write the spot or clear anything; it
-  // only starts the read. A head unit asserted NOW still counts (carAttached(): its fixes are the car's). The latch
+  // fix was shared live. Until hydration has SUCCEEDED (a failed read is retried, never counted as done — see
+  // hydrateLocationPrivacy), a fix may not arm the latch, write the spot or clear anything; it only starts the read. A head unit asserted NOW still counts (carAttached(): its fixes are the car's). The latch
   // cannot be armed here, so shareablePosition's movingNow cannot share live on fix evidence either.
   // Gate: tools/sim-qc/park_rearm_test.mts Y (1, 2 and 5 fixes before a delayed read).
   if (!_hydrateDone) {

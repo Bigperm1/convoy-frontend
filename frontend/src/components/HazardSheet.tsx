@@ -2,8 +2,8 @@
 // "WHERE IS THE HAZARDS BUTTON ON THE PHONE?" — the panel had shipped for CarPlay / Android Auto only, and the
 // phone's own Police/Hazard drawer had been dormant since the police FAB became Crew on 07-23: reporting was voice-only).
 //
-// FOUR SURFACES: the tiles ARE the head unit's (src/carplay/hazardPanel.ts HAZARD_TILES, the report kinds only —
-// the phone keeps its compass FAB, so no compass tile here), the art is the same direction-B Apple-symbol glyph
+// FOUR SURFACES: the tiles ARE the head unit's (src/carplay/hazardPanel.ts HAZARD_TILES — all five, the Compass tile
+// included since 2026-09-25, when the phone's compass FAB became the 2D/3D button), the art is the same direction-B Apple-symbol glyph
 // set in the driver's metal (assets/carplay-glyphs/report), the shape is the Hairpin square (DESIGN.md § Shape:
 // radius ≈ 28 % of height). A tile reports at the car's position from 5 s ago through map.tsx's reportHazard —
 // the same POST /hazards the voice intents use — and closes the panel; the confirmation is the ReportToast pill.
@@ -16,8 +16,8 @@
 // backdrop — no dimming, the map stays readable, like the weather forecast card).
 //
 // LOOK = the weather forecast card (Jeff: "Make the panel have the same background opacity as the weather panel"):
-// the same translucent floor rgba(24,24,28,0.66), the same hairline, the same GlassFill tinted by hudTint(), the same
-// pop (opacity + 12 pt rise + 0.94 scale). WeatherHUD.tsx styles.forecastCard is the reference — change both or neither.
+// the shared floor in src/panelFloor.ts, no GlassFill over it, and NO entrance animation (see the note below). Spec:
+// HAZARDS.md.
 import React, { useEffect, useRef, useState } from "react";
 import { Image, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { PANEL_FLOOR, PANEL_BORDER, PANEL_RADIUS } from "../panelFloor";
@@ -139,7 +139,7 @@ export default function HazardSheet({ visible, onClose, onReport, onCompass, dis
   // rim (NeonPin's tone table), so the five faces read as one family with the pins.
   const neonFor = (kind: HazardKind | null): string => (kind ? hazardPaint(kind).bright : NEON_TONE[metal].rim);
   // Above the stack — unless that would push the card into the top bar (short phone, Drive drawer up): then it stops
-  // TOP_CLEAR from the top and may touch the compass FAB, never the Hazards button below it.
+  // TOP_CLEAR from the top and may overlap the top of the FAB stack.
   const bottom = Math.min(anchorBottom + GAP_ABOVE_STACK, Math.max(0, winH - TOP_CLEAR - cardH));
   return (
     <Modal transparent visible animationType="none" onRequestClose={() => close("back")} statusBarTranslucent hardwareAccelerated>

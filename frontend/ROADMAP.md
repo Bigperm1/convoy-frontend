@@ -1137,7 +1137,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   re-baked. Gates: `hazard_panel_test` D1–D6 (phone), 58/58 sim-qc, typecheck, eslint 0, trap-check, doc-check, nav-lock PASS (no
   relock). Sim receipt: the sheet rendered with the diamond glyphs (iPhone 16 Pro, bundle-swapped). Owed: a `hazard-panel pick
   surf=phone` row from a real phone.
-- **✅ PUBLISHED in OTA-BY `bfb8316a` (code `93a0ce41`, 2026-09-24 22:52 PDT, Jeff: "ship the fold fix"; KEY_PRESENT=1 iOS + Android) — THE
+- **✅ PUBLISHED in OTA-BY `bfb8316a` (code `93a0ce41`, 2026-09-24 22:29 PDT, Jeff: "ship the fold fix"; KEY_PRESENT=1 iOS + Android) — THE
   FOLD (John Mungai's 18:57 CarPlay photo, "the car under the route line"; built `2cd2521a` on `claude/ribbon-fold-0924`, cherry-picked as
   `7455ee86`, relocked ×2 under his words, 42 approvals).** His reroute went west 11 m, right onto King George, U-turned 239 m up and came
   back SOUTH past the same corner; he turned left at the corner straight onto the return leg. VERIFIED from his crumbs + a replay of the
@@ -1152,7 +1152,7 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   route, same drive, same binary: today's bundle drew the return leg under the car and recovered 50 s later like the field, the fix cut it
   at the nose (`scratchpad/sim-fold/fold-before-after.png`). Owed: Codex (quota → 23:06 PDT), the field receipt (`ribbon-trim` rows on
   the next fold). Memory `ribbon-fold-2026-09-24`.
-- **✅ PUBLISHED in OTA-BX `dbc3a19f` (code `d2b9d132`, 2026-09-24 22:35 PDT, Jeff: "build the hazard panel with the apple glyphs i
+- **✅ PUBLISHED in OTA-BX `dbc3a19f` (code `d2b9d132`, 2026-09-24 22:22 PDT, Jeff: "build the hazard panel with the apple glyphs i
   mentioned. then do the ota push with everything"; KEY_PRESENT=1 iOS + Android) — THE REPORT PANEL on CarPlay + Android Auto.** The
   fourth map button (was the compass — poll Yes 1 / No 0 / Never 3, 21 head-unit taps in 14 days) is now Hazards: one grid template
   (`src/carplay/hazardPanel.ts`, pure) — Police / Crash / Hazard / Traffic / Compass, direction-B Apple-symbol glyphs with a P in the

@@ -153,9 +153,11 @@ Flow: `onMapButtonPressed`/`onBarButtonPressed` → `handleCarMapButton`/`handle
 Android Auto mirrors the same ids (`aaMapButtons`); its Report grid is `createTemplate('grid')` + `pushTemplate`, the
 press arrives as `gridButtonPressed` with our template id, and `backButtonPressed` pops it (androidx tints the tile
 art white until a native tinted-icon path ships).
-The phone has the same panel (2026-09-24, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"): a Hazards FAB on TOP (Hazards · 2D/3D · Crew — the head unit's column minus the mic; the compass is a tile inside the panel on the phone too, 2026-09-25); the Report panel floats ABOVE that stack, centred, styled like the weather forecast card. The pins are the same baked category-coloured teardrops on every surface (Police = EV teal, Crash = Hospital red, Hazard = Fast Food amber, Traffic = Gas orange, the Apple-symbol glyph on the head — `src/hazardPinImages.ts`, `HazardMarker` draws the identical PNG on the head units)
-opens `src/components/HazardSheet.tsx` — the same four report tiles from `hazardPanel.ts` in the driver's metal; the phone
-keeps its compass FAB, so no compass tile there. A tile reports through `map.tsx reportHazard` (the voice intents' path).
+The phone has the same panel (2026-09-24, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"): a Hazards FAB on TOP (Hazards · 2D/3D · Crew — the head unit's column minus the mic; the compass is a tile inside the panel on the phone too, 2026-09-25); the Report panel (`src/components/HazardSheet.tsx`) floats ABOVE that stack, centred, on the weather forecast card's floor, with
+the same five tiles as the head units (`hazardPanel.ts` `HAZARD_TILES`, the Compass tile included). A tile reports through
+`map.tsx reportHazard` (the voice intents' path). The pins are the same baked category-coloured teardrops on every surface
+(Police = EV teal, Crash = Hospital red, Hazard = Fast Food amber, Traffic = Gas orange, the Apple-symbol glyph on the head —
+`src/hazardPinImages.ts`; `HazardMarker` draws the identical PNG on the head units). Full spec: `HAZARDS.md`.
 
 **Warm vs cold.** With the phone app open, `ConvoyCarPlay` intercepts some ids first and
 calls live refs *directly* (never the bus) — don't hunt for a bus event on the warm path.

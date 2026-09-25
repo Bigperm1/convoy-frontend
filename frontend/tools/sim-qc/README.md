@@ -345,3 +345,19 @@ Gym, a 2+ letter prefix while typing) with Home/Work/custom-newest precedence, t
 RECTANGLE (Google caps a circle at 50 km) that holds Whistler and Hope and drops Kamloops and Seattle from Vancouver
 (those come back through the biased fallback request), and the crumb text is one quote-free line. Field receipts:
 `car-search text= norm= n= saved= ms=` (one per typed query) and `car-search-pick idx= label= src=saved|places`.
+
+## Hazard gates (pure + source) — 2026-09-24 / 25
+
+```bash
+node --experimental-strip-types tools/sim-qc/hazard_panel_test.mts
+node --experimental-strip-types tools/sim-qc/hazard_ahead_test.mts
+node --experimental-strip-types tools/sim-qc/panel_floor_test.mts
+```
+- `hazard_panel_test` — the Report panel on all three surfaces: tiles vs the backend's kinds, button arrays per head unit,
+  four metals per glyph, the phone panel's layout / auto-close / no-animation / no-BackHandler rules, the pins, the card,
+  the pill, the still-there prompt, the crew-return wiring.
+- `hazard_ahead_test` — Scout's hazard-ahead call (`src/hazardAhead.ts`): 45 s lead clamped 1–2 km, ±50° cone on the fix's
+  own course, km / mi wording.
+- `panel_floor_test` — one floor (`src/panelFloor.ts`) for the weather card, the Report panel, the pin card and the category
+  drop-down / More panel.
+Spec: `HAZARDS.md` §11.

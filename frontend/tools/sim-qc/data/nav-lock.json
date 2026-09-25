@@ -326,6 +326,14 @@
       "changes": [
         "src/ConvoyMapbox.tsx#mbx-pushcam-glide-noselead region 35b985a3f78b → 20d6db8f2977"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: build the hazard panel with the apple glyphs i mentioned. then do the ota push with everything — the compass map button becomes Hazards on both head units (CAR_MAP_BUTTON_CONFIG, AA_MAP_BUTTONS); the compass rides inside the Report panel as a tile",
+      "changes": [
+        "src/carplay/carActions.ts:CAR_MAP_BUTTON_CONFIG { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS }, ], } → { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, ], }",
+        "src/carplay/carActions.ts:AA_MAP_BUTTONS [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT }, ] → [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, ]"
+      ]
     }
   ],
   "files": {
@@ -856,11 +864,11 @@
         "AA_NAV_ID": "'convoy-aa-nav'",
         "AA_SEARCH_MAX_ROWS": "6",
         "WHERE_TO_MAX": "30",
-        "CAR_MAP_BUTTON_CONFIG": "{ mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS }, ], }",
+        "CAR_MAP_BUTTON_CONFIG": "{ mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, ], }",
         "AA_PERSISTENT": "'persistent' as const",
         "AA_ACTION_STRIP": "[ { id: 'car-end', title: 'End', visibility: AA_PERSISTENT }, { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT }, { id: 'car-view', icon: CAR_ICON_VIEW_2D, visibility: AA_PERSISTENT }, { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT }, ]",
         "AA_ALLOW_LOCATION_ID": "'car-allow-location'",
-        "AA_MAP_BUTTONS": "[ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT }, ]",
+        "AA_MAP_BUTTONS": "[ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, ]",
         "TAP_LABEL": "{ 'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms', 'car-view': 'View', 'car-mic': 'Scout', 'car-search': 'Search', 'car-end': 'End', 'car-zoom-in': 'Zoom in', 'car-zoom-out': 'Zoom out', [AA_ALLOW_LOCATION_ID]: CAR_ALLOW_LOCATION_TITLE, }",
         "TAP_DEDUPE_MS": "50"
       },

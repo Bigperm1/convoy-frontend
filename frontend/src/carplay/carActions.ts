@@ -36,7 +36,8 @@ import { NativeModules, Platform } from 'react-native';
 import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGesture } from './carStore';
 import { toggleMapView2D, setMapView2D, isMapView2DLocked } from '../mapViewMode';
 import { getDepartureBearing, departureBearingSource, orderRoutesForward, routeInitialBearing } from '../departureBearing';
-import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_COMPASS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, CAR_ICON_VIEW_3D, carIcon } from './carButtonIcons';
+import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_HAZARDS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, CAR_ICON_VIEW_3D, carIcon } from './carButtonIcons';
+import { HAZARD_BUTTON_ID, HAZARD_BUTTON_GLYPH, HAZARD_TEMPLATE_ID, HAZARD_PANEL_TITLE, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA, type HazardKind } from './hazardPanel';
 import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
@@ -189,28 +190,136 @@ function pos5SecAgo(): { lat: number; lng: number } | null {
 // can't tell a car report from a phone report. No client-side cooldown (phone
 // has none either); id-dedupe on the receive side absorbs our own echo.
 let _reportInFlight = false;
-export async function reportPoliceFromCar(): Promise<void> {
+export function reportPoliceFromCar(): Promise<void> { return reportHazardFromCar('police', 'Police reported ✓'); }
+/** Any of the four kinds POST /hazards accepts — the Report panel's tiles call this (2026-09-24). */
+export async function reportHazardFromCar(kind: HazardKind, done: string): Promise<void> {
   if (_reportInFlight) return; // debounce a double-tap while the POST runs
   const pos = pos5SecAgo();
   if (!pos) { toast('No GPS fix yet'); return; }
   _reportInFlight = true;
   try {
-    const { data } = await api.post('/hazards', { kind: 'police', lat: pos.lat, lng: pos.lng, note: '' });
+    const { data } = await api.post('/hazards', { kind, lat: pos.lat, lng: pos.lng, note: '' });
     // Optimistic pin on the car map (same id-dedupe the phone applies). Goes
     // through the 'service' gate — if the phone mirror is live it will echo the
     // same hazard via WS within a beat anyway.
     if (data && data.id) {
       const cur = getCarState().hazards || [];
       if (!cur.some((h) => h.id === data.id)) {
-        setCarHazards([{ id: data.id, kind: data.kind || 'police', lat: data.lat, lng: data.lng, confirms: data.confirms, disputes: data.disputes }, ...cur], 'service');
+        setCarHazards([{ id: data.id, kind: data.kind || kind, lat: data.lat, lng: data.lng, confirms: data.confirms, disputes: data.disputes }, ...cur], 'service');
       }
     }
-    toast('Police reported ✓');
+    toast(done);
   } catch {
     toast('Report failed — no connection');
   } finally {
     _reportInFlight = false;
   }
+}
+
+// ── THE REPORT PANEL (2026-09-24) ──────────────────────────────────────────────────────────────
+// Jeff: "if i was to make the compass button the hazards, when tapping it could it bring up a menu to tap?" → "can we put
+// the compass in the hazard pop up on carplay?" → "build the hazard panel with the apple glyphs i mentioned". The fourth
+// map button opens ONE grid — Police / Crash / Hazard / Traffic / Compass (src/carplay/hazardPanel.ts) — a tile pops it
+// and either reports at the car's position from 5 s ago (reportHazardFromCar, the police path generalised) or fires the
+// same `compass` gesture the old button did. CARPLAY.md rule 7: one instance per session (like _whereTo), an
+// already-pushed guard, and the way home is the tile itself (plus the native back chevron). Rule 7b: no alert, the
+// result is the pill. Android Auto: createTemplate('grid') + pushTemplate, the press arrives as `gridButtonPressed`
+// with our template id (androidx RCTTemplate.parseGridItem → EventEmitter.gridButtonPressed; templateId is stamped by
+// emit()), `backButtonPressed` for our id pops it — the search screen's exact pattern.
+let _hazards: any = null;
+let _hazardsPushed = false;
+let _aaHazardsArmed = false;
+let _hazardsDisconnectArmed = false;
+// A disconnect ends the interface-controller stack but this module flag survives it — the same trap
+// armSearchAutoDismiss guards for the keyboard: without the reset a panel that was up at unplug reads
+// "already pushed" for the rest of the process and the Hazards button is dead until the app restarts.
+function armHazardsDisconnectReset(): void {
+  if (_hazardsDisconnectArmed) return;
+  const cp = (getCarLib() || getLib())?.CarPlay;
+  if (!cp?.registerOnDisconnect) return;
+  _hazardsDisconnectArmed = true;
+  try {
+    cp.registerOnDisconnect(() => {
+      if (_hazardsPushed) { try { logEventReliable('hazard-panel op=reset why=disconnect'); } catch {} }
+      _hazardsPushed = false;
+    });
+  } catch { _hazardsDisconnectArmed = false; }
+}
+function hazardIconFor(glyph: Parameters<typeof carIcon>[0]) { return carIcon(glyph, appSkinNow()); }
+function getHazardTemplateIOS(): any | null {
+  const lib = getLib();
+  if (!lib?.GridTemplate) return null;
+  if (_hazards) return _hazards;   // ONE instance for the session — a second `new` with the same id fires both
+  try {
+    _hazards = new lib.GridTemplate({
+      id: HAZARD_TEMPLATE_ID,
+      title: HAZARD_PANEL_TITLE,
+      // Metal resolved at build, like the map buttons: a skin change shows on the next session.
+      buttons: hazardGridButtons(hazardIconFor),
+      onButtonPressed: (e: { id?: string }) => { onHazardTile(e?.id, 'carplay'); },
+      onDidAppear: () => { _hazardsPushed = true; },
+      onDidDisappear: () => { _hazardsPushed = false; },
+    });
+  } catch {
+    _hazards = null;
+  }
+  return _hazards;
+}
+function popHazardPanel(): void {
+  if (!_hazardsPushed) return;
+  _hazardsPushed = false;
+  try { getCarLib()?.CarPlay?.popTemplate?.(true); } catch {}
+  try { logEventReliable(`hazard-panel op=pop surf=${Platform.OS === 'android' ? 'aa' : 'carplay'}`); } catch {}
+}
+function onHazardTile(id: string | undefined, surf: 'carplay' | 'aa'): void {
+  const tile = hazardTile(id);
+  try { logEventReliable(`hazard-panel pick surf=${surf} id=${id ?? '?'} kind=${tile?.kind ?? (tile ? 'compass' : '?')}`); } catch {}
+  popHazardPanel();
+  if (!tile) return;
+  if (tile.kind == null) { emitCarGesture({ kind: 'compass' }); return; }
+  armPosRing();
+  void reportHazardFromCar(tile.kind, tile.done);
+}
+function armAaHazardBridge(lib: any): void {
+  if (_aaHazardsArmed) return;
+  const em = lib?.CarPlay?.emitter;
+  if (!em?.addListener) return;
+  _aaHazardsArmed = true;
+  em.addListener('gridButtonPressed', (e: any) => {
+    if (!e || e.templateId !== HAZARD_TEMPLATE_ID) return;
+    onHazardTile(String(e.id ?? ''), 'aa');
+  });
+  em.addListener('backButtonPressed', (e: any) => {
+    if (!e || e.templateId !== HAZARD_TEMPLATE_ID) return;
+    popHazardPanel();
+  });
+}
+export function openHazardPanel(): void {
+  if (_hazardsPushed) return;             // already up: a double tap must not double-push (rule 7)
+  armHazardsDisconnectReset();            // idempotent
+  const lib = getCarLib();
+  if (Platform.OS === 'android') {
+    const bridge = lib?.CarPlay?.bridge;
+    if (!bridge?.createTemplate || !bridge?.pushTemplate) { toast('Report unavailable'); return; }
+    armAaHazardBridge(lib);
+    _hazardsPushed = true;                 // claim BEFORE the create so a double tap cannot double-push
+    try {
+      // Always re-create (see openAaSearch): createTemplate rebuilds the CarScreen so the id resolves at push time,
+      // and the push lives inside the callback so a createScreen failure is a toast, not a main-thread crash.
+      bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(hazardIconFor), (res: any) => {
+        if (res?.error) { _hazardsPushed = false; try { logEvent(`hazard-panel create-failed:${res.error}`); } catch {} toast('Report unavailable'); return; }
+        if (!_hazardsPushed) return;
+        try { bridge.pushTemplate(HAZARD_TEMPLATE_ID, true); try { logEventReliable('hazard-panel op=push surf=aa'); } catch {} }
+        catch { _hazardsPushed = false; toast('Report unavailable'); }
+      });
+    } catch { _hazardsPushed = false; toast('Report unavailable'); }
+    return;
+  }
+  const t = getHazardTemplateIOS();
+  if (!t) { toast('Report unavailable'); return; }
+  _hazardsPushed = true;                   // claim BEFORE the push so a double tap cannot double-push
+  try { logEventReliable('hazard-panel op=push surf=carplay'); } catch {}
+  try { lib?.CarPlay?.pushTemplate?.(t, true); } catch { _hazardsPushed = false; toast('Report unavailable'); }
 }
 
 // ── destination search (Google Places API v1 — the New API; the legacy
@@ -1260,11 +1369,13 @@ export const CAR_MAP_BUTTON_CONFIG = {
   // pair that disappear in panning mode; zoom survives regardless, in the nav bar
   // (automaticallyHidesNavigationBar is false above).
   // Max is 4 (CPMapTemplate.h:72). This uses all four.
+  // HAZARDS REPLACED THE COMPASS (Jeff, 2026-09-24: "build the hazard panel with the apple glyphs i mentioned"): the
+  // fourth slot opens the Report grid (src/carplay/hazardPanel.ts) and the compass rides inside it as a tile.
   mapButtons: [
     { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
     { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D },
     { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW },
-    { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS },
+    { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS },
   ],
 };
 
@@ -1311,7 +1422,7 @@ export function carMapButtonConfig() {
       { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
       { id: 'car-view', image: carIcon(viewGlyph, s), focusedImage: carIcon(viewGlyph, s) },
       { id: 'car-crew', image: carIcon('crew', s), focusedImage: carIcon('crew', s) },
-      { id: 'car-compass', image: carIcon('compass', s), focusedImage: carIcon('compass', s) },
+      { id: HAZARD_BUTTON_ID, image: carIcon(HAZARD_BUTTON_GLYPH, s), focusedImage: carIcon(HAZARD_BUTTON_GLYPH, s) },
     ],
   };
 }
@@ -1409,7 +1520,7 @@ export const AA_MAP_BUTTONS = [
   { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT },
   { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT },
   { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT },
-  { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT },
+  { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT },
 ];
 
 // The AA twin. ⚠ Currently a NO-OP visually: androidx tints MapActionStrip icons to a
@@ -1422,7 +1533,7 @@ export function aaMapButtons() {
     { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT },
     { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT },
     { id: 'car-crew', icon: carIcon('crew', s), visibility: AA_PERSISTENT },
-    { id: 'car-compass', icon: carIcon('compass', s), visibility: AA_PERSISTENT },
+    { id: HAZARD_BUTTON_ID, icon: carIcon(HAZARD_BUTTON_GLYPH, s), visibility: AA_PERSISTENT },
   ];
 }
 
@@ -1432,7 +1543,7 @@ export function handleAaButton(id?: string): void {
   if (!id) return;
   // ⚠ EXPLICIT ALLOWLIST, not a car-* wildcard. Miss an id here and the AA button
   // renders, taps, logs a receipt — and does nothing, while CarPlay works fine.
-  if (id === 'car-crew' || id === 'car-compass' || id === 'car-mic'
+  if (id === 'car-crew' || id === 'car-compass' || id === 'car-mic' || id === HAZARD_BUTTON_ID
       || id === 'car-zoom-in' || id === 'car-zoom-out') { handleCarMapButton(id); return; }
   handleCarBarButton(id);
 }
@@ -1461,7 +1572,7 @@ export function carTap(id: string): void {
       // pill never appears = the press never reached JS at all (native template
       // layer, needs a build). Any real message from the action overwrites this
       // a moment later, which is the correct ordering.
-      carToast: `${TAP_LABEL[id] || id} ✓`,
+      carToast: `${TAP_LABEL[id] || hazardTapLabel(id) || id} ✓`,
       carToastUntil: Date.now() + 1600,
     });
   } catch {}
@@ -1541,6 +1652,7 @@ export function handleCarMapButton(id: string, src = "?"): void {
   // 🔒 NAV-LOCK end act-view-2d-when-idle
   if (id === 'car-crew') { emitCarGesture({ kind: 'crewFit' }); return; }
   if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }
+  if (id === HAZARD_BUTTON_ID) { openHazardPanel(); return; }
   // One zoom level per tap — CarMapView applies it through the same applyZoomNow the
   // tap-zoom gesture uses, so a PARKED car responds (no camera ease is armed when
   // stationary, which is what made build 65's zoom buttons look dead).

@@ -1566,18 +1566,21 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // RETURN FLY (2026-09-24, Jeff: "can it do a cool animation where it like swivels and zooms down to where I'm
     // driving?"). The first push after a crew overview is one flyTo to the chase frame, aimed at where the car will be
     // when it lands; pushes stand down while it runs; the push that follows lands on that frame. See src/returnFly.ts.
+    let landedSnap = false;
     if (returnFlyRef) {
       const st = returnFlyStep(returnFlyRef.current as any, now);
+      landedSnap = st.landed;   // the push after the fly snaps zoom/pitch/heading lag itself — the phone passes no zoomSnapRef
       // While the fly runs: no pushes, and lastCamAt is NOT refreshed, so lockstep freshness lapses within 500 ms and
       // the marker's per-tick size follows the map's LIVE zoom through the animation (Codex, 2026-09-24: publishing
       // the destination zoom here scaled the self car for z 17 while the map was still at z 12 — a speck).
       if (st.action === 'wait') { returnFlyRef.current = st.next; return; }
       if (st.action === 'fly') {
         returnFlyRef.current = st.next;
-        // The landing push snaps zoom, pitch and the heading lag to the chase frame the fly ends on.
-        if (zoomSnapRef) zoomSnapRef.current = true;
         const flyCarHdg = typeof hdg === 'number' ? hdg : c.heading;
-        const aim = predictAhead(la, ln, flyCarHdg, speedMs, RETURN_FLY_MS);
+        // Live speed, not the mount-time prop: the head unit's bgTick → pushCam path is installed by effects with
+        // empty deps and would otherwise predict with the speed the surface mounted at (Codex, 2026-09-24).
+        const liveSpeed = typeof speedRef.current === 'number' ? speedRef.current : speedMs;
+        const aim = predictAhead(la, ln, flyCarHdg, liveSpeed, RETURN_FLY_MS);
         const flyHeading = (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : flyCarHdg;
         try {
           logEvent(`cam-return-fly surf=${probeRole} ms=${RETURN_FLY_MS} z=${Number(c.zoomLevel).toFixed(2)} pitch=${Math.round(c.pitch)} hdg=${typeof flyHeading === 'number' ? Math.round(flyHeading) : 'null'} spd=${(typeof speedMs === 'number' ? speedMs : 0).toFixed(1)}`);
@@ -1593,8 +1596,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
             animationMode: 'flyTo',
           });
         } catch {}
-        lastCamAt.current = now;
-        return;
+        return;   // lastCamAt deliberately NOT refreshed: the per-tick size block sizes off the live zoom while a fly is active
       }
       returnFlyRef.current = st.next;   // 0 after a landing (this push lands the frame) or unchanged
     }
@@ -1604,7 +1606,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // very next frame resumes the slow automatic glide.
     const userZoomed = !!zoomSnapRef?.current;
     if (userZoomed && zoomSnapRef) zoomSnapRef.current = false;
-    if (snap || userZoomed || camZoom.current == null || camPitch.current == null) {
+    if (snap || userZoomed || landedSnap || camZoom.current == null || camPitch.current == null) {
       camZoom.current = c.zoomLevel;
       camPitch.current = c.pitch;
       camZoomGoal.current = c.zoomLevel;
@@ -1633,7 +1635,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const carHdg = typeof hdg === 'number' ? hdg : c.heading;
     let camHeading = carHdg;
     if (NOSE_LEAD_IN_ENABLED && typeof carHdg === 'number') {
-      if (snap || userZoomed || camHdgLag.current == null) camHdgLag.current = carHdg;
+      if (snap || userZoomed || landedSnap || camHdgLag.current == null) camHdgLag.current = carHdg;
       else {
         const k = 1 - Math.exp(-dt / CAM_HEADING_LAG_MS);
         let h = camHdgLag.current + angDelta(camHdgLag.current, carHdg) * k;
@@ -2286,7 +2288,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // Zoom source, most-trustworthy first: the value the lockstep camera pushed within the last
   // 500 ms (exact — it is what setCamera was just given); else the map's own reported zoom;
   // else the caller's target; else the nav default.
-  const lockstepFresh = typeof camZoom.current === 'number' && Date.now() - lastCamAt.current < 500;
+  // A return fly armed or in progress means the camera is mid-animation: the lockstep zoom is not where the map is.
+  const flyActive = !!returnFlyRef && returnFlyRef.current !== 0;
+  const lockstepFresh = !flyActive && typeof camZoom.current === 'number' && Date.now() - lastCamAt.current < 500;
   const liveZ = liveZoomRef?.current;
   const perTickZoom = lockstepFresh ? (camZoom.current as number)
     : (typeof liveZ === 'number' && liveZ > 0) ? liveZ

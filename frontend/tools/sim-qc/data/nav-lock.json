@@ -311,6 +311,14 @@
       "at": "2026-09-24",
       "quote": "Jeff, 2026-09-24: why is everybody's car oversized and Olaf's car top center is really small? We need to make sure that these are a good size, including mine. I think they're too big. And also, when the image goes … back to the navigation chase view route, can it do a cool animation where it like swivels and zooms down to where I'm driving? → Go",
       "changes": []
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: why is everybody's car oversized and Olaf's car top center is really small? We need to make sure that these are a good size, including mine. I think they're too big. And also, when the image goes … back to the navigation chase view route, can it do a cool animation where it like swivels and zooms down to where I'm driving? → Go",
+      "changes": [
+        "src/ConvoyMapbox.tsx#mbx-pushcam-glide-noselead region b4cbd4fe0f80 → 35b985a3f78b",
+        "src/ConvoyMapbox.tsx#mbx-selfcar-pertick-size region a399afb8971d → 87b6981fb693"
+      ]
     }
   ],
   "files": {
@@ -549,7 +557,7 @@
         "mbx-selfcar-lift-query": "sha256:0c50093772499faaca34681f6c7df2260574d629df4a02e171ae0734f4444d72",
         "mbx-selfcar-angdelta": "sha256:f3fac890a6555edce00adc3a152151946b51026b2e09fd4db41192df8be99761",
         "mbx-cam-glide-pending": "sha256:43084c4689333780235fe668b28b2b439c60b879a304d09dd05414e33e1c37d6",
-        "mbx-pushcam-glide-noselead": "sha256:b4cbd4fe0f8017ce1f0e76ecc09ef47bf95d8f1e997e1b34a7fa4613cfa45199",
+        "mbx-pushcam-glide-noselead": "sha256:35b985a3f78bd6bede29a9091190b6353d242a511a1bc5a1cc2139920f8e8b55",
         "mbx-pushcam-setcamera": "sha256:d1b136789e761bb69be9188a4e7a1514f8a40aed92eb445ed0021980aa75c6bd",
         "mbx-selfcar-bgtick": "sha256:d09c739f75ab5b31435ce0a291bc4cdb430720cb5d88dcb6dc48052681f95481",
         "mbx-car-frame-pump": "sha256:346b94255999305006afb788d45ec9438efbe076c6da75c5b6c5077ae4dc3c4a",
@@ -560,7 +568,7 @@
         "mbx-selfcar-deadband-scatter": "sha256:b5a409f8359c5459a76472e6af3914a6d25360b1d1dd95c76fa02b57e8f00f61",
         "mbx-selfcar-ease-arm": "sha256:63641a968892f1cf7dbb0742d148be2e57d886e47e74e7540e8ffe662e53f7fa",
         "mbx-selfcar-wake-resume-snap": "sha256:b6f145b6c3948e6cb4275fd20d9d3fbdee01f8156c0f9d9b97c73044141093fe",
-        "mbx-selfcar-pertick-size": "sha256:a399afb8971d4514e4287d6f5fa05437828067c5b65d2ef58549f2a4e20b24b4",
+        "mbx-selfcar-pertick-size": "sha256:87b6981fb693efd3ee8aa4d14bf421a0c4625990edc5d39c1e62f4b83f4fcc8a",
         "mbx-selfcar-source-layers": "sha256:3564307bbfdf2299bbd27d97cb30b17702d46dd3a97d423d5ece4eecf8965c03",
         "mbx-pose-yaw-session": "sha256:75d62b239287f46b99736f5b7f8dad3ae068c2e3d81c6060b3a1efbb3d7f1b0f",
         "mbx-idle-roadsnap-poll": "sha256:85ab2b5eab071a42a5ab457820f09e378231dc1b05be0840887ae40448bc0805",

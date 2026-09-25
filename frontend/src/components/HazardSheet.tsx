@@ -11,15 +11,15 @@
 // WHERE IT SITS (Jeff, 2026-09-24, off his screenshot of the first cut: "Make sure the hazard panel does not collide
 // with anything else … Make sure on the phone the hazard panel is above the hazard button"): NOT a bottom sheet any
 // more — that one lay across the weather HUD, the speedo, the FAB column and the tab bar. It is a floating card
-// anchored ABOVE the right-hand FAB stack (map.tsx measures the stack and passes anchorBottom), right-aligned with
-// the buttons, in the map area where nothing else lives. Tap anywhere outside it to close (a transparent full-screen
+// anchored ABOVE the right-hand FAB stack (map.tsx measures the stack and passes anchorBottom) and CENTRED on the
+// screen (Jeff, 2026-09-25: "MAKE SURE ITS CENTERED"), in the map area where nothing else lives. Tap anywhere outside it to close (a transparent full-screen
 // backdrop — no dimming, the map stays readable, like the weather forecast card).
 //
 // LOOK = the weather forecast card (Jeff: "Make the panel have the same background opacity as the weather panel"):
 // the same translucent floor rgba(24,24,28,0.66), the same hairline, the same GlassFill tinted by hudTint(), the same
 // pop (opacity + 12 pt rise + 0.94 scale). WeatherHUD.tsx styles.forecastCard is the reference — change both or neither.
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, BackHandler, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { GlassFill, hudTint } from "../Glass";
 import { PressableScale } from "../ui/PressableScale";
 import { useAppSkin } from "../appSkin";
@@ -44,7 +44,7 @@ const TILE_GAP = 8;
 const PAD_H = 12;
 /** Four faces + gaps + padding: the card's natural width; capped to the window on a small phone. */
 const CARD_W = TILE * 4 + TILE_GAP * 3 + PAD_H * 2;
-/** Same right inset as map.tsx styles.fabStack, so the card's right edge lines up with the buttons. */
+/** Side gutter the card keeps on a narrow phone (map.tsx styles.fabStack uses the same 12). */
 const RIGHT_INSET = 12;
 /** Air between the top button and the card. */
 const GAP_ABOVE_STACK = 10;
@@ -91,6 +91,13 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
     if (!visible) { a.setValue(0); return; }
     Animated.spring(a, { toValue: 1, useNativeDriver: true, tension: 150, friction: 13 }).start();
   }, [visible, a]);
+  // Android Back closes the panel (Codex r2, 2026-09-25): the Modal used to do this through onRequestClose; without it
+  // Back reaches React Navigation and can pop the map screen out from under the driver.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => { onClose(); return true; });
+    return () => sub.remove();
+  }, [visible, onClose]);
   if (!visible) return null;
   const cardW = Math.min(CARD_W, winW - RIGHT_INSET * 2);
   // Above the stack — unless that would push the card into the top bar (short phone, Drive drawer up): then it stops
@@ -108,7 +115,7 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
           styles.card,
           {
             width: cardW,
-            right: RIGHT_INSET,
+            left: Math.round((winW - cardW) / 2),
             bottom,
             opacity: a,
             transform: [

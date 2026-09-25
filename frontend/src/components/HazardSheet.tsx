@@ -75,6 +75,7 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss }: {
                     <PressableScale
                       key={t.id}
                       testID={`report-${t.kind}`}
+                      hitSlop={0}   // the faces are 76 pt with 8 pt gaps; the default 12 pt slop let an edge tap report the neighbour (Codex r3)
                       style={styles.tile}
                       accessibilityLabel={`Report ${t.title}`}
                       onPress={() => {

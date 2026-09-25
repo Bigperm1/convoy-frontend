@@ -13,6 +13,36 @@ ORDER = ["police","crash","hazard","traffic","camera","compass"]
 LABEL = dict(police="Police", crash="Crash", hazard="Hazard", traffic="Traffic", camera="Speed cam", compass="Compass")
 
 def glyph(name, col, cut):
+    """Silhouette in `col` with the punched details as REAL holes (SVG mask) — cut is ignored, kept for callers."""
+    M = 'fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round"'   # black in a mask = removed
+    K = f'fill="none" stroke="{col}" stroke-linecap="round" stroke-linejoin="round"'
+    mid = f"m-{name}"
+    def masked(silhouette, holes):
+        return (f'<defs><mask id="{mid}" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">'
+                f'<rect x="0" y="0" width="64" height="64" fill="#fff"/>{holes}</mask></defs>'
+                f'<g mask="url(#{mid})">{silhouette}</g>')
+    if name == "police":
+        return masked(f'<path d="M32 7 L52 14 V30 C52 43.5 43 52 32 57 C21 52 12 43.5 12 30 V14 Z" fill="{col}"/>',
+                      f'<path d="M26.5 43 V21 H34.5 C39.5 21 42.5 24 42.5 28.5 C42.5 33 39.5 36 34.5 36 H26.5" {M} stroke-width="4.6"/>')
+    if name == "crash":
+        return (masked(f'<path d="M13 43 L17.5 30 C18.3 27.6 20 26 22.5 26 H41.5 C44 26 45.7 27.6 46.5 30 L51 43 V51 H44 V47 H20 V51 H13 Z" fill="{col}"/>',
+                       '<circle cx="21.5" cy="42" r="2.4" fill="#000"/><circle cx="42.5" cy="42" r="2.4" fill="#000"/>')
+                + f'<path d="M48 20 L52 10 M51 23 L60 17 M52 27 L62 28" {K} stroke-width="4.6"/>')
+    if name == "hazard":
+        return masked(f'<path d="M32 9 L57 51 H7 Z" fill="{col}" stroke="{col}" stroke-width="3" stroke-linejoin="round"/>',
+                      f'<path d="M32 23 V37" {M} stroke-width="4.6"/><circle cx="32" cy="45" r="2.6" fill="#000"/>')
+    if name == "traffic":
+        return masked(f'<path d="M14 24 L18.5 13 C19.2 11.2 20.6 10 22.5 10 H41.5 C43.4 10 44.8 11.2 45.5 13 L50 24 V30 H44 V27 H20 V30 H14 Z M14 52 L18.5 41 C19.2 39.2 20.6 38 22.5 38 H41.5 C43.4 38 44.8 39.2 45.5 41 L50 52 V58 H44 V55 H20 V58 H14 Z" fill="{col}"/>',
+                      f'<path d="M22 20 H42 M22 48 H42" {M} stroke-width="4"/>')
+    if name == "camera":
+        return (masked(f'<path d="M14 24 H22 L25 19 H39 L42 24 H50 C52.2 24 54 25.8 54 28 V46 C54 48.2 52.2 50 50 50 H14 C11.8 50 10 48.2 10 46 V28 C10 25.8 11.8 24 14 24 Z" fill="{col}"/>',
+                       f'<circle cx="32" cy="37" r="7.5" {M} stroke-width="4"/>')
+                + f'<path d="M53 16 L58 9 M56 22 L63 20 M49 13 L49 6" {K} stroke-width="4.2"/>')
+    if name == "compass":
+        return (f'<circle cx="32" cy="32" r="21" {K} stroke-width="5"/>'
+                f'<path d="M32 11 L38.5 32 H25.5 Z" fill="{col}"/><path d="M32 53 L25.5 32 H38.5 Z" fill="{col}" opacity="0.35"/>')
+
+def _old_glyph(name, col, cut):
     S=f'fill="none" stroke="{cut}" stroke-linecap="round" stroke-linejoin="round"'
     K=f'fill="none" stroke="{col}" stroke-linecap="round" stroke-linejoin="round"'
     if name=="police":

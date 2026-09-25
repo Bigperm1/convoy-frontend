@@ -6,7 +6,8 @@
 //
 // Local-only, no backend. Mirrors the storage shape of savedPlaces.ts: a module-level
 // cache + load promise, with imperative get/record helpers.
-// One trace per saved place (last-good v1; most-frequent clustering can come later).
+// One trace per saved place. v1 stored the LAST drive, whatever it was; since 2026-09-24 a drive is judged against the
+// remembered road before it may replace it, and a one-off waits in a candidate slot (see the learn section at the end).
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const KEY = "convoy.aiRoutes.v1";
@@ -22,31 +23,45 @@ export const AI_START_RADIUS_M = 350;
 // Minimum drive distance to bother learning (skip trivial sub-300 m hops).
 const MIN_LEARN_DISTANCE_M = 300;
 
-export type AiRoute = {
-  placeId: string;                  // the SavedPlace.id this trace leads to
+// The geometry of one finished drive: the memory itself, or the candidate waiting to replace it.
+export type AiTrace = {
   startLat: number; startLng: number;
   endLat: number; endLng: number;
   coords: [number, number][];       // decimated [lng,lat] driven path, origin -> dest
   t?: number[];                     // seconds from the drive's start at each kept coord (memories since 2026-09-24)
   m?: number[];                     // metres driven from the start at each kept coord, summed over the RAW fixes —
                                     // the kept coords are chords that cut corners on a winding road (Codex, 09-24)
-  drives: number;                   // times learned/reinforced
-  lastDrivenAt: number;
   duration_s: number;               // last observed drive duration (fallback ETA)
   distance_m: number;
+};
+// How a finished drive related to the memory it met (compareDrive), plus the two outcomes recordDrive adds.
+export type LearnVerdict = "same" | "partial" | "one-off";
+export type LearnOutcome = LearnVerdict | "learn" | "promote";
+export type AiRoute = AiTrace & {
+  placeId: string;                  // the SavedPlace.id this trace leads to
+  drives: number;                   // times learned/reinforced
+  lastDrivenAt: number;
+  learn?: LearnOutcome;             // how the last completed drive landed (since 2026-09-24)
+  candidate?: AiTrace & { drivenAt: number };   // the last one-off against a habit; promoted when the next drive repeats it
 };
 
 let cached: AiRoute[] = [];
 let loaded = false;
 
-function isValid(r: any): r is AiRoute {
-  return (
+// Exported for the gate. Every coord must be a finite [lng,lat] pair: a persisted `[null, null]` used to pass and would
+// throw inside compareDrive on the next drive, poisoning learning for that place (Codex review 2026-09-24).
+export function isTrace(r: any): r is AiTrace {
+  return !!(
     r &&
-    typeof r.placeId === "string" &&
     Array.isArray(r.coords) && r.coords.length >= 2 &&
-    typeof r.startLat === "number" && typeof r.startLng === "number" &&
-    typeof r.endLat === "number" && typeof r.endLng === "number"
+    r.coords.every((c: any) => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1])) &&
+    Number.isFinite(r.startLat) && Number.isFinite(r.startLng) &&
+    Number.isFinite(r.endLat) && Number.isFinite(r.endLng)
   );
+}
+
+function isValid(r: any): r is AiRoute {
+  return typeof r?.placeId === "string" && isTrace(r);
 }
 
 const loadPromise: Promise<AiRoute[]> = (async () => {
@@ -54,7 +69,10 @@ const loadPromise: Promise<AiRoute[]> = (async () => {
     const raw = await AsyncStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) cached = parsed.filter(isValid);
+      if (Array.isArray(parsed)) {
+        // A malformed candidate is dropped, never the memory it hangs off.
+        cached = parsed.filter(isValid).map((r) => (r.candidate && !isTrace(r.candidate) ? { ...r, candidate: undefined } : r));
+      }
     }
   } catch {}
   loaded = true;
@@ -127,8 +145,9 @@ export async function recordDrive(input: {
   trace: { lat: number; lng: number; ts: number }[];
 }): Promise<AiRoute | null> {
   await ensureAiRoutesLoaded();
+  // Finite, not merely numeric: a NaN fix would ride into the memory and blind every later comparison against it.
   const raw = (input.trace || []).filter(
-    (p) => typeof p?.lat === "number" && typeof p?.lng === "number"
+    (p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng)
   );
   if (raw.length < 4) return null;
 
@@ -145,9 +164,13 @@ export async function recordDrive(input: {
   const t0 = raw[0].ts;
   const tByCoord = new Map<[number, number], number>();
   const mByCoord = new Map<[number, number], number>();
-  let acc = 0;
+  let acc = 0, maxGapM = 0;
   raw.forEach((p, i) => {
-    if (i > 0) acc += haversineM(raw[i - 1].lat, raw[i - 1].lng, p.lat, p.lng);
+    if (i > 0) {
+      const gap = haversineM(raw[i - 1].lat, raw[i - 1].lng, p.lat, p.lng);
+      acc += gap;
+      if (gap > maxGapM) maxGapM = gap;
+    }
     tByCoord.set(coordsLngLat[i], Math.max(0, Math.round((p.ts - t0) / 1000)));
     mByCoord.set(coordsLngLat[i], Math.round(acc));
   });
@@ -156,19 +179,14 @@ export async function recordDrive(input: {
 
   const start = coords[0];
   const end = coords[coords.length - 1];
-  const prev = cached.find((r) => r.placeId === input.placeId);
-  const entry: AiRoute = {
-    placeId: input.placeId,
+  const trace: AiTrace = {
     startLat: start[1], startLng: start[0],
     endLat: end[1], endLng: end[0],
-    coords,
-    t,
-    m,
-    drives: (prev?.drives ?? 0) + 1,
-    lastDrivenAt: Date.now(),
-    duration_s,
-    distance_m,
+    coords, t, m, duration_s, distance_m,
   };
+  // A recording with a hole in it (a tunnel, the app suspended) is a drive, not a geometry: it counts, it never replaces.
+  const sparse = maxGapM > AI_TRACE_GAP_MAX_M;
+  const entry = learnFrom(cached.find((r) => r.placeId === input.placeId), input.placeId, trace, Date.now(), sparse);
   cached = [entry, ...cached.filter((r) => r.placeId !== input.placeId)];
   await persist();
   return entry;
@@ -398,4 +416,106 @@ export function viaPointsAhead(
     for (let i = 0; i < n; i++) out.push(run[Math.floor(i * step + step / 2)]);
   }
   return out.length <= maxVia ? out : sample(out);
+}
+
+// ── 2026-09-24 — a one-off drive must not overwrite the habit ──
+// Jeff's Tim Hortons stop (09-24 09:27, plotted mid-commute) would have been the next morning's "AI route": recordDrive
+// stored the LAST drive to a place, whatever it was. A drive is now judged against the remembered road before it may
+// replace it. Four measurements, all point-to-segment against the remembered path, AI_SAME_ROAD_M wide, each allowed
+// AI_SLACK_M before it means anything:
+//   • excursionM — metres the DRIVE spent off the remembered road after first reaching it: a loop (a coffee stop, a
+//     missed exit) or a different middle (another exit);
+//   • missedM    — metres of the REMEMBERED road the drive never touched after first joining it: it skipped part of the
+//     memory (the memory holds a loop the drive did not take — v1 stored whatever the last drive was, so it may);
+//   • skippedM   — remembered metres before the drive first joined it: it started later along the road;
+//   • leadM      — metres the drive spent before reaching the remembered road: it started earlier, or elsewhere.
+// Verdicts: "same" — no excursion, nothing missed, joined at the start: it replaces the memory (fresh t[]/m[]; a lead
+// from further back EXTENDS it — a lead that joins AT the start is behind the car at every later plot and is never
+// replayed, so it is harmless); "partial" — no excursion, nothing missed, joined the road later but ON it: the longer
+// memory is kept and the drive counted, so a memory never shrinks; "one-off" — an excursion, a skipped stretch, or a
+// road that joins the memory mid-way from elsewhere. Why not a length ratio (> 25 % longer / < 60 % shared)? The coffee
+// stop: 600 m off a 30 km commute is +4 % length and 96 % shared — it would have been reinforced. Why not a coverage
+// ratio (≥ 90 %)? A start 1.5 km later covered 95 % and shrank the memory by 1.5 km, three times over (Codex review
+// 2026-09-24). Gate: tools/sim-qc/ai_route_test.mts section G.
+
+// Two drives are on the same road when within this of each other — the same width that decides "my way" against the
+// fastest route at replay (AI_DIVERGE_M): opposite carriageways 20–50 m apart, a frontage road ≥ 150 m, nav GPS ≤ 30 m.
+export const AI_SAME_ROAD_M = 120;
+// Metres of excursion / missed road / skipped start / lead that still mean "the same road". Decimation keeps a point every
+// 60 m, so this is five kept points: a lane change, a parking lot or one stray fix cannot reach it; a 150 m-deep stop and
+// back can. It bounds how far a memory's start can drift per drive, and a from-home drive restores it.
+export const AI_SLACK_M = 300;
+// Drives before a memory is a habit worth defending; below it the last drive still wins, as v1 did.
+export const AI_HABIT_MIN_DRIVES = 2;
+// A raw fix-to-fix gap wider than this is a hole in the recording, not driving: the map keeps fixes ≥ 25 m apart at the
+// location rate (~36 m per fix at 130 km/h), so 1 km is ~30 s without a fix — a tunnel or a suspended app. Measured on
+// the RAW stream: the 400-point cap widens the KEPT gaps on a long drive and must not read as a hole.
+export const AI_TRACE_GAP_MAX_M = 1000;
+
+export function compareDrive(
+  memory: { coords: [number, number][]; startLat: number },
+  trace: [number, number][],
+): { verdict: LearnVerdict; leadM: number; excursionM: number; missedM: number; skippedM: number } {
+  const H = Array.isArray(memory.coords) ? memory.coords : [];
+  const T = Array.isArray(trace) ? trace : [];
+  if (H.length < 2 || T.length < 2) return { verdict: "one-off", leadM: 0, excursionM: 0, missedM: 0, skippedM: 0 };
+  const cosLat = Math.cos((memory.startLat * Math.PI) / 180);
+  const nearPath = (p: [number, number], path: [number, number][]): boolean => {
+    for (let i = 1; i < path.length; i++) if (segDistM(p, path[i - 1], path[i], cosLat) <= AI_SAME_ROAD_M) return true;
+    return false;
+  };
+  // The drive against the memory: where it was before reaching the road, and where it went off it afterwards.
+  const onT = T.map((p) => nearPath(p, H));
+  const first = onT.indexOf(true);
+  let leadM = 0, excursionM = 0;
+  for (let i = 1; i < T.length; i++) {
+    const d = planarM(T[i - 1], T[i], cosLat);
+    if (first < 0 || i <= first) leadM += d;                 // before the road is reached (or it never is)
+    else if (!(onT[i - 1] && onT[i])) excursionM += d;       // off the road after reaching it: a loop, another middle, a tail
+  }
+  // The memory against the drive: remembered road the drive never touched — before it joined (a later start) or after.
+  const onH = H.map((p) => nearPath(p, T));
+  let skippedM = 0, missedM = 0, joined = false;
+  for (let i = 1; i < H.length; i++) {
+    const d = planarM(H[i - 1], H[i], cosLat);
+    if (onH[i - 1] && onH[i]) { joined = true; continue; }
+    if (joined) missedM += d; else skippedM += d;
+  }
+  const verdict: LearnVerdict =
+    first < 0 || excursionM > AI_SLACK_M || missedM > AI_SLACK_M ? "one-off"
+    : skippedM <= AI_SLACK_M ? "same"
+    : leadM <= AI_SLACK_M ? "partial"
+    : "one-off";
+  return { verdict, leadM, excursionM, missedM, skippedM };
+}
+
+function traceOf(x: AiTrace): AiTrace {
+  const { startLat, startLng, endLat, endLng, coords, t, m, duration_s, distance_m } = x;
+  return { startLat, startLng, endLat, endLng, coords, t, m, duration_s, distance_m };
+}
+
+// The next memory for a place after a finished drive. Pure, so the gate can drive it through recordDrive. A `sparse`
+// drive (a hole in the recording) is evidence of where he went, never a geometry to keep.
+function learnFrom(prev: AiRoute | undefined, placeId: string, trace: AiTrace, now: number, sparse: boolean): AiRoute {
+  if (!prev) return { placeId, ...trace, drives: 1, lastDrivenAt: now, learn: "learn" };
+  const v = compareDrive(prev, trace.coords).verdict;
+  if (v === "same" || v === "partial") {
+    // The habit, driven again: counted, the candidate forgotten. Replaced only by a whole, dense recording of it.
+    return v === "same" && !sparse
+      ? { placeId, ...trace, drives: prev.drives + 1, lastDrivenAt: now, learn: v }
+      : { ...prev, candidate: undefined, drives: prev.drives + 1, lastDrivenAt: now, learn: v };
+  }
+  if (prev.drives < AI_HABIT_MIN_DRIVES) {
+    // No habit yet: the last drive wins, as v1 did — unless it has a hole in it.
+    return sparse ? { ...prev, lastDrivenAt: now, learn: v } : { placeId, ...trace, drives: prev.drives + 1, lastDrivenAt: now, learn: v };
+  }
+  // A one-off against a habit. Twice IN A ROW — it repeats the candidate left by the previous drive — and it is the way now,
+  // with THIS drive's geometry: only what was driven twice is promoted, never a loop the candidate drove once (Codex 2026-09-24).
+  const cand = prev.candidate;
+  if (cand && compareDrive(cand, trace.coords).verdict !== "one-off") {
+    const geometry = sparse ? traceOf(cand) : trace;
+    return { placeId, ...geometry, drives: AI_HABIT_MIN_DRIVES, lastDrivenAt: now, learn: "promote" };
+  }
+  if (sparse) return { ...prev, lastDrivenAt: now, learn: v };
+  return { ...prev, lastDrivenAt: now, learn: v, candidate: { ...trace, drivenAt: now } };
 }

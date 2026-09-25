@@ -162,5 +162,140 @@ const dist = (a: [number, number], b: [number, number]) =>
   }
 }
 
+// G — 2026-09-24: a one-off drive must not overwrite the habit. Jeff's Tim Hortons stop (09-24 09:27, plotted
+// mid-commute) would have become the next day's "AI route" because recordDrive stored the LAST drive, whatever it was.
+// The habit (drives ≥ 2) now survives a detour or a different way; a way driven twice in a row replaces it.
+{
+  const { recordDrive, compareDrive } = await import("../../src/aiRoutes.ts");
+  const fixes = (pts: [number, number][]) => pts.map((p, i) => ({ lat: p[1], lng: p[0], ts: i * 3000 }));
+  // A road with a loop off it at km 10: north `spikeM` and straight back (a detour of 2 × spikeM).
+  const spikedOn = (base: [number, number][], spikeM: number): [number, number][] => {
+    const out: [number, number][] = [];
+    for (const p of base) {
+      out.push(p);
+      if (Math.abs(p[0] - east(10020)) < 1e-9) {
+        for (let n = 60; n <= spikeM; n += 60) out.push([p[0], north(n)]);
+        for (let n = spikeM - 60; n > 0; n -= 60) out.push([p[0], north(n)]);
+      }
+    }
+    return out;
+  };
+  const spiked = (spikeM: number) => spikedOn(mine, spikeM);
+  // A genuinely different way: highway to km 20, a parallel road 400 m SOUTH from km 20.5 to km 29, rejoin at 29.5.
+  const other: [number, number][] = [];
+  for (let m = 0; m <= 30000; m += 60) {
+    let off = 0;
+    if (m > 20000 && m < 20500) off = -((m - 20000) / 500) * 400;
+    else if (m >= 20500 && m <= 29000) off = -400;
+    else if (m > 29000 && m < 29500) off = -((29500 - m) / 500) * 400;
+    other.push([east(m), north(off)]);
+  }
+  const drive = (placeId: string, pts: [number, number][]) => recordDrive({ placeId, trace: fixes(pts) });
+  const minNorth = (r: { coords: [number, number][] }) => Math.min(...r.coords.map((c) => (c[1] - LAT) * M_PER_DEG_LAT));
+  const maxNorth = (r: { coords: [number, number][] }) => Math.max(...r.coords.map((c) => (c[1] - LAT) * M_PER_DEG_LAT));
+
+  // G1/G2 — three identical commutes make the habit; a fourth with 15 m of GPS jitter reinforces it.
+  await drive("g-habit", mine); await drive("g-habit", mine);
+  const h3 = (await drive("g-habit", mine))!;
+  ok("G1 three identical drives → drives=3, verdict same", h3.drives === 3 && h3.learn === "same", `drives=${h3.drives} learn=${h3.learn}`);
+  const jitter = mine.map((p, i): [number, number] => [p[0], p[1] + ((i % 3) - 1) * 15 / M_PER_DEG_LAT]);
+  const h4 = (await drive("g-habit", jitter))!;
+  ok("G2 a near-identical drive (15 m jitter) reinforces: drives=4, geometry replaced", h4.drives === 4 && h4.learn === "same" && h4.coords !== h3.coords, `drives=${h4.drives} learn=${h4.learn}`);
+
+  // G3 — a 30 % longer loop (4.5 km north and back) on a drives=4 memory does NOT replace it.
+  const before = Date.now();
+  const loop = spiked(4500);
+  const h5 = (await drive("g-habit", loop))!;
+  ok("G3 a 30 % longer detour on an established habit → habit kept, drives unchanged, lastDrivenAt bumped",
+    h5.learn === "one-off" && h5.drives === 4 && h5.coords === h4.coords && h5.lastDrivenAt >= before && maxNorth(h5) < 500, `learn=${h5.learn} drives=${h5.drives}`);
+  ok("G3b …and the detour sits in the candidate slot", !!h5.candidate && Math.max(...h5.candidate.coords.map((c) => (c[1] - LAT) * M_PER_DEG_LAT)) > 4000);
+  // G4 — the habit driven again clears the candidate (two in a ROW is the rule).
+  const h6 = (await drive("g-habit", mine))!;
+  ok("G4 the habit driven again → drives=5, candidate cleared", h6.drives === 5 && h6.learn === "same" && h6.candidate === undefined, `drives=${h6.drives} cand=${!!h6.candidate}`);
+  // G5/G6 — a genuinely new way once is a one-off; twice in a row it becomes the habit.
+  const h7 = (await drive("g-habit", other))!;
+  ok("G5 a different way once → one-off, habit kept", h7.learn === "one-off" && h7.drives === 5 && minNorth(h7) > -50 && !!h7.candidate, `learn=${h7.learn}`);
+  const h8 = (await drive("g-habit", other))!;
+  ok("G6 the same different way twice in a row → promoted: it IS the habit now (drives=2), candidate cleared",
+    h8.learn === "promote" && h8.drives === 2 && minNorth(h8) < -350 && h8.candidate === undefined, `learn=${h8.learn} drives=${h8.drives} minN=${minNorth(h8).toFixed(0)}`);
+
+  // G7 — plotted later / earlier on the SAME road: the memory never shrinks, and it grows.
+  await drive("g-extent", mine); const e2 = (await drive("g-extent", mine))!;
+  const fromKm12 = mine.filter((p) => p[0] >= east(12000));
+  const e3 = (await drive("g-extent", fromKm12))!;
+  ok("G7 plotted 12 km later on the habit → partial: drives+1, geometry kept (start unchanged)", e3.learn === "partial" && e3.drives === 3 && e3.coords === e2.coords && e3.startLng === mine[0][0], `learn=${e3.learn} drives=${e3.drives}`);
+  const fromHome: [number, number][] = [];
+  for (let m = -5000; m < 0; m += 60) fromHome.push([east(m), north(0)]);
+  const e4 = (await drive("g-extent", fromHome.concat(mine)))!;
+  ok("G7b plotted 5 km earlier → same: drives+1, memory extends back to the new start", e4.learn === "same" && e4.drives === 4 && e4.startLng < mine[0][0] - 4000 / M_PER_DEG_LNG, `learn=${e4.learn} startKm=${((e4.startLng - lng0) * M_PER_DEG_LNG / 1000).toFixed(1)}`);
+
+  // G8 — Jeff's case: a coffee stop 600 m off the road (1.2 km excursion, +4 % length, 96 % shared) must not enter the habit.
+  await drive("g-tims", mine); const t2 = (await drive("g-tims", mine))!;
+  const t3 = (await drive("g-tims", spiked(600)))!;
+  ok("G8 a 600 m coffee stop on a 30 km habit → one-off, habit kept", t3.learn === "one-off" && t3.coords === t2.coords, `learn=${t3.learn}`);
+  const t4 = (await drive("g-tims", spiked(100)))!;
+  ok("G8b a 100 m wobble (a lane, a lot) is still the same road → same", t4.learn === "same" && t4.drives === 3, `learn=${t4.learn}`);
+
+  // G9 — no habit yet (drives=1): the last drive still wins, as v1 did.
+  await drive("g-fresh", mine);
+  const f2 = (await drive("g-fresh", other))!;
+  ok("G9 drives=1 + a different way → replaced (no habit to keep yet), drives=2", f2.drives === 2 && minNorth(f2) < -350, `drives=${f2.drives}`);
+
+  // G10 — the comparison itself, on the raw arrays.
+  const cmp = compareDrive(route, loop);
+  ok("G10 compareDrive: the loop is ~9 km of excursion → one-off", cmp.verdict === "one-off" && cmp.excursionM > 8000 && cmp.excursionM < 10000, `exc=${cmp.excursionM.toFixed(0)}`);
+  const cmp2 = compareDrive(route, mine);
+  ok("G10b compareDrive: the same road → same, nothing missed, nothing skipped", cmp2.verdict === "same" && cmp2.missedM < 50 && cmp2.skippedM < 50, `missed=${cmp2.missedM?.toFixed(0)} skipped=${cmp2.skippedM?.toFixed(0)}`);
+  const cmp3 = compareDrive(route, fromKm12);
+  ok("G10c compareDrive: the last 18 km of it → partial, 12 km skipped at the start", cmp3.verdict === "partial" && cmp3.skippedM > 11500 && cmp3.skippedM < 12500, `skipped=${cmp3.skippedM?.toFixed(0)}`);
+
+  // G11 — Codex 2026-09-24: a start only 1.5 km later must not shrink the memory either (a 90 % coverage rule let it, 3 × over).
+  await drive("g-shrink", mine); const s2 = (await drive("g-shrink", mine))!;
+  let sN = s2;
+  for (const km of [1.5, 3, 4.5]) sN = (await drive("g-shrink", mine.filter((p) => p[0] >= east(km * 1000))))!;
+  ok("G11 three drives each starting a little later → all partial, the memory keeps its start", sN.learn === "partial" && sN.drives === 5 && sN.coords === s2.coords && sN.startLng === mine[0][0], `learn=${sN.learn} drives=${sN.drives} startKm=${((sN.startLng - lng0) * M_PER_DEG_LNG / 1000).toFixed(1)}`);
+
+  // G12 — Codex: a memory that itself holds a loop (v1 stored whatever the last drive was — the coffee stop may BE the
+  // memory today) must be replaceable by the direct road driven twice.
+  const looped = spiked(3000);
+  await drive("g-loop", looped); const l2 = (await drive("g-loop", looped))!;
+  const l3 = (await drive("g-loop", mine))!;
+  ok("G12 the direct road against a looped habit → one-off (it skips 6 km of the memory), habit kept", l3.learn === "one-off" && l3.coords === l2.coords && maxNorth(l3) > 2500, `learn=${l3.learn}`);
+  const l4 = (await drive("g-loop", mine))!;
+  ok("G12b …and twice in a row → promoted, the loop is gone", l4.learn === "promote" && l4.drives === 2 && maxNorth(l4) < 500, `learn=${l4.learn} maxN=${maxNorth(l4).toFixed(0)}`);
+
+  // G13 — Codex: a candidate holding an early loop AND the different exit, repeated only from after the loop → the promoted
+  // geometry is the CONFIRMED drive (exit yes, loop no), never the candidate's whole shape.
+  await drive("g-cand", mine); await drive("g-cand", mine);
+  const c3 = (await drive("g-cand", spikedOn(other, 2000)))!;
+  const c4 = (await drive("g-cand", other.filter((p) => p[0] >= east(12000))))!;
+  ok("G13 the second drive repeats only the exit → promoted with its own geometry: exit yes, loop no", c3.learn === "one-off" && c4.learn === "promote" && minNorth(c4) < -350 && maxNorth(c4) < 500, `learn=${c4.learn} maxN=${maxNorth(c4).toFixed(0)} minN=${minNorth(c4).toFixed(0)}`);
+
+  // G14 — Codex: a start off the road. Joining the habit AT its start (parked 600 m beside it) is a lead: same, and it
+  // replaces — harmless, the lead is behind the car at any later plot. Joining it mid-way from a side street is not.
+  const beside: [number, number][] = [];
+  for (let n = 600; n > 0; n -= 60) beside.push([mine[0][0], north(n)]);
+  await drive("g-side", mine); await drive("g-side", mine);
+  const b3 = (await drive("g-side", beside.concat(mine)))!;
+  ok("G14 a 600 m lead into the habit's START → same (a lead extends)", b3.learn === "same" && b3.drives === 3, `learn=${b3.learn}`);
+  const sideIn: [number, number][] = [];
+  for (let n = 600; n > 0; n -= 60) sideIn.push([east(10020), north(n)]);
+  const b4 = (await drive("g-side", sideIn.concat(mine.filter((p) => p[0] >= east(10020)))))!;
+  ok("G14b a 600 m side street INTO km 10 of the habit → one-off (the first 10 km came from elsewhere)", b4.learn === "one-off" && b4.coords === b3.coords, `learn=${b4.learn}`);
+
+  // G15 — Codex: a sparse recording (a GPS dropout: 4 fixes for 30 km) must never replace a dense memory. A STRAIGHT road,
+  // so the chord passes within 120 m of every remembered point and only the gap itself can refuse it.
+  const straight = mine.map((p): [number, number] => [p[0], north(0)]);
+  const sparse: [number, number][] = [straight[0], straight[2], straight[straight.length - 3], straight[straight.length - 1]];
+  await drive("g-gap", straight); const g2 = (await drive("g-gap", straight))!;
+  const g3 = (await drive("g-gap", sparse))!;
+  ok("G15 a 4-fix trace over a dense habit → counted, geometry kept", g3.drives === 3 && g3.coords === g2.coords && g3.coords.length > 100, `learn=${g3.learn} pts=${g3.coords.length}`);
+
+  // G16 — Codex: a persisted candidate with unusable coords must not survive validation (compareDrive would throw on it).
+  const { isTrace } = await import("../../src/aiRoutes.ts");
+  const good = { startLat: 1, startLng: 2, endLat: 3, endLng: 4, coords: [[1, 2], [3, 4]], duration_s: 1, distance_m: 1 };
+  ok("G16 isTrace: finite pairs pass; null, NaN or string fields fail", typeof isTrace === "function" && isTrace(good) && !isTrace({ ...good, coords: [null, null] }) && !isTrace({ ...good, coords: [[1, 2], [NaN, 4]] }) && !isTrace({ ...good, startLat: "1" }));
+}
+
 console.log(fails ? `FAIL ai_route (${fails})` : "PASS ai_route");
 process.exit(fails ? 1 : 0);

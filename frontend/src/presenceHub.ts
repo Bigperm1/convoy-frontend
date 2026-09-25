@@ -62,26 +62,49 @@ const entries = new Map<string, Entry>();
 //    phone gets none): a single timer flushes it the moment the oldest send leaves the window. Timers can freeze on a
 //    locked phone, so that is best effort — the next track() flushes it too.
 // The +1 s on Supabase's 30 s window is OUR margin for our clock against the server's; the server's exact windowing is
-// not measured.
+// not measured. Every stamp below is on the MONOTONIC clock (THE BUDGET'S CLOCK), never the wall clock.
 const PRESENCE_WINDOW_MS = 31_000;
 const PRESENCE_MAX_SENDS = 5;            // Supabase's cap in that window
 const PRESENCE_POSITION_SENDS = 4;       // position tracks stop here — the 5th slot is for priority sends
 const PRESENCE_POSITION_GAP_MS = 7_500;  // Jeff's "~7.5 s": the four position slots spread across the window, never a burst
 
-/** Every channel send (track or untrack, any topic) still inside the window, oldest first. Hub-global — see above. */
+// ── THE BUDGET'S CLOCK (Codex review of 6292ade4, 2026-09-25) ─────────────────────────────────────────────────────
+// The first cut stamped sends with Date.now(). A wall clock gets CORRECTED (NTP sync, a manual set) while the
+// server's 30 s window keeps running: a 1 s backward step made the newest stamp "future", the filter dropped it, and a
+// 6th send went out at once; a forward step expired the window early. So the budget, its spacing, the flush deadline and
+// the crumb's period run on an ELAPSED clock: performance.now(), which RN 0.81 installs from NativePerformance.now →
+// HighResTimeStamp::now() → std::chrono::steady_clock (react-native Libraries/Core/setUpPerformance.js,
+// ReactCommon/react/timing/primitives.h). RN itself falls back to Date.now when no native clock exists, so the reading
+// is also held never-backward here. Whether steady_clock advances while the phone sleeps is NOT verified; if it pauses,
+// old sends look recent for longer, i.e. the budget sends LESS, never a 6th. Injectable for tools/sim-qc.
+type PresenceClock = () => number;
+const defaultClock: PresenceClock = () => {
+  const perf = (globalThis as any).performance;
+  return perf && typeof perf.now === "function" ? perf.now() : Date.now();
+};
+let presenceClock: PresenceClock = defaultClock;
+let clockLast = -Infinity;
+function monoNow(): number {
+  let t = NaN;
+  try { t = presenceClock(); } catch {}
+  if (!Number.isFinite(t) || t < clockLast) return Number.isFinite(clockLast) ? clockLast : 0;   // hold — never backward
+  clockLast = t;
+  return t;
+}
+/** tools/sim-qc only: swap the budget's elapsed clock (null = performance.now). The budget's stamps are kept. */
+export function setPresenceClock(fn: PresenceClock | null): void { presenceClock = fn ?? defaultClock; clockLast = -Infinity; }
+
+/** Every channel send (track or untrack, any topic) still inside the window, oldest first, on monoNow(). Hub-global. */
 let sendTimes: number[] = [];
-let lastSendAt = 0;
+let lastSendAt = -Infinity;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Sends inside the window at `now`. A wall clock that stepped BACKWARD (NTP / manual set) expires the stamps it passed —
- *  the carStore gates' convention: a clock jump can never mute us. */
 function sendsInWindow(now: number): number {
-  sendTimes = sendTimes.filter((t) => t <= now && now - t < PRESENCE_WINDOW_MS);
+  sendTimes = sendTimes.filter((t) => now - t < PRESENCE_WINDOW_MS);
   return sendTimes.length;
 }
 function mayPosition(now: number): boolean {
-  const gapOk = now < lastSendAt || now - lastSendAt >= PRESENCE_POSITION_GAP_MS;
-  return gapOk && sendsInWindow(now) < PRESENCE_POSITION_SENDS;
+  return now - lastSendAt >= PRESENCE_POSITION_GAP_MS && sendsInWindow(now) < PRESENCE_POSITION_SENDS;
 }
 function mayPriority(now: number): boolean { return sendsInWindow(now) < PRESENCE_MAX_SENDS; }
 function spend(now: number): void { sendTimes.push(now); lastSendAt = now; stats.sent++; }
@@ -146,7 +169,7 @@ const fanout = (e: Entry) => { e.subs.forEach((fn) => { try { fn(e.peers); } cat
 // say who is online; the pill's COLOUR reads this instead. Keyed to the CURRENT community topic (crewPresenceTopic): the
 // car service can briefly still hold the club you just left.
 const crewSubs = new Set<() => void>();
-function notifyCrew(): void { crewSubs.forEach((fn) => { try { fn(); } catch {} }); maybeCrumb(Date.now()); }
+function notifyCrew(): void { crewSubs.forEach((fn) => { try { fn(); } catch {} }); maybeCrumb(monoNow()); }
 
 /** The presence topic this phone joins for its crew: the active community's — none in ghost mode. The one rule, shared by
  *  the car service (carDataService) and the crew pill. */
@@ -183,7 +206,7 @@ export function crewPeersNow(topic: string | null): RawPeer[] {
 
 /** `flush` = called by the flush timer: send only if a PRIORITY send is still owed (position requests are never queued). */
 function doTrack(e: Entry, flush = false): void {
-  const now = Date.now();
+  const now = monoNow();
   maybeCrumb(now);
   if (!e.channel || e.status !== "SUBSCRIBED") return;
   const sorted = [...e.providers].sort((a, b) => b.priority - a.priority);
@@ -314,14 +337,14 @@ export function setPresenceLogger(fn: PresenceLogger | null): void { presenceLog
 
 const CRUMB_EVERY_MS = 60_000;
 const stats = { sent: 0, dropped: 0, drops: 0, greyMs: 0, maxN: 0 };
-let periodStart = 0;
-let sampleAt = 0;
+let periodStart: number | null = null;   // monoNow() values — performance.now() starts near 0, so 0 is not "unset"
+let sampleAt: number | null = null;
 let sampleGrey = true;
 let lastCrumbKey = "";
 
 function samplePill(now: number): number {
   const n = onlineCrewCount(crewPresenceTopic());
-  if (sampleAt && sampleGrey && now >= sampleAt) stats.greyMs += now - sampleAt;
+  if (sampleAt !== null && sampleGrey) stats.greyMs += now - sampleAt;
   sampleAt = now;
   sampleGrey = n === 0;
   if (n > stats.maxN) stats.maxN = n;
@@ -332,8 +355,8 @@ function maybeCrumb(now: number): void {
   let n = 0;
   try { n = samplePill(now); } catch { return; }
   if (!presenceLogger) return;
-  if (!periodStart) { periodStart = now; return; }
-  if (now >= periodStart && now - periodStart < CRUMB_EVERY_MS) return;
+  if (periodStart === null) { periodStart = now; return; }
+  if (now - periodStart < CRUMB_EVERY_MS) return;
   try {
     const topic = crewPresenceTopic();
     const e = topic ? entries.get(topic) : undefined;
@@ -342,7 +365,7 @@ function maybeCrumb(now: number): void {
     const key = `${live}${topic ? 1 : 0}${ghost}`;
     const changed = key !== lastCrumbKey || stats.sent > 0 || stats.dropped > 0 || stats.drops > 0 || stats.maxN > 0;
     if (topic || changed) {
-      const period = Math.max(0, now - periodStart);
+      const period = now - periodStart;
       presenceLogger(`crew-presence live=${live} greyMs=${Math.min(stats.greyMs, period)} drops=${stats.drops} maxN=${stats.maxN} topic=${topic ? 1 : 0} ghost=${ghost} sent=${stats.sent} dropped=${stats.dropped}`);
       lastCrumbKey = key;
     }
@@ -390,7 +413,7 @@ export function joinPresence(opts: {
         // a channel removed on the next line. With the window full it is skipped, and removeChannel's leave is what
         // takes us off the topic (HYPOTHESIS: the server drops a departed channel's presence — Phoenix presence is
         // tied to the channel process; not measured on Supabase).
-        const now = Date.now();
+        const now = monoNow();
         if (ent.channel && ent.status === "SUBSCRIBED") {
           if (mayPriority(now)) { spend(now); try { ent.channel.untrack?.(); } catch {} }
           else stats.dropped++;

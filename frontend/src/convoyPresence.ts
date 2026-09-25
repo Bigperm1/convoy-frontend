@@ -127,6 +127,13 @@ export function useConvoyPresence(
   // The share source the crew last saw (live fix vs parked car spot) — a flip bypasses the 1.5 s window like a status
   // flip: after it `coords` sits still on the car spot, so a throttled flip would have no later tick to ride.
   const lastSrcRef = useRef<string>("");
+  // …and it is DERIVED HERE, during render, so it can be an effect dependency (Codex review of 6292ade4). Reading it only
+  // inside the effect missed the case that matters: the last fix before a disconnect is dropped by the budget, the
+  // disconnect lands on that same fix (published == live → 'live'), then the walk moves ONLY the live fix. `coords`
+  // stays pinned on the car spot, so no position dep changes — only `src` does ('spot'), and only this dep re-runs the
+  // effect to spend the reserved slot on the spot. Without it the crew kept the older driving position until the 90 s
+  // status flip. A string, so the effect re-runs on the flip alone, not on every walking fix.
+  const src = coords ? shareSrc(coords, live) : "";
 
   // Build OUR presence payload from the freshest me/coords (the hub calls this
   // on every track(), and once automatically when the channel goes SUBSCRIBED).
@@ -230,7 +237,6 @@ export function useConvoyPresence(
     const statusChanged = (me.status ?? "live") !== lastStatusRef.current;
     const ident = [me.marker, me.cls, me.clsPri, me.clsSec, me.arrPri, me.arrSec, me.arrPick, me.scanId, me.activeColor, me.carColor].join("|");
     const identChanged = ident !== lastIdentRef.current;
-    const src = shareSrc(coords, liveRef.current);
     const srcChanged = src !== lastSrcRef.current;
     if (!statusChanged && !identChanged && !srcChanged && now - lastTrackRef.current < 1500) return;
     lastTrackRef.current = now;
@@ -238,7 +244,7 @@ export function useConvoyPresence(
     lastIdentRef.current = ident;
     lastSrcRef.current = src;
     handleRef.current.track();
-  }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec, me?.arrPick, me?.scanId]);
+  }, [coords?.lat, coords?.lng, coords?.heading, src, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec, me?.arrPick, me?.scanId]);
 
   return { peers, status };
 }

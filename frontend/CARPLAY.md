@@ -230,9 +230,13 @@ Cold falls through to the module-scope handlers.
   hub-global rolling budget (all topics, never reset on a rebuild): ≤ 4 position tracks per 31 s and
   ≥ 7.5 s apart, the 5th slot reserved for priority sends (status / appearance / `src` live↔car-spot
   flips, the post-SUBSCRIBE track incl. supabase-js auto-rejoin, `untrack`); excess positions are
-  dropped, a held priority send is flushed by one timer. Crew positions over presence therefore move
-  ~every 8 s (1 Hz fixes) instead of ~2 s. Gate: `tools/sim-qc/crew_online_test.mts` B0–B7. Telemetry:
-  `crew-presence live= greyMs= drops= maxN= topic= ghost= sent= dropped=`, ≤ 1 row/min.
+  dropped, a held priority send is flushed by one timer. The budget runs on `performance.now()`
+  (monotonic), never `Date.now()` — a wall-clock correction must not reopen the server's window.
+  `src` is derived during render in `useConvoyPresence` and is an effect dependency: walking away from
+  a just-unplugged car moves only the live fix, and that flip alone must send the car spot. Crew
+  positions over presence therefore move ~every 8 s (1 Hz fixes) instead of ~2 s. Gate:
+  `tools/sim-qc/crew_online_test.mts` B0–B7, C0–C3 (clock), H1–H3 (the hook), K1–K3 (the cold car
+  service). Telemetry: `crew-presence live= greyMs= drops= maxN= topic= ghost= sent= dropped=`, ≤ 1 row/min.
 - **Route/ETA** — warm: the phone mirror. Cold: `navNotification`'s banner engine off
   `paceSPerM`. The mirror must not clobber the cold values (rule 6).
 - **Position** — priority-gated feed (mirror > fg watch > bg task), staleness 2.6s.

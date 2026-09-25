@@ -1,8 +1,11 @@
 // A fake realtime client: one channel per topic, whose presenceState() the test sets and whose "sync" it fires.
 export const SUPABASE_ENABLED = true;
 export const channels = new Map();
-// Every presence send the hub makes (track AND untrack — Supabase counts both), stamped with Date.now(), in order.
+// Every presence send the hub makes (track AND untrack — Supabase counts both), in order, stamped by the SERVER's clock:
+// the test's true elapsed time (__setClock), independent of the phone's wall clock (Date.now) and of the hub's own clock.
 export const sends = [];
+let clock = () => Date.now();
+export function __setClock(fn) { clock = fn; }
 export function __sync(topic, state) {
   const c = channels.get(topic);
   if (!c) throw new Error("no channel " + topic);
@@ -21,8 +24,8 @@ export const supabase = {
       on(type, filter, cb) { if (type === "presence" && filter?.event === "sync") c.syncCb = cb; return c; },
       subscribe(cb) { c.statusCb = cb; try { cb?.("SUBSCRIBED"); } catch {} return c; },
       presenceState() { return c.state; },
-      track(payload) { sends.push({ t: Date.now(), topic, kind: "track", payload, chan: c }); return Promise.resolve("ok"); },
-      untrack() { sends.push({ t: Date.now(), topic, kind: "untrack", chan: c }); return Promise.resolve("ok"); },
+      track(payload) { sends.push({ t: clock(), topic, kind: "track", payload, chan: c }); return Promise.resolve("ok"); },
+      untrack() { sends.push({ t: clock(), topic, kind: "untrack", chan: c }); return Promise.resolve("ok"); },
     };
     channels.set(topic, c);
     return c;

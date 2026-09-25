@@ -17,6 +17,17 @@
 //   B5 two topics (a club switch) share ONE budget
 //   B6 leave's untrack counts, and is skipped (not sent over the limit) when the window is full
 //   B7 the crew-presence crumb: its format, ≥ 60 s apart (≤ 60/h), and no heartbeat without a topic
+// THE BUDGET'S CLOCK (Codex review of 6292ade4): three clocks — the server's window (true elapsed time, stamped by the
+// stub), the phone's wall clock (Date.now, corrected mid-run), the hub's elapsed clock (injected):
+//   C0 NEGATIVE CONTROL — the hub on the WALL clock: a forward correction lets a 6th send into one server window
+//   C1 backward wall corrections (−1 s, −60 s) with the budget spent: nothing extra goes out; the held send flushes on time
+//   C2 a forward correction (+60 s) with the budget spent: still held until the SERVER's window frees
+//   C3 2 min of 1 Hz movement with corrections every 10 s: never over 5 / 4 in any server window
+// THE SHARE-SOURCE FLIP, END TO END (Codex review of 6292ade4) — the budget drops the last fix before a disconnect, the
+// disconnect lands on that same fix, then ONLY the live fix moves (walking away) while the shared position stays pinned:
+//   H1–H3 the phone: the REAL useConvoyPresence under a minimal hooks model (crew/stubs/react.mjs, React's deps rule)
+//   K1–K3 the cold car service: the REAL carDataService (onStoreTick → trackPresence) with its transports stubbed
+//   W1 importing convoyPresence wires the crumb writer (logEvent) into the hub
 // Run: node --experimental-strip-types tools/sim-qc/crew_online_test.mts
 
 import { register } from "node:module";
@@ -98,8 +109,11 @@ off();
 
 // ═══ THE PRESENCE BUDGET ═══════════════════════════════════════════════════════════════════════════════════════════
 const WIN = 30_000;   // Supabase's window — what the checks hold the hub to (the hub keeps a 1 s margin on top)
-let NOW = Date.now() + 3_600_000;   // an hour past anything stamped with the real clock above
-Date.now = () => NOW;
+let NOW = Date.now() + 3_600_000;   // TRUE elapsed time: an hour past anything stamped with the real clock above
+let WALL = 0;                        // the phone's wall-clock error — Date.now() = NOW + WALL; C-cases correct it mid-run
+Date.now = () => NOW + WALL;
+hub.setPresenceClock(() => NOW);     // the hub's elapsed clock (performance.now() in the app) tracks true time
+sb.__setClock(() => NOW);            // the server stamps every send on true time
 type Timer = { at: number; fn: () => void; id: number };
 let timers: Timer[] = [];
 let timerId = 0;
@@ -143,7 +157,7 @@ function worst(list: Send[]): { all: number; pos: number; sixthAfterMs: number |
   return { all, pos, sixthAfterMs };
 }
 const mark = () => sb.sends.length;
-/** Sends the hub's own 31 s window holds at `now` — to prove a case's precondition ("the budget is spent"). */
+/** Sends the hub's own 31 s window holds at true time `now` — to prove a case's precondition ("the budget is spent"). */
 const inHubWindow = (now: number) => sb.sends.filter((x: Send) => x.t > now - 31_000 && x.t <= now).length;
 const since = (m: number): Send[] => classify(sb.sends.slice(m));
 
@@ -323,6 +337,217 @@ let carSvc: any;
   for (let i = 1; i <= 5; i++) { advanceTo(t8 + i * 61_000); sb.__sync("convoy:community:Z", { me: [{ lat: 1, lng: 1 }] }); }
   ok("B7d no crew topic and nothing changing: at most one crumb (the change), then no heartbeat", logs.length <= 1, `${logs.length} crumb(s): ${logs.join(" | ")}`);
   idle.leave();
+}
+
+// ═══ THE BUDGET'S CLOCK ═════════════════════════════════════════════════════════════════════════════════════════════
+const drain = () => advanceTo(NOW + 40_000);   // everything leaves every window (hub 31 s, server 30 s)
+/** A presence join on its own topic whose next send is an IDENTITY change (a priority send) on demand. */
+function priorityDriver(topic: string) {
+  const p: any = { user_id: "me", handle: "jeff", status: "live", marker: "arrow", src: "live", lat: 49.2, lng: -123.1 };
+  const h = hub.joinPresence({ topic, selfId: "me", priority: 2, getPayload: () => ({ ...p }), onPeers: () => {} });
+  let flip = 0;
+  return {
+    h, p,
+    // A NEW appearance every call (A→B→A would net to "no change", which the hub rightly does not send).
+    identity() { p.cls = `cls${++flip}`; h.track(); },
+    move() { p.lat += 0.0003; h.track(); },
+  };
+}
+/** Five priority sends 1 s apart → the window is full (true time). */
+function fillFive(d: ReturnType<typeof priorityDriver>, from: number): void {
+  for (let i = 1; i <= 5; i++) { advanceTo(from + i * 1000); d.identity(); }
+}
+
+// C0 NEGATIVE CONTROL — the budget on the phone's WALL clock (what 6292ade4 did): a +60 s correction expires the window
+// early and a 6th send lands inside one server window. The checker must see it.
+{
+  drain();
+  hub.setPresenceClock(() => Date.now());
+  const d = priorityDriver("convoy:community:C0");
+  drain();
+  const m = mark();
+  const t = NOW;
+  fillFive(d, t);
+  WALL += 60_000;
+  d.identity();
+  const w = worst(since(m));
+  ok("C0 NEGATIVE CONTROL: on the wall clock, a +60 s correction lets a 6th send into one 30 s server window", w.all > 5, `worst ${w.all}`);
+  d.h.leave();
+  WALL = 0;
+  drain();
+  hub.setPresenceClock(() => NOW);
+  drain();
+}
+
+// C1 — backward corrections with the budget spent.
+{
+  drain();
+  const d = priorityDriver("convoy:community:C1");
+  drain();
+  const m = mark();
+  const t = NOW;
+  fillFive(d, t);
+  const full = inHubWindow(NOW) === 5;
+  WALL -= 1_000;
+  d.identity();
+  const heldA = sb.sends.length === m + 5;
+  advanceTo(NOW + 500);
+  WALL -= 60_000;
+  d.identity();
+  d.move();
+  const heldB = sb.sends.length === m + 5;
+  // Stationary from here: only the flush timer can send the held change.
+  const freeAt = sb.sends[m].t + 31_000;
+  advanceTo(freeAt + 1_000);
+  const s = since(m);
+  const w = worst(s);
+  ok("C1 budget spent, wall clock stepped back 1 s then 60 s: nothing extra goes out", full && heldA && heldB);
+  ok("C1b the held change is flushed when the oldest send leaves the window on TRUE time, never over 5",
+    s.length === 6 && Math.abs(s[5].t - freeAt) <= 10 && w.all <= 5, `${s.length} sends, 6th at ${s[5] ? s[5].t - freeAt : "-"} ms from the true free time, worst ${w.all}`);
+  d.h.leave();
+  WALL = 0;
+}
+
+// C2 — a forward correction with the budget spent.
+{
+  drain();
+  const d = priorityDriver("convoy:community:C2");
+  drain();
+  const m = mark();
+  const t = NOW;
+  fillFive(d, t);
+  WALL += 60_000;
+  d.identity();
+  d.move();
+  const held = sb.sends.length === m + 5;
+  const freeAt = sb.sends[m].t + 31_000;
+  advanceTo(freeAt - 1_000);
+  const stillHeld = sb.sends.length === m + 5;
+  advanceTo(freeAt + 1_000);
+  const s = since(m);
+  const w = worst(s);
+  ok("C2 wall clock jumped +60 s with the budget spent: held until the SERVER's window frees, never over 5",
+    held && stillHeld && s.length === 6 && w.all <= 5, `${s.length} sends, worst ${w.all}`);
+  d.h.leave();
+  WALL = 0;
+}
+
+// C3 — two minutes of 1 Hz movement while the wall clock is corrected every 10 s.
+{
+  drain();
+  const d = priorityDriver("convoy:community:C3");
+  const m = mark();
+  const t = NOW;
+  const steps = [-1_000, +60_000, -60_000, +1_000, -30_000, +90_000];
+  for (let i = 1; i <= 120; i++) {
+    advanceTo(t + i * 1000);
+    if (i % 10 === 0) WALL += steps[(i / 10) % steps.length];
+    if (i % 25 === 0) d.identity(); else d.move();
+  }
+  const s = since(m);
+  const w = worst(s);
+  ok("C3 2 min at 1 Hz with wall corrections every 10 s: never over 5 sends / 4 position tracks per server window, still ~8 s cadence",
+    w.all <= 5 && w.pos <= 4 && s.length >= 14, `${s.length} sends, worst ${w.all}/${w.pos}`);
+  d.h.leave();
+  WALL = 0;
+}
+
+// ═══ THE SHARE-SOURCE FLIP, END TO END ══════════════════════════════════════════════════════════════════════════════
+const R: any = await import(new URL("./crew/stubs/react.mjs", import.meta.url).href);
+const bc: any = await import(new URL("./crew/stubs/crashBreadcrumb.mjs", import.meta.url).href);
+const cp: any = await import("../../src/convoyPresence.ts");
+
+// H — the phone map's hook. Drive 20 s at 1 Hz, the budget drops the last fix; CarPlay unplugs ON that fix (the gate now
+// shares the car spot, which IS that fix); then the driver walks away: only the live fix moves.
+{
+  drain();
+  settings.__reset({ activeCommunityId: "H" });
+  const TOPIC_H = "convoy:community:H";
+  const me = { user_id: "me", handle: "jeff", status: "live", marker: "arrow" };
+  const inst = R.__mount((ch: string, m: any, c: any, l: any) => cp.useConvoyPresence(ch, m, c, l));
+  let P = { lat: 49.2, lng: -123.1, heading: 90 };
+  const mH = mark();
+  const tH = NOW;
+  R.__render(inst, TOPIC_H, me, P, { lat: P.lat, lng: P.lng });
+  sb.__sync(TOPIC_H, { me: [{ lat: 1, lng: 1 }], olaf: [{ lat: 49.3, lng: -123.0 }] });
+  for (let i = 1; i <= 20; i++) {
+    advanceTo(tH + i * 1000);
+    P = { ...P, lat: P.lat + 0.0003 };
+    R.__render(inst, TOPIC_H, me, P, { lat: P.lat, lng: P.lng });
+  }
+  const last = { ...P };
+  const drove = sb.sends.slice(mH);
+  const finalDropped = drove.length > 0 && drove[drove.length - 1].payload?.lat !== last.lat;
+  // Unplugged at t+21, standing on the last fix: the gate's spot == the live fix, published unchanged.
+  advanceTo(tH + 21_000);
+  R.__render(inst, TOPIC_H, me, last, { lat: last.lat, lng: last.lng });
+  const mW = mark();
+  // Walking away: the published position stays pinned on the spot; only the live fix moves.
+  for (let k = 1; k <= 9; k++) {
+    advanceTo(tH + 21_000 + k * 1000);
+    R.__render(inst, TOPIC_H, me, last, { lat: last.lat + k * 0.00002, lng: last.lng });
+  }
+  const walk = sb.sends.slice(mW);
+  ok("H1 pre: the budget dropped the final driving fix (the crew hold an older position)", finalDropped,
+    `last sent lat ${drove[drove.length - 1]?.payload?.lat} vs final ${last.lat}`);
+  ok("H2 the first walking fix alone (shared position pinned) sends the car spot at once — src 'spot', the reserved slot",
+    walk.length >= 1 && walk[0].t === tH + 22_000 && walk[0].payload?.src === "spot" && walk[0].payload?.lat === last.lat,
+    walk.length ? `sent +${walk[0].t - tH} ms src=${walk[0].payload?.src} lat=${walk[0].payload?.lat}` : "nothing sent while walking");
+  ok("H3 …and only once: the rest of the walk sends nothing (the pinned spot does not re-send)", walk.length === 1, `${walk.length} send(s)`);
+  R.__unmount(inst);
+}
+
+// W1 — the phone's import of convoyPresence wired logEvent as the hub's crumb writer.
+{
+  const before = bc.rows.length;
+  const d = priorityDriver("convoy:community:W");
+  settings.__reset({ activeCommunityId: "W" });
+  for (let i = 1; i <= 70; i++) { advanceTo(NOW + 1000); d.move(); }
+  const got = bc.rows.slice(before).filter((r: string) => r.startsWith("crew-presence "));
+  ok("W1 importing convoyPresence wires crashBreadcrumb.logEvent: crew-presence rows reach it", got.length >= 1, got[0] ?? "none");
+  d.h.leave();
+}
+
+// K — the cold car service (no phone map): same drive, same unplug on the dropped fix, same walk. Its trigger is the
+// LIVE fix in carStore (onStoreTick), not the published position — so the walk reaches trackPresence.
+{
+  drain();
+  settings.__reset({ activeCommunityId: "K" });
+  const cs: any = await import(new URL("./crew/stubs/carStore.mjs", import.meta.url).href);
+  const lp: any = await import(new URL("./crew/stubs/locationPrivacy.mjs", import.meta.url).href);
+  const cds: any = await import("../../src/carplay/carDataService.ts");
+  const settle = async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r)); };
+  lp.__set({ mode: "live", status: "live", spot: null });
+  let lat = 49.4;
+  const lng = -123.3;
+  cs.__set({ selfLat: lat, selfLng: lng, speedMs: 20 });
+  const mK = mark();
+  const tK = NOW;
+  cds.startCarDataService();
+  await settle();
+  const joined = sb.sends.length > mK && sb.sends[mK].topic === "convoy:community:K";
+  for (let i = 1; i <= 20; i++) {
+    advanceTo(tK + i * 1000);
+    lat += 0.0003;
+    cs.__set({ selfLat: lat });
+  }
+  const drove = sb.sends.slice(mK);
+  const finalDropped = drove[drove.length - 1]?.payload?.lat !== lat;
+  advanceTo(tK + 21_000);
+  lp.__set({ mode: "spot", spot: { lat, lng } });   // unplugged ON the last fix: no store write, no tick
+  const mW = mark();
+  for (let k = 1; k <= 9; k++) {
+    advanceTo(tK + 21_000 + k * 1000);
+    cs.__set({ selfLat: lat + k * 0.00002 });
+  }
+  const walk = sb.sends.slice(mW);
+  ok("K1 pre: the cold service joined and broadcast; the budget dropped its final driving fix", joined && finalDropped,
+    `last sent lat ${drove[drove.length - 1]?.payload?.lat} vs final ${lat}`);
+  ok("K2 the first walking fix (live only) sends the car spot at once — src 'spot'",
+    walk.length >= 1 && walk[0].t === tK + 22_000 && walk[0].payload?.src === "spot" && walk[0].payload?.lat === lat,
+    walk.length ? `sent +${walk[0].t - tK} ms src=${walk[0].payload?.src} lat=${walk[0].payload?.lat}` : "nothing sent while walking");
+  ok("K3 …and only once", walk.length === 1, `${walk.length} send(s)`);
+  cds.stopCarDataService();
 }
 
 console.log(failed ? `\nFAIL crew_online (${failed})` : "\nPASS crew_online");

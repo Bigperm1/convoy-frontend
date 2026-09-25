@@ -37,7 +37,7 @@ ok("C5 every kind has ≥ 4 openers and none of them already says 'ahead'", ["po
 // D · map.tsx uses it
 const mapTsx = readFileSync(new URL("../../app/(app)/map.tsx", import.meta.url), "utf8");
 ok("D1 the map effect takes its lead from hazardAheadLeadM and re-arms at lead + HAZARD_AHEAD_REARM_EXTRA_M", mapTsx.includes("const leadM = hazardAheadLeadM(coords.speed ?? 0);") && mapTsx.includes("if (dM > leadM + HAZARD_AHEAD_REARM_EXTRA_M) { announced.delete(h.id); continue; }"));
-ok("D2 the pin must be in the forward cone of the fix's course (course first, sticky heading as the fallback)", mapTsx.includes("const course = coords.course ?? coords.heading ?? null;") && mapTsx.includes("if (!isAheadOf(course, bearingDeg(coords.lat, coords.lng, h.lat, h.lng))) continue;"));
+ok("D2 the pin must be in the forward cone of the fix's OWN course — never the sticky display heading (Codex r3)", mapTsx.includes("const course = coords.course ?? null;") && !mapTsx.includes("coords.course ?? coords.heading") && mapTsx.includes("if (!isAheadOf(course, bearingDeg(coords.lat, coords.lng, h.lat, h.lng))) continue;"));
 ok("D3 Scout speaks the kind + distance in the driver's unit, and leaves a hazard-ahead receipt", mapTsx.includes('announce(hazardAheadLine(h.kind, dM, settings.speedUnit === "mph" ? "mi" : "km"))') && mapTsx.includes("logEvent(`hazard-ahead kind=${h.kind} d=${Math.round(dM)} lead=${Math.round(leadM)}"));
 ok("D4 the fixed 500 m / 800 m call is gone", !/dM <= 500 && kmh >= 20/.test(mapTsx) && !/if \(dM > 800\) \{ announced\.delete/.test(mapTsx));
 

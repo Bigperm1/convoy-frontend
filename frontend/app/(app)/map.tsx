@@ -4444,7 +4444,9 @@ export default function MapScreen() {
     if (!coords || !showHazards || hazards.length === 0) return;
     const kmh = (coords.speed && coords.speed > 0) ? coords.speed * 3.6 : 0;
     const leadM = hazardAheadLeadM(coords.speed ?? 0);
-    const course = coords.course ?? coords.heading ?? null;
+    // The fix's OWN course only (Codex r3, 2026-09-25): `coords.heading` is the STICKY display heading held from earlier
+    // fixes, so after a turn with no course it would reject a real hazard ahead or accept one behind. null → no cone.
+    const course = coords.course ?? null;
     const announced = announcedHazardsRef.current;
     for (const h of hazards) {
       if (!h || !h.id) continue;

@@ -1076,9 +1076,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   8.0 s on the sim (`hazard-panel op=close why=auto`). (4) "A SCOUT NOTIFICATION THAT A SPECIFIC HAZARD IS AHEAD … A GOOD DISTANCE
   AWAY" → `src/hazardAhead.ts`: the fixed 500 m call becomes 45 s of travel (1–2 km), a ±50° forward cone on the fix's course, the
   kind + distance spoken ("Heads up, police reported about 1 kilometer ahead."); sim receipt on a real pin: `hazard-ahead
-  kind=traffic d=1122 lead=1125 kmh=90 spoke=1` + `tts-play`. (5) FAB triangle 26 → 30 pt. (6) ⛔ Codex r2's Android BackHandler
-  REMOVED: with a `hardwareBackPress` listener registered in an effect the panel opened in state but never painted (iOS sim, 4 of 4;
-  2 of 2 painted without) — mechanism unexplained, auto-close covers the concern. The report path itself was exercised for real from a
+  kind=traffic d=1122 lead=1125 kmh=90 spoke=1` + `tts-play`. (5) FAB triangle 26 → 30 pt. (6) ⚠ BENCH PAINT FLAKE, NOT root-caused: on the iPhone 16 Pro sim the phone panel
+  sometimes opens in STATE (open + layout + auto-close receipts, card laid out at window 25,380 352×190) but paints NOTHING —
+  across 25 cold-launch trials of nine bundle variants (in-tree card / transparent Modal; RN Animated native + JS, Reanimated
+  FadeInDown, static opacity) it painted 11 times and not 14, with no variant clearly clean except the very first (6/6). The
+  Android BackHandler was blamed for an hour and cleared (it failed and passed with and without it). What ships: a transparent
+  Modal card with NO entrance animation (the structurally simplest thing) + a `hazard-panel layout` receipt, so a field
+  "nothing showed" can be read against the rows. OTA-BZ's Modal sheet painted on Jeff's phone; this needs his phone too. The report path itself was exercised for real from a
   remote bench location (Traffic tile → `hazard-panel pick`, Supabase row, pin at the car; row expired by hand after). Gates:
   hazard_panel_test D1–D11 + E1–E4, hazard_ahead_test 19, 59/59 sim-qc, typecheck, eslint 0, trap-check, doc-check, nav-lock PASS.
   Codex ×3 on the panel (r1/r2 findings fixed; r3 on the batch owed at the time of writing). Hazard lifetime, for the record

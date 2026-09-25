@@ -19,7 +19,7 @@
 // the same translucent floor rgba(24,24,28,0.66), the same hairline, the same GlassFill tinted by hudTint(), the same
 // pop (opacity + 12 pt rise + 0.94 scale). WeatherHUD.tsx styles.forecastCard is the reference — change both or neither.
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Image, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { GlassFill, hudTint } from "../Glass";
 import { PressableScale } from "../ui/PressableScale";
 import { useAppSkin } from "../appSkin";
@@ -54,9 +54,13 @@ const GAP_ABOVE_STACK = 10;
 const TOP_CLEAR = 120;
 /** Until onLayout reports the real height (title + faces + labels + hint). */
 const CARD_H_GUESS = 190;
-// Above every map overlay that a stray tap must not reach while the panel is up (topBar / H button zIndex 100, the
-// weather HUD 70, the pitstop card 200) and below the toasts (999+). The backdrop sits one under the card.
-const Z_CARD = 301;
+// ⛔ THE CARD LIVES IN A transparent Modal — its own window — NOT in the map screen's view tree (2026-09-25, measured).
+// As a plain absolutely-positioned sibling of the map (zIndex 301 over a backdrop at 300) the SAME component painted on
+// some cold launches and not on others: open + auto-close receipts fired, anchor identical, nothing on screen — 0 of 8
+// launches across four bundles vs 6 of 6 on two other bundles of near-identical code, native- and JS-driven opacity alike.
+// Never root-caused. A Modal is composited above everything by UIKit / WindowManager, so it cannot lose that race, and
+// its onRequestClose gives Android Back for free (no BackHandler — see the note below). The card's `bottom` is measured
+// from the window's bottom edge, which is where the map screen's `bottom` (styles.fabStack) is measured from too.
 // One report at a time (Codex review 2026-09-24): the panel closes on the tap, so React state cannot dedupe a second
 // tap or a re-open during a slow POST — the CarPlay path has _reportInFlight for the same reason. Module-level so it
 // survives the panel unmounting; released when the caller's promise settles.
@@ -77,6 +81,7 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
   const metal = useAppSkin();
   const { width: winW, height: winH } = useWindowDimensions();
   const [cardH, setCardH] = useState(CARD_H_GUESS);
+  const cardRef = useRef<View>(null);
   // Close on the TRANSITION into turn-by-turn only (Codex review r2, 2026-09-24): a panel opened DURING a drive —
   // the whole point of a hazard report — must stay up; one left open when the drive auto-starts must not sit
   // over guidance. The previous value rides a ref, so the component stays mounted across visible=false.
@@ -99,17 +104,15 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
     const t = setTimeout(() => close("auto"), HAZARD_PANEL_AUTO_CLOSE_MS);
     return () => clearTimeout(t);
   }, [visible]);
-  // The weather forecast card's pop, exactly (WeatherHUD.tsx cardAnim): no bounce, nothing was thrown.
-  const a = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!visible) { a.setValue(0); return; }
-    Animated.spring(a, { toValue: 1, useNativeDriver: true, tension: 150, friction: 13 }).start();
-  }, [visible, a]);
-  // ⛔ NO BackHandler here (2026-09-25, measured 4-of-4 on the iPhone 16 Pro sim): with a hardwareBackPress listener
-  // registered in an effect while the panel is up, the panel opened in STATE (op=open … op=close why=auto receipts, 8 s
-  // apart) but never PAINTED — the same bundle with the listener removed paints every time. Mechanism unexplained
-  // (RN's BackHandler.ios.js is a stub), so the listener is gone on both platforms rather than shipped blind to Android.
-  // Codex r2's concern (Android Back reaching React Navigation with the panel open) is covered by the auto-close above.
+  // ⛔ NO ENTRANCE ANIMATION ON THIS CARD (2026-09-25, measured on the iPhone 16 Pro sim): every fade-in that starts the
+  // card at opacity 0 — RN Animated with the native driver, RN Animated on the JS thread, and Reanimated's FadeInDown —
+  // left it INVISIBLE on 13 of 15 cold launches (open + auto-close receipts fired, nothing painted), while the same build
+  // with a static `opacity: 1` painted first time. Not root-caused; HYPOTHESIS: UI-thread prop updates after the mount
+  // commit are not reaching this view in that state (the app's own frame pacing is the first suspect). Until that is
+  // measured, the card simply appears. Gate D8 forbids an animated opacity here.
+  // NO BackHandler here: Android Back is the Modal's onRequestClose (close("back")). A hardwareBackPress listener was
+  // tried on 2026-09-25 and blamed for the unpainted panel; the later trials showed the paint failure was independent of
+  // it (see the Modal note above), but the Modal makes it moot.
   useEffect(() => {
     if (!visible) return;
     try { logEvent(`hazard-panel op=open surf=phone anchor=${Math.round(anchorBottom)} winH=${Math.round(winH)}`); } catch {}
@@ -120,24 +123,25 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
   // TOP_CLEAR from the top and may touch the compass FAB, never the Hazards button below it.
   const bottom = Math.min(anchorBottom + GAP_ABOVE_STACK, Math.max(0, winH - TOP_CLEAR - cardH));
   return (
-    <>
+    <Modal transparent visible animationType="none" onRequestClose={() => close("back")} statusBarTranslucent hardwareAccelerated>
       {/* Tap anywhere outside the card to close. Transparent on purpose: the map stays readable, the way the weather
           forecast card leaves it. Covers the FAB stack too, so a stray tap on Crew while the panel is up just closes it. */}
-      <Pressable testID="hazard-sheet-backdrop" style={[StyleSheet.absoluteFill, { zIndex: Z_CARD - 1 }]} onPress={() => close("tap")} accessibilityLabel="Close" />
-      <Animated.View
+      <Pressable testID="hazard-sheet-backdrop" style={StyleSheet.absoluteFill} onPress={() => close("tap")} accessibilityLabel="Close" />
+      <View
         testID="hazard-sheet"
-        onLayout={(e) => { const h = Math.round(e.nativeEvent.layout.height); if (h > 0 && h !== cardH) setCardH(h); }}
+        ref={cardRef}
+        onLayout={(e) => {
+          const { x, y, width, height } = e.nativeEvent.layout;
+          const h = Math.round(height); if (h > 0 && h !== cardH) setCardH(h);
+          // Receipt: where the card actually landed, in its own frame and in the window (bench diagnosis, 2026-09-25).
+          try { cardRef.current?.measureInWindow?.((wx, wy, ww, wh) => { try { logEvent(`hazard-panel layout x=${Math.round(x)} y=${Math.round(y)} w=${Math.round(width)} h=${h} win=${Math.round(wx)},${Math.round(wy)},${Math.round(ww)},${Math.round(wh)}`); } catch {} }); } catch {}
+        }}
         style={[
           styles.card,
           {
             width: cardW,
             left: Math.round((winW - cardW) / 2),
             bottom,
-            opacity: a,
-            transform: [
-              { translateY: a.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
-              { scale: a.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
-            ],
           },
         ]}
       >
@@ -166,8 +170,8 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss, ancho
           ))}
         </View>
         <Text maxFontSizeMultiplier={1.2} style={styles.hint}>Pinned where you were 5 seconds ago. The crew sees it right away.</Text>
-      </Animated.View>
-    </>
+      </View>
+    </Modal>
   );
 }
 
@@ -186,7 +190,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(24,24,28,0.66)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.14)",
-    zIndex: Z_CARD,
     ...Platform.select({
       ios: { shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
       android: { elevation: 10 },

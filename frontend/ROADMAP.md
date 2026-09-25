@@ -1066,6 +1066,13 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-CE `414e1207` (code `3d66c662`, 2026-09-25 03:02 PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "make sure this weather
+  background panel colour is the same for the hazard panel and the food/gas etc drop down panels. And the more panel, also switch
+  the more panel … to slide down under the neon food/gas icons and make sure it layers over the version pill."** `src/panelFloor.ts`
+  (the forecast card's floor) on WeatherHUD, HazardSheet, HazardCard and CategoryPills; the Report panel and the card drop their
+  GlassFill so they read identical; the More bottom sheet is gone — an overlay that slides down under the measured chip row, like the
+  results drop-down now, both layered over the crew / version pill (block raised to zIndex 40 while open). Gate panel_floor_test
+  P1–P5; sim-verified (drop-down + More over the pill).
 - **✅ PUBLISHED in OTA-CD `2629bb48` (code `6f0a1a9c`, 2026-09-25 02:55 PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "make the 3d/2d glyph bigger as
   well … the hazard on the fab doesn't have the same type of effect as the 3d or crew glyphs."** The Hazards button in the candy
   finish on the phone (34 pt) AND the head units (`hz_hazard_candy`, same 132 px PNGs; the grid tile stays flat) —

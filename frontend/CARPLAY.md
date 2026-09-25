@@ -151,6 +151,9 @@ Flow: `onMapButtonPressed`/`onBarButtonPressed` → `handleCarMapButton`/`handle
 Android Auto mirrors the same ids (`aaMapButtons`); its Report grid is `createTemplate('grid')` + `pushTemplate`, the
 press arrives as `gridButtonPressed` with our template id, and `backButtonPressed` pops it (androidx tints the tile
 art white until a native tinted-icon path ships).
+The phone has the same panel (2026-09-24, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"): a Hazards FAB below Crew
+opens `src/components/HazardSheet.tsx` — the same four report tiles from `hazardPanel.ts` in the driver's metal; the phone
+keeps its compass FAB, so no compass tile there. A tile reports through `map.tsx reportHazard` (the voice intents' path).
 
 **Warm vs cold.** With the phone app open, `ConvoyCarPlay` intercepts some ids first and
 calls live refs *directly* (never the bus) — don't hunt for a bus event on the warm path.

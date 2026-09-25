@@ -44,7 +44,15 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss }: {
   dismiss?: boolean;
 }) {
   const metal = useAppSkin();
-  useEffect(() => { if (visible && dismiss) onClose(); }, [visible, dismiss, onClose]);
+  // Close on the TRANSITION into turn-by-turn only (Codex review r2, 2026-09-24): a sheet opened DURING a drive —
+  // the whole point of a hazard report — must stay up; one left open when the drive auto-starts must not sit
+  // over guidance. The previous value rides a ref, so the component stays mounted across visible=false.
+  const prevDismiss = useRef(!!dismiss);
+  useEffect(() => {
+    const was = prevDismiss.current;
+    prevDismiss.current = !!dismiss;
+    if (visible && dismiss && !was) onClose();
+  }, [visible, dismiss, onClose]);
   const y = useRef(new Animated.Value(40)).current;
   useEffect(() => {
     if (!visible) { y.setValue(40); return; }

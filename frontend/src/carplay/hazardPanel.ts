@@ -56,12 +56,23 @@ export function hazardTile(id: string | null | undefined): HazardTile | null {
 export function hazardTapLabel(id: string): string | null {
   return id === HAZARD_BUTTON_ID ? HAZARD_BUTTON_LABEL : null;
 }
+/** The head-unit grid draws each REPORT tile in its kind's colour, like the phone's tinted tiles (Jeff, 2026-09-25, CarPlay
+ *  photo: "make it so that the icons or the glyphs in the hazards window are the same colors as on the phone, just so they
+ *  stand out a little bit"). CarPlay / androidx take a finished image and cannot tint it, so each kind has a baked
+ *  `hz_<glyph>_neon` icon (carButtonIcons.ts, tools/poi-pins/bake_car_hazard_icons.py). The Compass tile keeps its metal. */
+export type HazardNeonGlyph = 'hz_police_neon' | 'hz_crash_neon' | 'hz_hazard_neon' | 'hz_traffic_neon';
+export const HAZARD_NEON_GLYPH: Record<HazardKind, HazardNeonGlyph> = {
+  police: 'hz_police_neon', accident: 'hz_crash_neon', road: 'hz_hazard_neon', traffic: 'hz_traffic_neon',
+};
+export function hazardTileCarGlyph(t: HazardTile): HazardGlyph | HazardNeonGlyph {
+  return t.kind ? HAZARD_NEON_GLYPH[t.kind] : t.glyph;
+}
 /** The grid buttons in the shape BOTH ports read: `id`, `titleVariants[0]`, `image` (androidx RCTTemplate.parseGridItem
  *  reads exactly those keys; CPGridButton takes titleVariants + image). `iconFor` resolves the metal. */
-export function hazardGridButtons<I>(iconFor: (glyph: HazardGlyph) => I): { id: string; titleVariants: string[]; image: I }[] {
-  return HAZARD_TILES.map((t) => ({ id: t.id, titleVariants: [t.title], image: iconFor(t.glyph) }));
+export function hazardGridButtons<I>(iconFor: (glyph: HazardGlyph | HazardNeonGlyph) => I): { id: string; titleVariants: string[]; image: I }[] {
+  return HAZARD_TILES.map((t) => ({ id: t.id, titleVariants: [t.title], image: iconFor(hazardTileCarGlyph(t)) }));
 }
 /** Android Auto: the createTemplate config for the same panel (TemplateParser: "grid" → RCTGridTemplate). */
-export function hazardGridConfigAA<I>(iconFor: (glyph: HazardGlyph) => I) {
+export function hazardGridConfigAA<I>(iconFor: (glyph: HazardGlyph | HazardNeonGlyph) => I) {
   return { type: 'grid', id: HAZARD_TEMPLATE_ID, title: HAZARD_PANEL_TITLE, headerAction: { type: 'back' }, buttons: hazardGridButtons(iconFor) };
 }

@@ -18,7 +18,14 @@ RAMPS = {
 TRI = "M32 9 L57 51 H7 Z"
 BANG = '<path d="M32 23 V37" fill="none" stroke="#000" stroke-width="4.6" stroke-linecap="round"/><circle cx="32" cy="45" r="2.6" fill="#000"/>'
 
-def svg(top, mid, bot):
+def svg(top, mid, bot, transform=None):
+    # `transform` is for the HEAD-UNIT cut only (bake_car_hazard_icons.py); None renders the phone art unchanged.
+    body = f'''<g mask="url(#m)" filter="url(#sh)">
+  <path d="{TRI}" fill="url(#ramp)" stroke="{bot}" stroke-opacity="0.55" stroke-width="1.2" stroke-linejoin="round"/>
+  <g clip-path="url(#c)"><ellipse cx="32" cy="18" rx="22" ry="14" fill="url(#gloss)"/></g>
+</g>'''
+    if transform:
+        body = f'<g transform="{transform}">\n{body}\n</g>'
     return f'''<svg viewBox="0 0 64 64" width="132" height="132" xmlns="http://www.w3.org/2000/svg">
 <defs>
   <linearGradient id="ramp" gradientUnits="userSpaceOnUse" x1="0" y1="9" x2="0" y2="52">
@@ -31,10 +38,7 @@ def svg(top, mid, bot):
   <clipPath id="c"><path d="{TRI}"/></clipPath>
   <filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-color="#000" flood-opacity="0.45"/></filter>
 </defs>
-<g mask="url(#m)" filter="url(#sh)">
-  <path d="{TRI}" fill="url(#ramp)" stroke="{bot}" stroke-opacity="0.55" stroke-width="1.2" stroke-linejoin="round"/>
-  <g clip-path="url(#c)"><ellipse cx="32" cy="18" rx="22" ry="14" fill="url(#gloss)"/></g>
-</g>
+{body}
 </svg>'''
 
 def main():

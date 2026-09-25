@@ -39,7 +39,8 @@ export const HAZARD_ART: Record<Exclude<HazardGlyph, "hz_camera" | "hz_hazard_ca
   hz_compass: { brand: require("../../assets/carplay-glyphs/report/compass_green.png"), premium: require("../../assets/carplay-glyphs/report/compass_silver.png"), ultra: require("../../assets/carplay-glyphs/report/compass_gold.png"), diamond: require("../../assets/carplay-glyphs/report/compass_diamond.png") },
 };
 /** The map button's own art: the triangle in the CANDY finish the crew / 2D/3D buttons wear (Jeff, 2026-09-25) — the same
- *  PNGs the CarPlay car-hazards button carries (tools/poi-pins/bake_hazard_candy.py). */
+ *  art the head units carry, which is cut smaller and centred there (tools/poi-pins/bake_hazard_candy.py; head units:
+ *  bake_car_hazard_icons.py). */
 export const HAZARD_FAB_ART: Record<VisualTier, number> = {
   brand:   require("../../assets/images/premium/hazard_candy.png"),
   premium: require("../../assets/images/premium/hazard_candy_silver.png"),

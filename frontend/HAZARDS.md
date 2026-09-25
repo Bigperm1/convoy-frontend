@@ -27,7 +27,7 @@ votes delete it for everyone. Reports expire by kind (§5).
 | Phone still-there prompt | `HazardCard` `mode="passby"` (`hazard={selected \|\| showReport ? null : passPrompt}`) | "`<label>` ahead — still there?" · "Gone" · "Still there". Never over a tapped-pin card or the Report panel. |
 | Phone report pill | `src/components/AlertToast.tsx` `ReportPill` | Under the crew / version pill, dressed like it (`styles.liveOverlay`), tinted with the kind's bright colour, "`<label>` reported", 4 s. A second mount renders while the search bar is hidden (under the turn banner in turn-by-turn). |
 | CarPlay map buttons | `src/carplay/carActions.ts` `carMapButtonConfig()` (used by `carPlayBootstrap.ts` cold, `ConvoyCarPlay.tsx` warm) | Array: `car-comms` · `car-hazards` · `car-view` · `car-crew` = top → bottom. Panning mode hides from the END, so the mic and Hazards survive a pan. |
-| CarPlay grid | `openHazardPanel` → `getHazardTemplateIOS` (`GridTemplate`, id `hairpin-car-hazards`, title "Report") | The same five tiles (`hazardGridButtons`). One template instance per session. |
+| CarPlay grid | `openHazardPanel` → `getHazardTemplateIOS` (`GridTemplate`, id `hairpin-car-hazards`, title "Report") | The same five tiles (`hazardGridButtons`). The four report tiles draw the kind-coloured `hz_*_neon` glyph (the phone's tinted glyph, §3), the Compass its metal. One template instance per session. |
 | Android Auto map strip | `aaMapButtons()` (used by `ConvoyCarPlay.tsx`, `AndroidAutoRoot.tsx`) | `car-zoom-in` · `car-zoom-out` · `car-hazards` · `car-crew` — Hazards above Crew. The action strip (`AA_ACTION_STRIP`: End · Search · view · comms) has no Hazards. |
 | Android Auto grid | `openHazardPanel` → `bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(...))` + `pushTemplate` | The same five tiles, `headerAction: { type: 'back' }`. androidx tints map-strip icons white (code comment; no native tint patch). HYPOTHESIS, never seen on a unit: grid tile art is tinted white too (CARPLAY.md §4). |
 | Voice | `map.tsx` `voiceBus.subscribe` | Intents `report_police` / `report_accident` / `report_road` / `report_traffic` → `reportHazard(kind, { fromVoice: true })` (spoken acknowledgement). The backend emits them from the agent tool `report_hazard` and a keyword fallback. |
@@ -55,11 +55,19 @@ Backend kinds: `server.py` `create_hazard` rejects anything outside `("police", 
   `{ kind, cat, label, glyph, bright, deep }`; an unknown kind draws as `road`.
 - Phone tiles are rimmed 1.5 pt **and** glyph-tinted in the kind's bright colour (`HazardSheet` `neonFor`); the card's
   glyph tile too. The Compass tile keeps its metal art and rim (`NEON_TONE[metal].rim`).
+- **Head-unit grid tiles match** (Jeff, 2026-09-25: "the same colors as on the phone, just so they stand out"): CarPlay and
+  androidx cannot tint an image, so `hazardTileCarGlyph()` (`hazardPanel.ts`) maps each report tile to a baked
+  `hz_<glyph>_neon` icon — the brand silhouette with every pixel in the kind's bright colour, one icon for all four metals
+  (`CAR_ICON_BY_SKIN`). CarPlay draws grid art in its own colours (Jeff's 09-25 photo shows the Diamond cyan, not white).
+  Android Auto: HYPOTHESIS that the host may still tint grid icons — never seen on a unit or the DHU.
 - Metals (brand green / Silver / Gold / Diamond): head units carry every `hz_*` glyph × four metals in
   `src/carplay/carButtonIcons.ts` `CAR_ICON_BY_SKIN` (incl. `hz_camera` and `hz_hazard_candy`); the phone's
   `HazardSheet.tsx` `HAZARD_ART` holds the five tile glyphs (no `hz_camera`) and `HAZARD_FAB_ART` the candy triangle.
 - The Hazards **map button** wears the **candy** triangle (`HAZARD_BUTTON_GLYPH = 'hz_hazard_candy'`; phone
-  `HAZARD_FAB_ART`, 34 pt) — the finish of the crew and 2D/3D buttons. The grid tile keeps the flat glyph. The static,
+  `HAZARD_FAB_ART`, 34 pt) — the finish of the crew and 2D/3D buttons. The grid tile keeps the flat glyph. **Head units
+  wear their own cut** (Jeff, 2026-09-25, CarPlay photo: "a little, little smaller and it's the same distance for each three
+  points to the edge of the circle"): the same triangle centred on its circumcentre, all three points at 0.80 of the 44 pt
+  box (the phone's PNG reaches 0.98 at the base corners, which touched CarPlay's circle). The phone FAB is unchanged. The static,
   value-locked `CAR_MAP_BUTTON_CONFIG` / `AA_MAP_BUTTONS` still reference the flat `CAR_ICON_HAZARDS`; the live builders
   (`carMapButtonConfig()`, `aaMapButtons()`) are what the templates use.
 - **No speed-camera tile.** `hz_camera` art exists but the backend has no such kind (gate A4). Adding it = backend kind +
@@ -189,7 +197,9 @@ those from field conclusions.
   FAB 34 pt, 2D/3D 42 pt)
   · E (both head units' button arrays) · G (compass tile runs the 🔒 toggle, palette mapping, baked pins on both renderers,
   the card is the panel's twin, pill placement, prompt on Scout's call, neon rims + tinted glyphs, Remove without a
-  confirm, crew-return wiring, Codex r4 guards).
+  confirm, crew-return wiring, Codex r4 guards) · H (decodes the baked head-unit PNGs: every neon glyph is the brand
+  silhouette in exactly `hazardPaint(kind).bright`; the head-unit candy's three points within 1.5 px of each other and
+  ≤ 0.84 of the half-canvas).
 - `tools/sim-qc/hazard_ahead_test.mts` — lead clamp, cone and bearing, km / mi wording, the `map.tsx` wiring (course only).
 - `tools/sim-qc/panel_floor_test.mts` — one floor (`src/panelFloor.ts` = the weather forecast card's) for the weather
   card, the Report panel, the pin card, the category drop-down and the More panel; no GlassFill over it.
@@ -200,8 +210,11 @@ those from field conclusions.
 - **Pins:** `python3 tools/poi-pins/bake_hazards.py` → `src/hazardPinImages.ts` + `tools/poi-pins/preview-hazard-*.png`.
   Its `KINDS` table must match `hazardPalette.ts` `MAP`. Needs headless Chrome at `/Applications/Google Chrome.app`.
 - **Candy map button:** `python3 tools/poi-pins/bake_hazard_candy.py` → `assets/images/premium/hazard_candy{,_silver,_gold,_diamond}.png`
-  (132 px). The phone reads them directly; the head-unit base64 (`CAR_ICON_HZ_HAZARD_CANDY_*` in `carButtonIcons.ts`) was
-  pasted by hand — no script writes it.
+  (132 px). The phone reads them directly. The head units carry their OWN centred, smaller cut (§3):
+  `python3 tools/poi-pins/bake_car_hazard_icons.py` writes `CAR_ICON_HZ_HAZARD_CANDY_*` straight into `carButtonIcons.ts`
+  (reusing `bake_hazard_candy.svg()` with a transform) — never paste these by hand.
+- **Head-unit grid colours:** the same script writes `CAR_ICON_HZ_{POLICE,CRASH,HAZARD,TRAFFIC}_NEON` from the brand glyph's
+  alpha and the `hazardPalette.ts` → `poiPalette.ts` bright colour. Re-run it after any palette or glyph change.
 - **Report-tile glyphs:** masters `assets/carplay-glyphs/report/gen_b.py` `glyph()` (64-unit SVG, cut-outs are real mask
   holes); render EACH glyph on its own 256 px transparent canvas with headless Chrome. Head-unit icons = `sips -Z 132`
   of those PNGs, base64 into the `CAR_ICON_HZ_*` constants (manual). **Never crop a bake sheet with `sips --cropOffset`**

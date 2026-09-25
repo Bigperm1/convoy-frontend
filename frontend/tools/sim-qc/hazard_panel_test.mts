@@ -2,9 +2,10 @@
 // accepts (or is the compass), the grid fits both head units, every glyph has all four metals, the ids are unique.
 //   node --experimental-strip-types tools/sim-qc/hazard_panel_test.mts
 import { readFileSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import {
   HAZARD_TILES, HAZARD_REPORT_KINDS, HAZARD_BUTTON_ID, HAZARD_BUTTON_LABEL, HAZARD_BUTTON_GLYPH, HAZARD_TEMPLATE_ID,
-  CARPLAY_GRID_MAX, AA_GRID_MAX, HAZARD_PANEL_AUTO_CLOSE_MS, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA,
+  CARPLAY_GRID_MAX, AA_GRID_MAX, HAZARD_PANEL_AUTO_CLOSE_MS, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA, hazardTileCarGlyph, HAZARD_NEON_GLYPH,
 } from "../../src/carplay/hazardPanel.ts";
 
 let fails = 0;
@@ -26,8 +27,9 @@ ok("A8 hazardTile resolves ids and rejects strangers", hazardTile("hz-crash")?.k
 
 // B · the shapes both ports read
 const btns = hazardGridButtons((g) => `icon:${g}`);
-ok("B1 iOS grid buttons: id + titleVariants[0] + image, in tile order", btns.length === 5 && btns.every((b, i) => b.id === HAZARD_TILES[i].id && b.titleVariants[0] === HAZARD_TILES[i].title && b.image === `icon:${HAZARD_TILES[i].glyph}`));
+ok("B1 iOS grid buttons: id + titleVariants[0] + image, in tile order", btns.length === 5 && btns.every((b, i) => b.id === HAZARD_TILES[i].id && b.titleVariants[0] === HAZARD_TILES[i].title && b.image === `icon:${hazardTileCarGlyph(HAZARD_TILES[i])}`));
 const aa = hazardGridConfigAA((g) => `icon:${g}`);
+ok("B3 head-unit grid: every report tile draws its kind's neon glyph, the Compass keeps its metal glyph (Jeff, 2026-09-25)", btns.every((b, i) => { const t = HAZARD_TILES[i]; return t.kind ? b.image === `icon:${HAZARD_NEON_GLYPH[t.kind]}` : b.image === `icon:${t.glyph}`; }));
 ok("B2 Android Auto config: type grid, our id, a back header action, the same buttons", aa.type === "grid" && aa.id === HAZARD_TEMPLATE_ID && aa.headerAction.type === "back" && aa.buttons.length === 5 && aa.buttons[4].id === "hz-compass");
 
 // C · every glyph the panel names is baked in all four metals (carButtonIcons.ts is RN-free text: check the table)
@@ -92,6 +94,64 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
   ok("G9 the tile glyphs are tinted the SAME neon as their rim (compass keeps its metal art); the card glyph too", sheet.includes("...(t.kind ? { tintColor: neonFor(t.kind) } : null)") && card.includes("{ tintColor: paint.bright }"));
   ok("G10 Remove my alert deletes straight away — no confirm popup (Jeff, 2026-09-25)", mapTsx.includes("void deleteHazard(h.id); } }}") && !/onRemove=\{[^}]*handleHazardLongPress/.test(mapTsx));
   ok("G11 the Crew press arms a 7 s way home AFTER the 🔒 block, via recenterNow, cleared on re-press and unmount", /CREW_RETURN_MS = 7000;/.test(crew) && mapTsx.includes("// 🔒 NAV-LOCK end map-crew-fit-drops-follow\n            // The crew press") && mapTsx.includes("crewReturnRef.current = setTimeout(() => {\n              crewReturnRef.current = null;\n              recenterNow();") && mapTsx.includes("}, CREW_RETURN_MS);") && mapTsx.includes("useEffect(() => () => { if (crewReturnRef.current) clearTimeout(crewReturnRef.current); }, []);"));
+}
+
+// H · the CarPlay photo round (Jeff, 2026-09-25, 09:29 on a real head unit): the candy map-button triangle touched the circle
+// at its base corners → "a little, little smaller and it's the same distance for each three points to the edge of the circle";
+// the grid glyphs → "the same colors as on the phone". Decodes the baked PNGs themselves (bake_car_hazard_icons.py).
+{
+  const icons = readFileSync(new URL("../../src/carplay/carButtonIcons.ts", import.meta.url), "utf8");
+  const pal = readFileSync(new URL("../../src/hazardPalette.ts", import.meta.url), "utf8");
+  const poi = readFileSync(new URL("../../src/poiPalette.ts", import.meta.url), "utf8");
+  const b64 = (name: string): string => icons.match(new RegExp(`const ${name}: CarIcon = icon\\(\\s*'([A-Za-z0-9+/=]+)'`))?.[1] ?? "";
+  // Minimal PNG decode: 8-bit RGBA (colour type 6), non-interlaced — what Chrome and PIL write. Anything else fails loudly.
+  const rgba = (name: string): { w: number; h: number; px: Uint8Array } | null => {
+    const s = b64(name); if (!s) return null;
+    const buf = Buffer.from(s, "base64");
+    let off = 8, w = 0, h = 0; const idat: Buffer[] = [];
+    while (off < buf.length) {
+      const len = buf.readUInt32BE(off), type = buf.toString("ascii", off + 4, off + 8), data = buf.subarray(off + 8, off + 8 + len);
+      if (type === "IHDR") { w = data.readUInt32BE(0); h = data.readUInt32BE(4); if (data[8] !== 8 || data[9] !== 6 || data[12] !== 0) return null; }
+      if (type === "IDAT") idat.push(data);
+      off += 12 + len;
+    }
+    const raw = inflateSync(Buffer.concat(idat)), stride = w * 4, px = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      const f = raw[y * (stride + 1)], row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+      for (let x = 0; x < stride; x++) {
+        const a = x >= 4 ? px[y * stride + x - 4] : 0, b = y > 0 ? px[(y - 1) * stride + x] : 0, c = x >= 4 && y > 0 ? px[(y - 1) * stride + x - 4] : 0;
+        const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        const pred = f === 0 ? 0 : f === 1 ? a : f === 2 ? b : f === 3 ? (a + b) >> 1 : pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+        px[y * stride + x] = (row[x] + pred) & 255;
+      }
+    }
+    return { w, h, px };
+  };
+  const bright = (kind: string): string => { const cat = pal.match(new RegExp(`^\\s*${kind}:\\s*\\{ cat: "(\\w+)"`, "m"))?.[1]; return (cat && poi.match(new RegExp(`^\\s*${cat}:\\s*\\{ bright: "(#[0-9A-Fa-f]{6})"`, "m"))?.[1]) || "?"; };
+  const stem: Record<string, string> = { police: "POLICE", accident: "CRASH", road: "HAZARD", traffic: "TRAFFIC" };
+  for (const kind of Object.keys(stem)) {
+    const n = rgba(`CAR_ICON_HZ_${stem[kind]}_NEON`), b = rgba(`CAR_ICON_HZ_${stem[kind]}_BRAND`), hex = bright(kind);
+    const want = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    let sameAlpha = !!n && !!b && n.px.length === b.px.length, allBright = !!n, inked = 0;
+    if (n && b) for (let i = 0; i < n.px.length; i += 4) {
+      if (n.px[i + 3] !== b.px[i + 3]) sameAlpha = false;
+      if (n.px[i + 3] > 0) { inked++; if (n.px[i] !== want[0] || n.px[i + 1] !== want[1] || n.px[i + 2] !== want[2]) allBright = false; }
+    }
+    ok(`H1 ${kind}: the grid glyph is the phone's tinted glyph — brand silhouette, every inked pixel ${hex} (hazardPaint bright)`, sameAlpha && allBright && inked > 500, `${inked} px`);
+  }
+  ok("H2 every neon glyph is one icon for all four metals (the phone tints the kind colour whatever the metal)", ["police", "crash", "hazard", "traffic"].every((g) => new RegExp(`^  hz_${g}_neon: \\{ brand: (CAR_ICON_HZ_${g.toUpperCase()}_NEON), premium: \\1, ultra: \\1, diamond: \\1 \\},$`, "m").test(icons)));
+  for (const metal of ["BRAND", "PREMIUM", "ULTRA", "DIAMOND"]) {
+    const img = rgba(`CAR_ICON_HZ_HAZARD_CANDY_${metal}`);
+    const reach: Record<string, number> = { apex: 0, right: 0, left: 0 };
+    if (img) { const c = (img.w - 1) / 2; for (let y = 0; y < img.h; y++) for (let x = 0; x < img.w; x++) {
+      if (img.px[(y * img.w + x) * 4 + 3] <= 128) continue;
+      const ang = (Math.atan2(y - c, x - c) * 180 / Math.PI + 360) % 360, r = Math.hypot(x - c, y - c);
+      for (const [k, at] of [["apex", 270], ["right", 30], ["left", 150]] as const) if (Math.abs(((ang - at + 540) % 360) - 180) < 40) reach[k] = Math.max(reach[k], r);
+    } }
+    const half = img ? img.w / 2 : 1, rs = Object.values(reach);
+    ok(`H3 ${metal} candy map button: all three points the same distance from the circle (±1.5 px) and clear of it (≤ 0.84 of the half-canvas; the phone cut reached 0.98)`,
+      !!img && img.w === 132 && Math.max(...rs) - Math.min(...rs) <= 1.5 && Math.max(...rs) / half <= 0.84 && Math.min(...rs) / half >= 0.7, rs.map((r) => (r / half).toFixed(3)).join(" / "));
+  }
 }
 
 console.log(fails === 0 ? "\nPASS hazard_panel" : `\nFAIL hazard_panel (${fails})`);

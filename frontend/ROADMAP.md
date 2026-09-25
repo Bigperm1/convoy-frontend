@@ -1066,6 +1066,22 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-BX `dbc3a19f` (code `d2b9d132`, 2026-09-24 22:35 PDT, Jeff: "build the hazard panel with the apple glyphs i
+  mentioned. then do the ota push with everything"; KEY_PRESENT=1 iOS + Android) — THE REPORT PANEL on CarPlay + Android Auto.** The
+  fourth map button (was the compass — poll Yes 1 / No 0 / Never 3, 21 head-unit taps in 14 days) is now Hazards: one grid template
+  (`src/carplay/hazardPanel.ts`, pure) — Police / Crash / Hazard / Traffic / Compass, direction-B Apple-symbol glyphs with a P in the
+  shield, baked in brand/premium/ultra/diamond (`carButtonIcons.ts` `hz_*`). A tile pops the grid and reports at the car's position
+  from 5 s ago (`reportHazardFromCar` = the police path generalised to the four kinds POST /hazards accepts) or fires the same `compass`
+  gesture the button did (CarMapView untouched). CarPlay: one `GridTemplate` per session, pushed guard, disconnect reset, the tile is
+  the way home (rule 7), the pill is the feedback (7b). AA: `createTemplate('grid')` + push in the callback, `gridButtonPressed` filtered
+  on our template id, `backButtonPressed` pops. **No speed-camera tile** — no backend kind (gate A3 reads server.py). nav-lock:
+  `CAR_MAP_BUTTON_CONFIG` + `AA_MAP_BUTTONS` relocked under his words (41 approvals). Gates `hazard_panel_test` (16) · 56/56 sim-qc ·
+  typecheck · eslint 0 · trap-check 0 · doc-check 0; crash-gated on the phone sim (alive at 22 s). NOT bench-verifiable: the head-unit
+  templates (the only CarPlay sim carries a build-67 binary) — receipt owed from Jeff's next connect: `carplay-tap:car-hazards`,
+  `hazard-panel op=push surf=carplay`, a pick, a "<Kind> reported ✓" pill. Codex owed (quota until 23:06). Same OTA carries
+  `a9ecb0e3` Unfiltered Scout (backend `1a7a0e1` LOCAL — classifier refused the deploy push; Jeff runs it), `52b9599a` car search,
+  `cd0559db` learned-route habit, `47d9f2b5` John's crumbs. NOT in it: the fold fix `2cd2521a` (claude/ribbon-fold-0924, 🔒×2).
+  CARPLAY.md §4 updated. Memory `hazard-panel-carplay-aa-2026-09-24`.
 - **⏳ COMMITTED `a9ecb0e3`, NOT PUBLISHED (2026-09-24 late — Jeff, on the Grok/NSFW question: *"can we switch on NSFW too"* → the edgy-personality offer → *"yes do that please"*): UNFILTERED SCOUT, an opt-in adult-humour persona.** Settings →
   Scout & Alerts → PERSONALITY → "Unfiltered Scout" (`settings.scoutEdgy`, OFF by default, never migrated on). Language only: Scout
   swears, roasts the driver and the crew, adult humour — never sexual or explicit (App Store 1.1.4 bans that outright; no age rating

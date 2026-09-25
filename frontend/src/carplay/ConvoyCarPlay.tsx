@@ -56,6 +56,8 @@ import type { RoadEvent } from '../driveBcEvents';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
 import { useAccent } from '../appSkin';
 import { useOnlineCrewCount } from '../convoyPresence';
+import { reportPillLive } from './hazardPanel';
+import { hazardPaint, hazardTint } from '../hazardPalette';
 
 // CarPlay HUD floor — a solid dark tint ONLY on light basemaps (dawn / day / satellite),
 // where clear glass over the bright map would wash out. On DARK basemaps (dusk / night)
@@ -686,6 +688,56 @@ export function CarSurface() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusCode, statusWhere]);
 
+  // ── HEAD-UNIT REPORT PILL (Jeff, 2026-09-25: "lets add the hazard alert that is on the phone to the under the version
+  // pill, to the the carplay surfaces make it last like 15 sec") ──────────────────────────────────────────────────────
+  // Live for 15 s after a report (hazardPanel.ts reportPillPatch — a head-unit tile or a phone report), decided by the
+  // TIMESTAMP at render like every row in this slot. A render only happens on a store write, though, and a car held at a
+  // light writes nothing (poseEstimator.ts: "a stationary car generates no callbacks"). Two ways that bites the pill:
+  // it could outstay its 15 s, and it could stay hidden under a timed row that has already expired — the 1.6 s
+  // "Hazards ✓" tap receipt (carTap) outranks it, and a tile picked + POSTed inside those 1.6 s lands under it. So while
+  // the pill is pending, ONE local re-render is armed for the next instant the slot can change: the pill's own expiry or
+  // the end of a receipt / crew view covering it. If JS timers are paused (a locked phone), the next store write redraws
+  // instead — the worst case is a caption lingering, never a stranded screen (CARPLAY.md rule 7b). A tick that fires a
+  // hair early re-arms for the remainder (reportTick is a dependency).
+  const reportKind = s.carReportKind || null;
+  const reportLive = !!reportKind && reportPillLive(s.carReportUntil, Date.now());
+  const reportPaint = hazardPaint(reportKind);
+  const [reportTick, setReportTick] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    if (!reportKind || !reportPillLive(s.carReportUntil, now)) return;
+    const next = Math.min(...[s.carReportUntil, s.carToastUntil, s.crewViewUntil].filter((t): t is number => typeof t === 'number' && t > now));
+    const id = setTimeout(() => setReportTick((t) => t + 1), next - now);
+    return () => clearTimeout(id);
+  }, [reportKind, s.carReportUntil, s.carToastUntil, s.crewViewUntil, reportTick]);
+
+  // WHICH ROW THE STATUS SLOT DRAWS — one decision, in priority order, read by the JSX below AND by the drawn receipt,
+  // so the receipt can never name a row the slot did not render.
+  const slotNow = Date.now();
+  const slot: 'pitstop' | 'toast' | 'crew' | 'comms' | 'talker' | 'scout' | 'report' | 'status' | 'none' =
+    s.pitstopActive ? 'pitstop'
+    : slotNow < (s.carToastUntil || 0) && s.carToast ? 'toast'
+    : (slotNow < (s.crewViewUntil || 0) && s.commsTx !== 'recording') ? 'crew'
+    : (s.commsTx === 'recording' || s.commsTx === 'sending') ? 'comms'
+    : talker ? 'talker'
+    : (s.scoutListening || s.scoutThinking) ? 'scout'
+    : reportLive ? 'report'
+    : statusPill ? 'status'
+    : 'none';
+  // DRAWN receipt for the report pill, like car-status-drawn: written from the commit when the slot switches TO the pill
+  // (a new report, or the pill returning after a receipt / crew view / Transmitting / a talker / Scout covered it) —
+  // never while one of those covers it. <= 8 per surface mount. Still not pixel proof.
+  const slotKey = slot === 'report' ? `report|${reportKind}|${s.carReportUntil}` : slot;
+  const slotKeyPrev = useRef('');
+  const reportDrawnCount = useRef(0);
+  useEffect(() => {
+    const was = slotKeyPrev.current;
+    slotKeyPrev.current = slotKey;
+    if (CAR_DIAG_MODE || slot !== 'report' || was === slotKey || reportDrawnCount.current >= 8) return;
+    reportDrawnCount.current += 1;
+    try { logEventReliable(`car-report-drawn kind=${reportKind} surf=${IS_AA ? 'aa' : 'carplay'}`); } catch {}
+  }, [slot, slotKey, reportKind]);
+
   // GROUND-TRUTH RENDER TEST. If this paints, the CarPlay React surface is alive and
   // the bug is downstream (content/layout); if the head unit stays the bare logo, the
   // Fabric surface never commits a tree (native). Zero deps on map/GPS/store content.
@@ -1030,7 +1082,7 @@ export function CarSurface() {
           and no Scout progress to compete with, and the driver has walked away from the
           screen: when they glance back, the running clock is the ONE thing they want.
           Candy red matches the phone card (src/components/PitstopCard.tsx). */}
-      {s.pitstopActive ? (
+      {slot === 'pitstop' ? (
         <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -1047,7 +1099,7 @@ export function CarSurface() {
             </Text>
           </View>
         </View>
-      ) : Date.now() < (s.carToastUntil || 0) && s.carToast ? (
+      ) : slot === 'toast' ? (
         /* ACTION RECEIPT. This slot replaced the CPAlertTemplate modals that every
            button used to raise for its confirmation. A presented template covers the
            map and makes EVERY map button unreachable by design, and carAlert's
@@ -1064,7 +1116,7 @@ export function CarSurface() {
             <Text style={styles.scoutPillText} numberOfLines={1}>{s.carToast}</Text>
           </View>
         </View>
-      ) : (Date.now() < (s.crewViewUntil || 0) && s.commsTx !== 'recording') ? (
+      ) : slot === 'crew' ? (
         <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -1072,7 +1124,7 @@ export function CarSurface() {
             <Text style={styles.scoutPillText}>Crew view · {s.crewViewCount ?? 0}</Text>
           </View>
         </View>
-      ) : (s.commsTx === 'recording' || s.commsTx === 'sending') ? (
+      ) : slot === 'comms' ? (
         <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -1081,7 +1133,7 @@ export function CarSurface() {
             <Text style={styles.scoutPillText}>{s.commsTx === 'recording' ? 'Transmitting…' : 'Sending…'}</Text>
           </View>
         </View>
-      ) : talker ? (
+      ) : slot === 'talker' ? (
         <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -1089,7 +1141,7 @@ export function CarSurface() {
             <Text style={styles.scoutPillText} numberOfLines={1}>{talker} is talking…</Text>
           </View>
         </View>
-      ) : (s.scoutListening || s.scoutThinking) ? (
+      ) : slot === 'scout' ? (
         <View style={[styles.statusRow, statusRowFit]} pointerEvents="none">
           <View style={[styles.scoutPill, { backgroundColor: carHudFloor() }]}>
             <GlassFill tintColor={undefined} style={{ borderRadius: 16, overflow: 'hidden' }} />
@@ -1097,7 +1149,24 @@ export function CarSurface() {
             <Text style={styles.scoutPillText}>{s.scoutListening ? 'Listening…' : 'Thinking…'}</Text>
           </View>
         </View>
-      ) : statusPill ? (
+      ) : slot === 'report' ? (
+        /* HEAD-UNIT REPORT PILL (Jeff, 2026-09-25) — the phone's ReportPill (src/components/AlertToast.tsx) on the car:
+           a twin of the crew pill right above it (styles.crewPill: its height, radius, 1 pt border, padding, text size),
+           bordered in the kind's bright colour with a 0.30 wash of it over the usual HUD floor, a dot and "<Label>
+           reported". Label and colours come ONLY from hazardPaint(kind) — the phone pill's own source — so the surfaces
+           cannot drift. 15 s; below every live or short-lived row in this slot, above only the persistent status pill.
+           CarPlay: centred on the crew pill's row. Android Auto: on the crew pill's left rail, scaled about 'left top'
+           like the crew row (applied AFTER statusRowFit so that transformOrigin wins). */
+        <View style={[styles.statusRow, statusRowFit, styles.reportRow, IS_AA ? hudFit('left top') : null]} pointerEvents="none">
+          <View testID="car-report-pill" style={[styles.crewPill, styles.reportPill, { backgroundColor: carHudFloor(), borderColor: reportPaint.bright }]}>
+            <GlassFill glassStyle="regular" tintColor={hazardTint(reportKind, 0.30)} style={{ borderRadius: 9, overflow: 'hidden' }} />
+            <View style={[styles.reportDot, { backgroundColor: reportPaint.bright }]} />
+            <Text style={[styles.crewPillText, styles.reportPillText]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+              {reportPaint.label} reported
+            </Text>
+          </View>
+        </View>
+      ) : slot === 'status' ? (
         /* WHAT IS MISSING (build 79, 2026-09-14) — LOWEST priority in this slot: a persistent
            condition must never hide a receipt, a pitstop, a transmission, a talker or Scout.
            A non-tappable readout like every other row here (CarPlay routes touches through the
@@ -2165,6 +2234,16 @@ const styles = StyleSheet.create({
   // Crew online (presence): the system "online" green — the phone pill's live dot. Red (above) still wins for the text.
   crewPillOnline: { borderColor: 'rgba(48,209,88,0.9)' },
   crewPillTextOnline: { color: '#FFFFFF' },
+  // The head-unit REPORT PILL (2026-09-25) wears styles.crewPill / crewPillText and adds only these. Its row is the status
+  // slot (styles.statusRow) moved onto the crew pill's own horizontal frame: CarPlay centres it between the bar buttons
+  // exactly like topCenterRow (the canvas-centred statusRow sits 16 pt left of the crew pill on a 470 canvas); Android
+  // Auto starts it on the crew pill's left rail (CAR_DOCK_LEFT) and keeps statusRow's full width: the crew row's frame
+  // (92 short on the right) would leave the widest label, "Hazard reported" at 11 pt, under 2 pt of room on the 213 dp
+  // canvas (measured in Roboto Bold, 2026-09-25). Dot 6 pt and gap 5 = the phone ReportPill's.
+  reportRow: { left: IS_AA ? CAR_DOCK_LEFT : CAR_BAR_LEADING_W, right: IS_AA ? 0 : CAR_BAR_TRAILING_W, alignItems: IS_AA ? 'flex-start' : 'center' },
+  reportPill: { gap: 5 },
+  reportDot: { width: 6, height: 6, borderRadius: 3 },
+  reportPillText: { color: '#FFFFFF' },
   scoutPill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 34, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', overflow: 'hidden' },
   scoutDot: { width: 10, height: 10, borderRadius: 5 },
   scoutPillText: { color: '#F4F4F4', fontSize: 14, fontWeight: '700' },

@@ -105,6 +105,11 @@ export type CarState = {
   // when a driver is using CarPlay.
   carToast?: string;
   carToastUntil?: number;
+  // HEAD-UNIT REPORT PILL (2026-09-25): the last report's kind and when its pill expires — written only through
+  // hazardPanel.ts reportPillPatch (15 s, HAZARD_REPORT_PILL_MS), by a head-unit tile or a phone report. Compared at
+  // RENDER like carToastUntil; CarSurface draws it in the status slot below every live / short-lived state.
+  carReportKind?: string | null;
+  carReportUntil?: number;
   // PITSTOP mirror — the phone owns detection (src/pitstop.ts); the car just draws it.
   // Standing rule: the CarPlay HUD matches the phone, so a stop that shows a timer on
   // the phone must show one on the head unit too.

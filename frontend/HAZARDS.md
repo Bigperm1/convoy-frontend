@@ -26,11 +26,26 @@ votes delete it for everyone. Reports expire by kind (§5).
 | Phone tapped-pin card | `src/components/HazardCard.tsx` `mode="detail"`, fed by `onHazardPress → setSelected` | Your own pin: one full-width 52 pt "Remove my alert" (no confirm dialog). Someone else's: "Gone" · "Still there". Shows 👍 confirms / 👎 disputes. |
 | Phone still-there prompt | `HazardCard` `mode="passby"` (`hazard={selected \|\| showReport ? null : passPrompt}`) | "`<label>` ahead — still there?" · "Gone" · "Still there". Never over a tapped-pin card or the Report panel. |
 | Phone report pill | `src/components/AlertToast.tsx` `ReportPill` | Under the crew / version pill, dressed like it (`styles.liveOverlay`), tinted with the kind's bright colour, "`<label>` reported", 4 s. A second mount renders while the search bar is hidden (under the turn banner in turn-by-turn). |
+| Head-unit report pill | `src/carplay/ConvoyCarPlay.tsx` `CarSurface` status slot (`slot === 'report'`) — the React root on BOTH CarPlay (`ConvoyCarSurface`) and Android Auto (`convoy-aa-nav`); state `carStore` `carReportKind` / `carReportUntil`, written only by `hazardPanel.ts` `reportPillPatch` | **Built 2026-09-25, not yet published — needs Jeff's go on the look.** The phone pill on the car (Jeff, 2026-09-25: "lets add the hazard alert that is on the phone to the under the version pill, to the the carplay surfaces make it last like 15 sec"). A twin of the head-unit crew pill it sits under: `styles.crewPill` (22 pt, radius 6, 1 pt border — here the kind's bright), `GlassFill` washed `hazardTint(kind, 0.30)` over `carHudFloor()`, a 6 pt bright dot, "`<label>` reported" in white at `crewPillText` size (9 pt CarPlay / 11 pt AA). Label and colours only from `hazardPaint(kind)`. **15 s** (`HAZARD_REPORT_PILL_MS`); a second report restarts it. In the ONE status slot under the crew pill (`styles.statusRow` + `statusRowFit` + `styles.reportRow`): CarPlay centred on the crew pill's own row (between the bar buttons); Android Auto on the crew pill's left rail (`CAR_DOCK_LEFT`), scaled about `'left top'`. Slot priority: pitstop > receipt toast > crew view > Transmitting / Sending > "X is talking" > Scout Listening / Thinking > **report pill** > persistent status pill — a covered pill comes back for the rest of its 15 s. Fired by a head-unit tile (`reportHazardFromCar` success) and by every phone report (`reportHazard` / `reportAlert`: panel taps and voice). |
 | CarPlay map buttons | `src/carplay/carActions.ts` `carMapButtonConfig()` (used by `carPlayBootstrap.ts` cold, `ConvoyCarPlay.tsx` warm) | Array: `car-comms` · `car-hazards` · `car-view` · `car-crew` = top → bottom. Panning mode hides from the END, so the mic and Hazards survive a pan. |
 | CarPlay grid | `openHazardPanel` → `getHazardTemplateIOS` (`GridTemplate`, id `hairpin-car-hazards`, title "Report") | The same five tiles (`hazardGridButtons`). The four report tiles draw the kind-coloured `hz_*_neon` glyph (the phone's tinted glyph, §3), the Compass its metal. One template instance per session. |
 | Android Auto map strip | `aaMapButtons()` (used by `ConvoyCarPlay.tsx`, `AndroidAutoRoot.tsx`) | `car-zoom-in` · `car-zoom-out` · `car-hazards` · `car-crew` — Hazards above Crew. The action strip (`AA_ACTION_STRIP`: End · Search · view · comms) has no Hazards. |
 | Android Auto grid | `openHazardPanel` → `bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(...))` + `pushTemplate` | The same five tiles, `headerAction: { type: 'back' }`. androidx tints map-strip icons white (code comment; no native tint patch). The four report tiles get the kind-coloured `hz_*_neon` icons like CarPlay. Our bridge sets no tint (`RCTTemplate.kt` `parseCarIcon`); HYPOTHESIS, never seen on a unit or the DHU: the host tints grid tile art white anyway (CARPLAY.md §4). |
 | Voice | `map.tsx` `voiceBus.subscribe` | Intents `report_police` / `report_accident` / `report_road` / `report_traffic` → `reportHazard(kind, { fromVoice: true })` (spoken acknowledgement). The backend emits them from the agent tool `report_hazard` and a keyword fallback. |
+
+**Which reports reach the head-unit pill** (read from the code, 2026-09-25):
+- A Report-grid tile on CarPlay or Android Auto: `reportHazardFromCar` success writes the pill — cold or warm, one JS
+  context. It REPLACES the old 3 s grey "`<Kind>` reported ✓" toast (both would say the same thing); the failure toasts
+  ("No GPS fix yet", "Report failed — no connection", "Report unavailable") stay 3 s `carToast`s.
+- A phone report (Report panel tile or voice) while a car is connected: `reportHazard` / `reportAlert` write the same
+  patch right after the phone's own pill. Needs `map.tsx` mounted (warm). With no car connected the write is inert
+  (`CarSurface` only mounts in a car session), but the store keeps it: a car connected within 15 s shows it.
+- Voice from the head unit: **CarPlay has no Scout mic button** — its top map button is `car-comms`, the crew walkie
+  (`handleCarMapButton` → `toggleCarComms`); only a stale `car-mic` id would reach Scout. **Android Auto's** warm
+  `onButtonPressed` sends `car-mic` or `car-comms` to `onScoutMicRef` → `map.tsx` `toggleScoutMic`, and the `report_*`
+  intents land in `reportHazard` — so an AA voice report does light the pill. **The Android Auto pill has never run on a
+  unit, the DHU or the emulator** (no Android `hazard-panel` row in the field as of 2026-09-25).
+- Head-unit reports do NOT show the phone's 4 s pill (unchanged).
 
 Dispatch: warm CarPlay `onMapButtonPressed` → `handleCarMapButton(id, 'warm')`; cold → `handleCarMapButton(id, 'cold')`;
 Android Auto `handleAaButton` (its allowlist includes `HAZARD_BUTTON_ID`) → `handleCarMapButton`; then
@@ -169,8 +184,9 @@ State: `passPrompt`, `promptedHazardsRef` (once per hazard per map mount), `pass
 | Report panel auto-close (phone + both head units) | 8 s `HAZARD_PANEL_AUTO_CLOSE_MS` | `hazardPanel.ts`; `HazardSheet` timer; `carActions.ts` `armHazardsAutoPop` |
 | Pin card / prompt fold-away | 15 s | `HazardCard` effect; `passPromptTimer` |
 | Crew button → back to the car | 7 s `CREW_RETURN_MS` | `src/crewReturn.ts`; armed in the Crew FAB's `onPress` after the 🔒 block → `recenterNow()` |
-| Report pill | 4 s | `reportHazard` `setTimeout(() => setAlertConfirm(null), 4000)` |
-| Head-unit toast / tap pill / tap dedupe | 3 s `TOAST_MS` / 1.6 s / 50 ms `TAP_DEDUPE_MS` | `carActions.ts` |
+| Report pill (phone) | 4 s | `reportHazard` `setTimeout(() => setAlertConfirm(null), 4000)` |
+| Report pill (CarPlay / Android Auto) | 15 s `HAZARD_REPORT_PILL_MS` | `hazardPanel.ts` `reportPillPatch` → `carReportUntil`; `CarSurface` compares the timestamp at render (`reportPillLive`) plus ONE local re-render at expiry (a stopped car writes no store); a new report restarts it |
+| Head-unit toast / tap pill / tap dedupe | 3 s `TOAST_MS` / 1.6 s / 50 ms `TAP_DEDUPE_MS` | `carActions.ts` — a head-unit report's success is the 15 s pill now, not a toast; the 3 s toast carries only its failures |
 | Hazard fetch | 30 s | phone poll; car `HAZARDS_REFRESH_MS` |
 
 ## 10 · Receipts (crumbs) — exact strings
@@ -180,12 +196,15 @@ Phone: `phone-tap:hazards` · `hazard-panel op=open surf=phone anchor= winH=` ·
 `hazard-panel pick surf=phone id=hz-compass kind=compass` + `phone-tap:compass hold=0|1` (⚠ the phone's `id=` is
 `hz-<backend kind>` — `hz-accident` / `hz-road` — not the tile id the head units log, `hz-crash` / `hz-hazard`; join
 cross-surface queries on `kind=`) · `hazard-ahead kind= d= lead=
-kmh= spoke=0|1` · `crew-return ms=7000`. **`reportHazard` logs nothing on success or failure** (failure is an
-`Alert`), so a report is only visible as a `hazards` row.
+kmh= spoke=0|1` · `crew-return ms=7000` · `car-report-pill kind=<kind> src=phone` (a successful `reportHazard` /
+`reportAlert` — the head-unit pill's write; the only success row either logs). A failure is an `Alert` and logs nothing.
 Head units: `carplay-tap:car-hazards` (pill "Hazards ✓") · `hazard-panel op=push surf=carplay|aa` · `hazard-panel op=pop
 surf=… why=user|auto` · `hazard-panel pick surf=carplay|aa id= kind=` · `hazard-panel op=reset why=disconnect` ·
-`hazard-panel create-failed:<err>`. Toasts: "Report unavailable", "No GPS fix yet", "Report failed — no connection",
-"<Kind> reported ✓". **Bench rows:** the iPhone 16 Pro simulator logs as handle `Jeff` with `update_id` NULL — exclude
+`hazard-panel create-failed:<err>` · `car-report-pill kind=<kind> src=car` (a successful tile report wrote the pill) ·
+`car-report-drawn kind=<kind> surf=carplay|aa` (`logEventReliable`, from `CarSurface`'s commit when the status slot
+switches TO the pill — a new report, or the pill coming back after something above it; never while covered; ≤ 8 per
+surface mount; a render-commit row, not pixel proof). Toasts: "Report unavailable", "No GPS fix yet", "Report failed — no
+connection" (the "<Kind> reported ✓" `done` strings stay on the tiles — gate A5 — but no longer show). **Bench rows:** the iPhone 16 Pro simulator logs as handle `Jeff` with `update_id` NULL — exclude
 those from field conclusions.
 
 ## 11 · Gates
@@ -199,7 +218,10 @@ those from field conclusions.
   the card is the panel's twin, pill placement, prompt on Scout's call, neon rims + tinted glyphs, Remove without a
   confirm, crew-return wiring, Codex r4 guards) · H (decodes the baked head-unit PNGs: every neon glyph is the brand
   silhouette in exactly `hazardPaint(kind).bright`; the head-unit candy's three points within 1.5 px of each other and
-  ≤ 0.84 of the half-canvas).
+  ≤ 0.84 of the half-canvas) · I (the head-unit report pill: 15 s, `reportPillPatch` / `reportPillLive`, the tile's success
+  writes the pill instead of `toast(done)` with `TOAST_MS` still 3000, both phone report functions write it, the slot
+  order with the pill between Scout and the status pill, paint only from `hazardPaint`, the expiry re-render, the drawn
+  crumb only on a switch to the pill, the AA `'left top'` after `statusRowFit`, the hooks before the diag early return).
 - `tools/sim-qc/hazard_ahead_test.mts` — lead clamp, cone and bearing, km / mi wording, the `map.tsx` wiring (course only).
 - `tools/sim-qc/panel_floor_test.mts` — one floor (`src/panelFloor.ts` = the weather forecast card's) for the weather
   card, the Report panel, the pin card, the category drop-down and the More panel; no GlassFill over it.
@@ -265,7 +287,14 @@ those from field conclusions.
   which never counts police.
 - A car-only drive (cold head unit, phone app not open) has pins but no Scout hazard call, no prompt and no voting — the
   call lives only in `map.tsx`. HYPOTHESIS from the code.
-- The report pill's 4 s timer is never cleared, so a second report within 4 s is hidden early (read from code).
+- The report pill's 4 s timer is never cleared, so a second report within 4 s is hidden early (read from code). The
+  head-unit pill does not share this (each report overwrites `carReportUntil`), so after two quick reports the phone
+  and the car pill can disagree.
+- **The head-unit report pill (2026-09-25) has never rendered anywhere.** CarPlay cannot render on this Mac's Xcode 27;
+  the only preview is a mock-up drawn from the style values. The 9 pt CarPlay text is smaller than the 14 pt toast it
+  replaces — Jeff approves the look before it ships. The one-shot expiry re-render exists only while a report is pending:
+  the 3 s `carToast` and the 3 s crew view still expire only on the next store write (no writer at expiry — grep), so on
+  a stopped car they can linger.
 
 **Android phone — never run.** No emulator or device covered BZ → CE: the panel, card, pill, More panel and floor are
 unverified on Android, including layering (`HazardSheet` / `HazardCard` `elevation: 10` in a Modal, `ReportPill` `zIndex: 5`
@@ -274,7 +303,9 @@ with no elevation, CategoryPills `zIndex 40 / elevation 40`). Use the `verify-an
 **Never seen in the field (as of 2026-09-25 08:30 PDT):** any head-unit panel receipt (`carplay-tap:car-hazards`,
 `hazard-panel op=push`, `surf=carplay|aa`), the new pins on a head unit, `hazard-ahead` from a real drive, the
 still-there prompt (needs another driver's pin), `crew-return` from Jeff's phone. Say Phin (Android Auto) was still on
-OTA-BV, which predates the panel.
+OTA-BV, which predates the panel. The head-unit report pill's receipts (`car-report-pill`, `car-report-drawn`) are new
+and unshipped; the field receipt is a grid report giving `hazard-panel pick` → `car-report-pill src=car` →
+`car-report-drawn` within a second or two, plus one photo.
 
 **Bench paint flake — NOT root-caused:** on the shared iPhone 16 Pro simulator the phone panel sometimes opens in state
 (open + layout + auto-close crumbs) and paints nothing — 11 of 25 cold launches painted across nine variants. A

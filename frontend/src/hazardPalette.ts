@@ -23,5 +23,11 @@ export function hazardPaint(kind: string | null | undefined): HazardPaint {
   return { kind: kind && MAP[kind] ? kind : "road", ...m, ...POI_PALETTE[m.cat] };
 }
 export const HAZARD_PAINT_KINDS = Object.keys(MAP);
+/** The kind's BRIGHT colour as an rgba() wash — the head-unit report pill's tint (ConvoyCarPlay.tsx, at 0.30). Same math as
+ *  the private rgba() in AlertToast.tsx that tints the phone ReportPill at 0.30 (left there: gate G5 pins that literal). */
+export function hazardTint(kind: string | null | undefined, alpha: number): string {
+  const n = parseInt(hazardPaint(kind).bright.replace("#", ""), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 /** The registered Mapbox image name of a kind's pin (src/hazardPinImages.ts holds every one). */
 export function hazardPinImageName(kind: string | null | undefined): string { return `hz_pin_${hazardPaint(kind).kind}`; }

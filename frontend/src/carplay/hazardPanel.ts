@@ -48,6 +48,23 @@ export const AA_GRID_MAX = 6;
  *  head-unit pop may wait for the next tick; the back chevron and the tiles always work. */
 export const HAZARD_PANEL_AUTO_CLOSE_MS = 8000;
 
+/** The HEAD-UNIT REPORT PILL (Jeff, 2026-09-25: "lets add the hazard alert that is on the phone to the under the version
+ *  pill, to the the carplay surfaces make it last like 15 sec"). The phone's ReportPill ("<Label> reported", in the kind's
+ *  colour, under the crew pill) on CarPlay and Android Auto, drawn by CarSurface in its one status slot. It lives here, not in
+ *  ConvoyCarPlay.tsx / carActions.ts / map.tsx, because those are nav-lock `watchNew` files (no new module constants). */
+export const HAZARD_REPORT_PILL_MS = 15000;
+export type ReportPillPatch = { carReportKind: string; carReportUntil: number };
+/** The carStore patch a report writes — head-unit tile or phone. Every report overwrites `carReportUntil`, so a second
+ *  report restarts the 15 s instead of being cut short by the first one's expiry. */
+export function reportPillPatch(kind: string, now: number): ReportPillPatch {
+  return { carReportKind: kind, carReportUntil: now + HAZARD_REPORT_PILL_MS };
+}
+/** Is the pill still inside its 15 s? A TIMESTAMP compared at render (CARPLAY.md rule 7b: JS timers pause on a locked
+ *  phone), so a paused timer can at worst leave the caption up until the next redraw — never strand anything. */
+export function reportPillLive(until: number | null | undefined, now: number): boolean {
+  return typeof until === 'number' && Number.isFinite(until) && now < until;
+}
+
 export function hazardTile(id: string | null | undefined): HazardTile | null {
   if (!id) return null;
   return HAZARD_TILES.find((t) => t.id === id) ?? null;

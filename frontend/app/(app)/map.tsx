@@ -27,6 +27,7 @@ import { haptics } from "../../src/haptics";
 import { MusicToast, HailToast, InfoToast, ReportPill } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import HazardSheet, { HAZARD_FAB_ART } from "../../src/components/HazardSheet";
+import { reportPillPatch } from "../../src/carplay/hazardPanel";
 import HazardCard from "../../src/components/HazardCard";
 import { CREW_RETURN_MS } from "../../src/crewReturn";
 import { hazardAheadLeadM, bearingDeg, isAheadOf, hazardAheadLine, HAZARD_AHEAD_REARM_EXTRA_M, HAZARD_AHEAD_MIN_KMH } from "../../src/hazardAhead";
@@ -4004,6 +4005,8 @@ export default function MapScreen() {
         setHazards((prev) => (prev.some((h) => h.id === data.id) ? prev : [data, ...prev]));
       }
       setAlertConfirm(kind);
+      // The same pill on CarPlay / Android Auto, 15 s (Jeff, 2026-09-25; src/carplay/hazardPanel.ts reportPillPatch).
+      try { setCarState(reportPillPatch(kind, Date.now())); logEvent(`car-report-pill kind=${kind} src=phone`); } catch {}
       setTimeout(() => setAlertConfirm(null), 4000)   // 4 s: a glance at a moving phone (2026-09-25);
       if (Platform.OS !== 'web') {
         try {
@@ -4285,6 +4288,10 @@ export default function MapScreen() {
       setShowReport(false);
       // The confirmation pill (ReportToast) for every kind — a tap from the Report sheet had none (2026-09-24).
       setAlertConfirm(kind);
+      // The same pill on CarPlay / Android Auto, 15 s (Jeff, 2026-09-25; src/carplay/hazardPanel.ts reportPillPatch). A
+      // phone-panel tap or voice report reaches the head unit; with no car connected the write is inert (CarSurface only
+      // mounts in a car session) — a car connected within 15 s would show it.
+      try { setCarState(reportPillPatch(kind, Date.now())); logEvent(`car-report-pill kind=${kind} src=phone`); } catch {}
       setTimeout(() => setAlertConfirm(null), 4000)   // 4 s: a glance at a moving phone (2026-09-25);
       // Voice-driven reports get a spoken acknowledgement so the driver can keep eyes on the road
       if (opts?.fromVoice && !navMuted) {

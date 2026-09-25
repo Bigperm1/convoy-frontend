@@ -6,6 +6,7 @@ import { inflateSync } from "node:zlib";
 import {
   HAZARD_TILES, HAZARD_REPORT_KINDS, HAZARD_BUTTON_ID, HAZARD_BUTTON_LABEL, HAZARD_BUTTON_GLYPH, HAZARD_TEMPLATE_ID,
   CARPLAY_GRID_MAX, AA_GRID_MAX, HAZARD_PANEL_AUTO_CLOSE_MS, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA, hazardTileCarGlyph, HAZARD_NEON_GLYPH,
+  HAZARD_REPORT_PILL_MS, reportPillPatch, reportPillLive,
 } from "../../src/carplay/hazardPanel.ts";
 
 let fails = 0;
@@ -152,6 +153,66 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
     ok(`H3 ${metal} candy map button: all three points the same distance from the circle (±1.5 px) and clear of it (≤ 0.84 of the half-canvas; the phone cut reached 0.98)`,
       !!img && img.w === 132 && Math.max(...rs) - Math.min(...rs) <= 1.5 && Math.max(...rs) / half <= 0.84 && Math.min(...rs) / half >= 0.7, rs.map((r) => (r / half).toFixed(3)).join(" / "));
   }
+}
+
+// I · the head-unit REPORT PILL (Jeff, 2026-09-25: "lets add the hazard alert that is on the phone to the under the version
+// pill, to the the carplay surfaces make it last like 15 sec"): the phone's ReportPill on CarPlay + Android Auto, 15 s.
+{
+  const acts = readFileSync(new URL("../../src/carplay/carActions.ts", import.meta.url), "utf8");
+  const mapTsx = readFileSync(new URL("../../app/(app)/map.tsx", import.meta.url), "utf8");
+  const cp = readFileSync(new URL("../../src/carplay/ConvoyCarPlay.tsx", import.meta.url), "utf8");
+  const store = readFileSync(new URL("../../src/carplay/carStore.ts", import.meta.url), "utf8");
+  const pal = readFileSync(new URL("../../src/hazardPalette.ts", import.meta.url), "utf8");
+  // A function's body: from its header to the first line that closes it at the header's own indentation.
+  const body = (src: string, head: string): string => {
+    const k = src.indexOf(head); if (k < 0) return "";
+    const lineStart = src.lastIndexOf("\n", k) + 1, indent = src.slice(lineStart, k).match(/^\s*/)?.[0] ?? "";
+    const end = src.indexOf(`\n${indent}};`, k), end2 = src.indexOf(`\n${indent}}\n`, k);
+    const stop = [end, end2].filter((v) => v > k).sort((a, b) => a - b)[0] ?? src.length;
+    return src.slice(k, stop);
+  };
+  ok("I1 HAZARD_REPORT_PILL_MS is 15 s", HAZARD_REPORT_PILL_MS === 15000, `${HAZARD_REPORT_PILL_MS}`);
+  const p1 = reportPillPatch("traffic", 1000), p2 = reportPillPatch("police", 9000);
+  ok("I2 reportPillPatch writes the kind and now + 15 s; a second report restarts the 15 s",
+    JSON.stringify(p1) === JSON.stringify({ carReportKind: "traffic", carReportUntil: 16000 }) && p2.carReportKind === "police" && p2.carReportUntil === 24000);
+  ok("I3 reportPillLive: true until the instant it expires, false at / after it and for a missing or non-finite stamp",
+    reportPillLive(15000, 14999) && !reportPillLive(15000, 15000) && !reportPillLive(15000, 20000) && !reportPillLive(undefined, 0) && !reportPillLive(null, 0) && !reportPillLive(NaN, 0));
+  const rh = body(acts, "export async function reportHazardFromCar("), rhCode = rh.replace(/\/\/.*$/gm, "");
+  ok("I4 a head-unit report's success writes the pill (reportPillPatch + car-report-pill src=car) instead of toast(done); failures stay 3 s toasts; TOAST_MS still 3000",
+    rh.includes("setCarState(reportPillPatch(kind, Date.now()))") && rh.includes("logEvent(`car-report-pill kind=${kind} src=car`)") && rh.length > 0 && !rhCode.includes("toast(done)")
+    && rh.includes("toast('No GPS fix yet')") && rh.includes("toast('Report failed — no connection')") && /^const TOAST_MS = 3000;$/m.test(acts));
+  const phoneWrite = "try { setCarState(reportPillPatch(kind, Date.now())); logEvent(`car-report-pill kind=${kind} src=phone`); } catch {}";
+  const ra = body(mapTsx, "const reportAlert = async ("), rz = body(mapTsx, "const reportHazard = async (");
+  ok("I5 both phone report functions write the head-unit pill right after the phone pill, and keep the phone's own 4 s",
+    [ra, rz].every((b) => b.includes(phoneWrite) && b.indexOf("setAlertConfirm(kind);") < b.indexOf(phoneWrite) && b.includes("setTimeout(() => setAlertConfirm(null), 4000)")));
+  const order = ["'pitstop'", "'toast'", "'crew'", "'comms'", "'talker'", "'scout'", "'report'", "'status'"];
+  const decision = cp.slice(cp.indexOf("const slot: 'pitstop'"), cp.indexOf("    : 'none';", cp.indexOf("const slot: 'pitstop'")));
+  const decided = order.map((t) => decision.indexOf(`? ${t}`));
+  const jsx = order.map((t) => cp.indexOf(`slot === ${t} ? (`));
+  ok("I6 the ONE status slot: pitstop > receipt > crew view > Transmitting > talker > Scout > REPORT > status pill, in the decision and in the JSX",
+    decided.every((v, i) => v > 0 && (i === 0 || decided[i - 1] < v)) && decision.includes(": reportLive ? 'report'")
+    && jsx.every((v, i) => v > 0 && (i === 0 || jsx[i - 1] < v)) && !cp.includes("{s.pitstopActive ? (") && !cp.includes(") : statusPill ? ("));
+  ok("I7 the head-unit pill is the crew pill's twin, painted ONLY from hazardPaint(kind): border + dot bright, a 0.30 wash, '<Label> reported'",
+    cp.includes("const reportPaint = hazardPaint(reportKind);") && cp.includes("style={[styles.crewPill, styles.reportPill, { backgroundColor: carHudFloor(), borderColor: reportPaint.bright }]}")
+    && cp.includes("tintColor={hazardTint(reportKind, 0.30)}") && cp.includes("style={[styles.reportDot, { backgroundColor: reportPaint.bright }]}")
+    && cp.includes("style={[styles.crewPillText, styles.reportPillText]}") && cp.includes("{reportPaint.label} reported")
+    && pal.includes("export function hazardTint(kind: string | null | undefined, alpha: number): string {") && pal.includes("hazardPaint(kind).bright"));
+  ok("I8 expiry: a TIMESTAMP at render plus ONE local re-render at the next slot change while the pill is pending (its own expiry, or the end of a receipt / crew view covering it — a stopped car writes no store), re-armed if early, cleared on change / unmount",
+    cp.includes("const reportLive = !!reportKind && reportPillLive(s.carReportUntil, Date.now());")
+    && cp.includes("if (!reportKind || !reportPillLive(s.carReportUntil, now)) return;")
+    && cp.includes("const next = Math.min(...[s.carReportUntil, s.carToastUntil, s.crewViewUntil].filter((t): t is number => typeof t === 'number' && t > now));")
+    && cp.includes("const id = setTimeout(() => setReportTick((t) => t + 1), next - now);")
+    && cp.includes("return () => clearTimeout(id);\n  }, [reportKind, s.carReportUntil, s.carToastUntil, s.crewViewUntil, reportTick]);"));
+  ok("I9 car-report-drawn is written only when the slot switches TO the pill (never while covered), ≤ 8 per mount",
+    cp.includes("if (CAR_DIAG_MODE || slot !== 'report' || was === slotKey || reportDrawnCount.current >= 8) return;")
+    && cp.includes("logEventReliable(`car-report-drawn kind=${reportKind} surf=${IS_AA ? 'aa' : 'carplay'}`)"));
+  ok("I10 placement: the status slot on the crew pill's frame — CarPlay centred between the bar buttons, AA on the left rail with 'left top' applied AFTER statusRowFit",
+    cp.includes("<View style={[styles.statusRow, statusRowFit, styles.reportRow, IS_AA ? hudFit('left top') : null]} pointerEvents=\"none\">")
+    && cp.includes("reportRow: { left: IS_AA ? CAR_DOCK_LEFT : CAR_BAR_LEADING_W, right: IS_AA ? 0 : CAR_BAR_TRAILING_W, alignItems: IS_AA ? 'flex-start' : 'center' },"));
+  ok("I11 the report hooks run before CarSurface's CAR_DIAG_MODE early return (hook order), and carStore carries the two type fields",
+    cp.indexOf("const [reportTick, setReportTick] = useState(0);") > 0 && cp.indexOf("const slotKeyPrev = useRef('');") > 0
+    && cp.indexOf("const slotKeyPrev = useRef('');") < cp.indexOf("  if (CAR_DIAG_MODE) {\n    return (")
+    && store.includes("  carReportKind?: string | null;\n  carReportUntil?: number;"));
 }
 
 console.log(fails === 0 ? "\nPASS hazard_panel" : `\nFAIL hazard_panel (${fails})`);

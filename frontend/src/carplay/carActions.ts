@@ -37,7 +37,7 @@ import { getCarState, setCarState, setCarHazards, subscribeCarState, emitCarGest
 import { toggleMapView2D, setMapView2D, isMapView2DLocked } from '../mapViewMode';
 import { getDepartureBearing, departureBearingSource, orderRoutesForward, routeInitialBearing } from '../departureBearing';
 import { CAR_ICON_MIC, CAR_ICON_CREW, CAR_ICON_HAZARDS, CAR_ICON_ZOOM_IN, CAR_ICON_ZOOM_OUT, CAR_ICON_HOME, CAR_ICON_WORK, CAR_ICON_SAVED, CAR_ICON_BLANK, CAR_ICON_VIEW_2D, CAR_ICON_VIEW_3D, carIcon } from './carButtonIcons';
-import { HAZARD_BUTTON_ID, HAZARD_BUTTON_GLYPH, HAZARD_TEMPLATE_ID, HAZARD_PANEL_TITLE, HAZARD_PANEL_AUTO_CLOSE_MS, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA, type HazardKind } from './hazardPanel';
+import { HAZARD_BUTTON_ID, HAZARD_BUTTON_GLYPH, HAZARD_TEMPLATE_ID, HAZARD_PANEL_TITLE, HAZARD_PANEL_AUTO_CLOSE_MS, hazardTile, hazardTapLabel, hazardGridButtons, hazardGridConfigAA, reportPillPatch, type HazardKind } from './hazardPanel';
 import { appSkinNow } from '../appSkin';
 import { toggleCarComms } from './carComms';
 import { logEvent, logEventReliable } from '../crashBreadcrumb';
@@ -208,7 +208,11 @@ export async function reportHazardFromCar(kind: HazardKind, done: string): Promi
         setCarHazards([{ id: data.id, kind: data.kind || kind, lat: data.lat, lng: data.lng, confirms: data.confirms, disputes: data.disputes }, ...cur], 'service');
       }
     }
-    toast(done);
+    // Success = the kind-coloured REPORT PILL under the crew pill for 15 s (Jeff, 2026-09-25 — hazardPanel.ts
+    // reportPillPatch), not the 3 s grey `toast(done)` it replaces: both at once would say the same thing twice. `done`
+    // stays each tile's text contract (gate A5); the failure toasts below stay 3 s.
+    try { setCarState(reportPillPatch(kind, Date.now())); } catch {}
+    try { logEvent(`car-report-pill kind=${kind} src=car`); } catch {}
   } catch {
     toast('Report failed — no connection');
   } finally {

@@ -26,36 +26,88 @@ type Entry = {
   live: boolean;
   subs: Set<(peers: RawPeer[]) => void>;
   providers: Provider[];
-  // Single-throttle bookkeeping (see TRACK_MIN_MS below).
-  lastTrackAt: number;
+  // Budget bookkeeping (see THE PRESENCE BUDGET below).
+  /** idKeyOf the last payload that actually REACHED the channel — a different key now is a priority send. */
   lastIdKey: string;
+  /** The post-SUBSCRIBE track has not gone out on this channel yet: supabase holds no payload for us until it does. */
+  owed: boolean;
+  /** A priority send was held for a slot; the flush timer (or the next track()) sends it. */
+  pending: boolean;
 };
 
 const entries = new Map<string, Entry>();
 
-// ── THE SINGLE PRESENCE THROTTLE (2026-08-15) ──────────────────────────
-// Nothing throttled the CHANNEL — each CONSUMER throttled itself, at the same 1.5 s
-// but on its own independent phase: useConvoyPresence (convoyPresence.ts:193) and
-// carDataService (PRESENCE_TRACK_MS, carDataService.ts:39 → :359). Both call
-// handle.track(), and track() → doTrack() broadcasts the HIGHEST-priority provider's
-// payload no matter WHO called it — so while a head unit is connected the car
-// service's tick merely re-sends the phone map's payload, and the channel carries up
-// to two frames per 1.5 s window for one window's worth of movement.
+// ── THE PRESENCE BUDGET (2026-09-25; replaces the 1.5 s TRACK_MIN_MS throttle of 2026-08-15) ──────────────────────────
+// Supabase Realtime: "By default, a client can send at most 5 Presence updates within a 30-second window. Both track() and untrack()
+// calls count toward this limit. When a client exceeds it, Realtime logs ClientPresenceRateLimitReached and shuts the
+// channel down" — a "per-connection limit" (supabase.com/docs/guides/troubleshooting/realtime-client-presence-rate-limit-reached).
+// The 1.5 s throttle that stood here let a 1 Hz mover send its 6th update at +10.0 s (the real hub, measured under node),
+// and Supabase's realtime logs show exactly that: a presence channel shut every 10.0 s through Jeff's 09:19–10:06 PDT
+// CarPlay drive on 2026-09-25 (268 × ClientPresenceRateLimitReached 16:19:39–17:06:19Z, a new channel each time), and on every day back to
+// 09-18. Each close cleared `live` below, so the crew pill dropped to grey and the crew saw the driver vanish and come back.
+// Jeff, 2026-09-25: "something happened to the green crew pill on phone/carplay top center its not green anymore." Asked,
+// he chose "Keep rule + fix drops": green still means another member's presence is live right now, and crew positions
+// over presence go out at most every ~7.5 s instead of ~2 s.
 //
-// The hub is the only place that can see both callers, so the throttle belongs here.
-// It rate-limits POSITION churn ONLY: anything that is not "we moved" changes the
-// identity key below and bypasses the window outright.
-const TRACK_MIN_MS = 1500;
+//  • ONE budget for the whole hub. The limit is per connection and one socket carries every topic, so every topic's
+//    tracks and every untrack spend from it, and a channel rebuild does NOT reset it.
+//  • POSITION tracks (only lat/lng/heading/topSpeed moved) go out at most every PRESENCE_POSITION_GAP_MS, and only while
+//    fewer than PRESENCE_POSITION_SENDS sends sit in the window — the last of Supabase's 5 slots is kept for priority
+//    sends. An excess position request is DROPPED, never queued: both callers track on every tick and the payload is
+//    read fresh, so the first tick after a slot frees carries the newest position.
+//  • PRIORITY sends — an identity change (idKeyOf differs: status, appearance, the provider's field shape, and `src`, the
+//    live↔car-spot share source, see shareSrc), the post-SUBSCRIBE track (supabase-js's own auto-rejoin re-SUBSCRIBEs the
+//    SAME channel object, so this is keyed to the status callback, not to ensureChannel's rebuild), and leave's untrack —
+//    take the reserved slot, then the next free one. One held for a slot does not wait for a position tick (a stationary
+//    phone gets none): a single timer flushes it the moment the oldest send leaves the window. Timers can freeze on a
+//    locked phone, so that is best effort — the next track() flushes it too.
+// The +1 s on Supabase's 30 s window is OUR margin for our clock against the server's; the server's exact windowing is
+// not measured.
+const PRESENCE_WINDOW_MS = 31_000;
+const PRESENCE_MAX_SENDS = 5;            // Supabase's cap in that window
+const PRESENCE_POSITION_SENDS = 4;       // position tracks stop here — the 5th slot is for priority sends
+const PRESENCE_POSITION_GAP_MS = 7_500;  // Jeff's "~7.5 s": the four position slots spread across the window, never a burst
+
+/** Every channel send (track or untrack, any topic) still inside the window, oldest first. Hub-global — see above. */
+let sendTimes: number[] = [];
+let lastSendAt = 0;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Sends inside the window at `now`. A wall clock that stepped BACKWARD (NTP / manual set) expires the stamps it passed —
+ *  the carStore gates' convention: a clock jump can never mute us. */
+function sendsInWindow(now: number): number {
+  sendTimes = sendTimes.filter((t) => t <= now && now - t < PRESENCE_WINDOW_MS);
+  return sendTimes.length;
+}
+function mayPosition(now: number): boolean {
+  const gapOk = now < lastSendAt || now - lastSendAt >= PRESENCE_POSITION_GAP_MS;
+  return gapOk && sendsInWindow(now) < PRESENCE_POSITION_SENDS;
+}
+function mayPriority(now: number): boolean { return sendsInWindow(now) < PRESENCE_MAX_SENDS; }
+function spend(now: number): void { sendTimes.push(now); lastSendAt = now; stats.sent++; }
+
+/** One timer for every held priority send: it fires when the oldest send leaves the window, i.e. when a slot frees. */
+function scheduleFlush(now: number): void {
+  if (flushTimer) return;
+  const n = sendsInWindow(now);
+  const freeAt = n < PRESENCE_MAX_SENDS ? now : sendTimes[n - PRESENCE_MAX_SENDS] + PRESENCE_WINDOW_MS;
+  try {
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      entries.forEach((e) => { if (e.pending) doTrack(e, true); });
+    }, Math.max(0, freeAt - now) + 5);
+  } catch { flushTimer = null; }
+}
 
 // Identity/appearance signature — the payload MINUS the fields that keep changing on
-// their own while driving. lat/lng/heading are the churn being rate-limited. topSpeed
+// their own while driving. lat/lng/heading are the churn being rate-limited (the POSITION budget above). topSpeed
 // rides with them because map.tsx broadcasts
 // Math.max(user.top_speed_record, sessionMaxSpeed) (map.tsx:3444), which advances on
 // every fix while you accelerate past your old record — left in, ordinary acceleration
-// would bypass the throttle and restore the doubling. EVERYTHING else is a real event
-// that must reach peers immediately, and takes the bypass: status live↔parked (the
+// would make every fix a priority send and blow the budget. EVERYTHING else is a real event
+// that must reach peers promptly, and is a PRIORITY send: status live↔parked (the
 // very case convoyPresence.ts:192's own bypass exists for), marker/cls/arrow paint,
-// handle, carColor — and the provider's whole field SHAPE, since Object.keys keeps
+// handle, carColor, `src` (shareSrc below) — and the provider's whole field SHAPE, since Object.keys keeps
 // explicitly-undefined keys. (Until 2026-09-23 the car service's slim payload never
 // carried marker/cls/clsPri/clsSec/arrPri/arrSec, so the two providers' keys could
 // never collide; it carries them now — carDataService.buildCarPayload — so a phone
@@ -70,8 +122,21 @@ const idKeyOf = (p: Record<string, any>): string => {
         .sort()
         .map((k) => [k, p[k]]),
     );
-  } catch { return ""; }   // never equal to a real key ("[]" at minimum) → always sends
+  } catch { return ""; }   // never equal to a real key ("[]" at minimum) → reads as an identity change
 };
+
+// ── THE SHARE SOURCE (2026-09-25) ──────────────────────────────────────────────────────────────────────────────────
+// After a head-unit disconnect the privacy gate (locationPrivacy.shareablePosition) swaps the live fix for the parked
+// car spot. That swap moves only lat/lng, which idKeyOf leaves out, and `status` stays 'live' through the 90 s
+// hysteresis — so under the position budget the swap could wait ~30 s for a slot while the crew kept the live
+// position. `src` makes the swap an identity change, i.e. a priority send. Derived by comparing what we publish with
+// the live fix, so the gate itself (its decision is a nav-locked region) is untouched. Both payload builders call this.
+export function shareSrc(
+  shared: { lat: number; lng: number },
+  live: { lat: number; lng: number } | null | undefined,
+): "live" | "spot" {
+  return live && shared.lat === live.lat && shared.lng === live.lng ? "live" : "spot";
+}
 
 const fanout = (e: Entry) => { e.subs.forEach((fn) => { try { fn(e.peers); } catch {} }); notifyCrew(); };
 
@@ -81,7 +146,7 @@ const fanout = (e: Entry) => { e.subs.forEach((fn) => { try { fn(e.peers); } cat
 // say who is online; the pill's COLOUR reads this instead. Keyed to the CURRENT community topic (crewPresenceTopic): the
 // car service can briefly still hold the club you just left.
 const crewSubs = new Set<() => void>();
-function notifyCrew(): void { crewSubs.forEach((fn) => { try { fn(); } catch {} }); }
+function notifyCrew(): void { crewSubs.forEach((fn) => { try { fn(); } catch {} }); maybeCrumb(Date.now()); }
 
 /** The presence topic this phone joins for its crew: the active community's — none in ghost mode. The one rule, shared by
  *  the car service (carDataService) and the crew pill. */
@@ -116,7 +181,10 @@ export function crewPeersNow(topic: string | null): RawPeer[] {
   return e && e.live ? e.peers : NO_PEERS;
 }
 
-function doTrack(e: Entry, force = false): void {
+/** `flush` = called by the flush timer: send only if a PRIORITY send is still owed (position requests are never queued). */
+function doTrack(e: Entry, flush = false): void {
+  const now = Date.now();
+  maybeCrumb(now);
   if (!e.channel || e.status !== "SUBSCRIBED") return;
   const sorted = [...e.providers].sort((a, b) => b.priority - a.priority);
   if (!sorted.length) return;
@@ -136,23 +204,26 @@ function doTrack(e: Entry, force = false): void {
     if (v) { payload = v; break; }
   }
   if (!payload) return;
-  // ── SINGLE THROTTLE ──────────────────────────────────────────────
+  // ── THE BUDGET (see THE PRESENCE BUDGET above) ──────────────────────────
   // Deliberately AFTER the provider loop above: WHICH tier's payload is broadcast is
   // decided exactly as before, so this cannot resurrect the 2026-07-20 regression
   // where a slim car payload stripped class-sprite paint off retained presence. Nor
-  // can it DELAY a rich payload that must overwrite a slim one — the two providers'
-  // field shapes differ (the map always sends marker/cls/…, the car service never
-  // does), so their identity keys can never match and the bypass always fires.
-  // `force` covers the post-SUBSCRIBE broadcast, where supabase holds no retained
+  // can it hold back a rich payload that must overwrite a slim one for long — the two
+  // providers' field shapes differ, so their identity keys differ and it is a PRIORITY
+  // send. `owed` covers the post-SUBSCRIBE broadcast, where supabase holds no retained
   // payload for us at all and a skip would leave us invisible to the convoy.
   const idKey = idKeyOf(payload);
-  const now = Date.now();
-  const dt = now - e.lastTrackAt;
-  // dt < 0 = the wall clock stepped backward (NTP / manual set) — same convention as
-  // carStore's gates: treat the window as expired so a clock jump can never mute us.
-  if (!force && idKey === e.lastIdKey && dt >= 0 && dt < TRACK_MIN_MS) return;
-  e.lastTrackAt = now;
+  const priority = e.owed || idKey !== e.lastIdKey;
+  if (flush && !priority) { e.pending = false; return; }
+  if (!(priority ? mayPriority(now) : mayPosition(now))) {
+    stats.dropped++;
+    if (priority) { e.pending = true; scheduleFlush(now); }
+    return;
+  }
+  spend(now);
   e.lastIdKey = idKey;
+  e.owed = false;
+  e.pending = false;
   try { e.channel.track({ ...payload, online_at: new Date().toISOString() }); } catch {}
 }
 
@@ -199,8 +270,15 @@ function ensureChannel(e: Entry): void {
       .subscribe((s: string) => {
         e.status = s;
         // Disconnected (or rejoining, not yet synced): nobody counts as online until the next sync says who is there.
-        if (s !== "SUBSCRIBED" && e.channel === channel && e.live) { e.live = false; notifyCrew(); }
-        if (s === "SUBSCRIBED") doTrack(e, true);   // fresh channel holds no retained payload — never throttle this one
+        if (s !== "SUBSCRIBED" && e.channel === channel && e.live) {
+          e.live = false;
+          if (e.topic === crewPresenceTopic()) stats.drops++;
+          notifyCrew();
+        }
+        // A (re)joined channel holds no retained payload for us: the next send is OWED and goes as a priority send —
+        // on every SUBSCRIBED, including supabase-js's auto-rejoin of this same channel object after CHANNEL_ERROR /
+        // TIMED_OUT, which never passes through the rebuild below.
+        if (s === "SUBSCRIBED" && e.channel === channel) { e.owed = true; doTrack(e); }
         else if (s === "CLOSED" && e.channel === channel && e.subs.size > 0) {
           // Defensive rebuild: a hard CLOSE while consumers still need presence
           // would otherwise freeze peers until an app restart. supabase auto-
@@ -219,6 +297,58 @@ function ensureChannel(e: Entry): void {
     try { supabase.removeChannel(channel); } catch {}
     e.channel = null;
   }
+}
+
+// ── THE crew-presence CRUMB (2026-09-25) ─────────────────────────────────────────────────────────────────────────
+// There was no client-side presence telemetry at all, so the pill's grey/green duty cycle on a phone or head unit was
+// unmeasurable. One bounded aggregate row, at most once a minute (≤ 60/h), written from hub activity — never a timer:
+//   crew-presence live=<crew topic synced now> greyMs=<ms the pill read grey this period> drops=<live→not-live on the
+//   crew topic> maxN=<most members online> topic=<a crew topic is set> ghost=<ghost mode> sent=<channel sends, all
+//   topics> dropped=<requests the budget refused>
+// It writes while a crew topic is set, or when anything changed since the last row. greyMs samples the pill's colour
+// at every hub event, so it is approximate between events. The logger is INJECTED (convoyPresence and carDataService
+// pass crashBreadcrumb.logEvent) so this file stays importable under plain node for tools/sim-qc.
+type PresenceLogger = (message: string) => void;
+let presenceLogger: PresenceLogger | null = null;
+export function setPresenceLogger(fn: PresenceLogger | null): void { presenceLogger = fn; }
+
+const CRUMB_EVERY_MS = 60_000;
+const stats = { sent: 0, dropped: 0, drops: 0, greyMs: 0, maxN: 0 };
+let periodStart = 0;
+let sampleAt = 0;
+let sampleGrey = true;
+let lastCrumbKey = "";
+
+function samplePill(now: number): number {
+  const n = onlineCrewCount(crewPresenceTopic());
+  if (sampleAt && sampleGrey && now >= sampleAt) stats.greyMs += now - sampleAt;
+  sampleAt = now;
+  sampleGrey = n === 0;
+  if (n > stats.maxN) stats.maxN = n;
+  return n;
+}
+
+function maybeCrumb(now: number): void {
+  let n = 0;
+  try { n = samplePill(now); } catch { return; }
+  if (!presenceLogger) return;
+  if (!periodStart) { periodStart = now; return; }
+  if (now >= periodStart && now - periodStart < CRUMB_EVERY_MS) return;
+  try {
+    const topic = crewPresenceTopic();
+    const e = topic ? entries.get(topic) : undefined;
+    const live = e?.live ? 1 : 0;
+    const ghost = getAvatarMode(getSettings()) === "ghost" ? 1 : 0;
+    const key = `${live}${topic ? 1 : 0}${ghost}`;
+    const changed = key !== lastCrumbKey || stats.sent > 0 || stats.dropped > 0 || stats.drops > 0 || stats.maxN > 0;
+    if (topic || changed) {
+      const period = Math.max(0, now - periodStart);
+      presenceLogger(`crew-presence live=${live} greyMs=${Math.min(stats.greyMs, period)} drops=${stats.drops} maxN=${stats.maxN} topic=${topic ? 1 : 0} ghost=${ghost} sent=${stats.sent} dropped=${stats.dropped}`);
+      lastCrumbKey = key;
+    }
+  } catch {}
+  periodStart = now;
+  stats.sent = 0; stats.dropped = 0; stats.drops = 0; stats.greyMs = 0; stats.maxN = n;
 }
 
 export type PresenceHandle = { track: () => void; leave: () => void };
@@ -240,7 +370,7 @@ export function joinPresence(opts: {
   }
   let e = entries.get(topic);
   if (!e) {
-    e = { topic, selfId, channel: null, status: "idle", peers: [], live: false, subs: new Set(), providers: [], lastTrackAt: 0, lastIdKey: "" };
+    e = { topic, selfId, channel: null, status: "idle", peers: [], live: false, subs: new Set(), providers: [], lastIdKey: "", owed: false, pending: false };
     entries.set(topic, e);
   }
   const provider: Provider = { priority, get: getPayload };
@@ -256,7 +386,15 @@ export function joinPresence(opts: {
       ent.subs.delete(onPeers);
       ent.providers = ent.providers.filter((p) => p !== provider);
       if (ent.subs.size === 0) {
-        try { ent.channel?.untrack?.(); } catch {}
+        // untrack() counts against Supabase's window like a track: a priority send, but with no "next free slot" for
+        // a channel removed on the next line. With the window full it is skipped, and removeChannel's leave is what
+        // takes us off the topic (HYPOTHESIS: the server drops a departed channel's presence — Phoenix presence is
+        // tied to the channel process; not measured on Supabase).
+        const now = Date.now();
+        if (ent.channel && ent.status === "SUBSCRIBED") {
+          if (mayPriority(now)) { spend(now); try { ent.channel.untrack?.(); } catch {} }
+          else stats.dropped++;
+        }
         try { if (ent.channel && supabase) supabase.removeChannel(ent.channel); } catch {}
         entries.delete(topic);
         notifyCrew();

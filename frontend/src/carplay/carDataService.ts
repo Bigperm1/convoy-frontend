@@ -37,12 +37,13 @@ import { getGarage } from '../garageStore';
 import { shareablePosition, noteFix, hydrateLocationPrivacy } from '../locationPrivacy';
 import { toGRCSlug } from '../vehicleAssets';
 import { getCarState, setCarPeers, setCarHazards, subscribeCarState, carFeedWouldAccept, type CarPeer } from './carStore';
-import { crewPresenceTopic, joinPresence as hubJoinPresence, type PresenceHandle } from '../presenceHub';
+import { crewPresenceTopic, joinPresence as hubJoinPresence, setPresenceLogger, shareSrc, type PresenceHandle } from '../presenceHub';
+import { logEvent } from '../crashBreadcrumb';
 
 // ── throttle cadences (wall-clock, event-driven — NO timers) ────────────────
 const NEARBY_REFRESH_MS = 10_000;   // matches the phone's 10s /users/nearby poll
 const HAZARDS_REFRESH_MS = 30_000;  // matches the phone's 30s fallback poll
-const PRESENCE_TRACK_MS = 1_500;    // matches useConvoyPresence's track throttle
+const PRESENCE_TRACK_MS = 1_500;    // matches useConvoyPresence's track throttle (presenceHub's budget is the real gate: ~7.5 s)
 const WS_RECONNECT_MS = 10_000;     // min gap between WS reconnect attempts
 const ME_RETRY_MS = 30_000;         // /auth/me retry while it keeps failing
 
@@ -78,6 +79,7 @@ let _hazards: SvcHazard[] = [];
 let _nearbyLastFetch = 0;
 let _hazardsLastFetch = 0;
 let _presenceLastTrack = 0;
+let _presenceLastKey = '';   // status + share source last handed to the hub — a flip bypasses PRESENCE_TRACK_MS
 let _presenceHandle: PresenceHandle | null = null;
 // Has the privacy gate been hydrated from disk in THIS context? Presence may not join
 // (and therefore may not broadcast) until it has — see startCarDataService.
@@ -383,10 +385,13 @@ function buildCarPayload(): Record<string, any> | null {
     // moving fix, and COLD-PATH ONLY — while map.tsx is mounted its provider (priority 2)
     // owns the broadcast outright and this payload is never even read (presenceHub.ts:83-90
     // breaks at the first non-top priority).
-    // `status` is NOT one of presenceHub's throttled keys (idKeyOf excludes only
-    // lat/lng/heading/topSpeed, presenceHub.ts:58-67), so a live<->parked flip still
-    // bypasses the 1.5 s window.
+    // `status` is NOT one of presenceHub's position keys (idKeyOf excludes only
+    // lat/lng/heading/topSpeed), so a live<->parked flip is a PRIORITY send under the
+    // hub's presence budget (the reserved slot, then the next free one).
     status: share.status,
+    // Live fix or the parked car spot (presenceHub.shareSrc): the hub treats a flip as identity, so the swap to the
+    // spot is a priority send and never waits out the position budget (~30 s) with the live position on the wire.
+    src: shareSrc(share, { lat: st.selfLat, lng: st.selfLng }),
     lat: share.lat,
     lng: share.lng,
     // `|| undefined` preserves today's wire SHAPE: the gate returns heading 0 both for
@@ -450,8 +455,12 @@ function trackPresence(force = false): void {
   const st = getCarState();
   if (typeof st.selfLat !== 'number' || typeof st.selfLng !== 'number') return;
   const now = Date.now();
-  if (!force && now - _presenceLastTrack < PRESENCE_TRACK_MS) return;
+  // A status or share-source flip skips this window: on a stationary phone the tick that carries it may be the last.
+  const p = buildCarPayload();
+  const key = p ? `${p.status}|${p.src}` : '';
+  if (!force && key === _presenceLastKey && now - _presenceLastTrack < PRESENCE_TRACK_MS) return;
   _presenceLastTrack = now;
+  _presenceLastKey = key;
   _presenceHandle.track();
 }
 
@@ -484,13 +493,16 @@ function onStoreTick(): void {
   void connectWs();       // reconnect (throttled) if the socket dropped
   void refreshNearby();   // ≤ every 10s
   void refreshHazards();  // ≤ every 30s
-  void trackPresence();   // ≤ every 1.5s
+  void trackPresence();   // ≤ every 1.5s here; the hub's budget sends a position ≤ every ~7.5 s
 }
 
 // ── lifecycle ────────────────────────────────────────────────────────────────
 export function startCarDataService(): void {
   if (_running) return;
   _running = true;
+  // The hub's crew-presence crumb writer (presenceHub, THE crew-presence CRUMB): a cold car session may never import
+  // convoyPresence, which wires it for the phone. Idempotent.
+  setPresenceLogger(logEvent);
   _unsubStore = subscribeCarState(onStoreTick);
   void ensureMe();
   void connectWs();
@@ -550,6 +562,7 @@ export function stopCarDataService(): void {
   _me = null;
   _lastTickLat = null;
   _lastTickLng = null;
+  _presenceLastKey = '';
   _privacyReady = false;   // next start re-awaits (both hydrations are idempotent/cheap)
   // Deliberately NOT clearing carStore.peers/hazards here — the phone mirror (if
   // mounted) keeps owning them, and a momentary [] would blink the car UI during

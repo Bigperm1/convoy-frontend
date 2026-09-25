@@ -17,7 +17,13 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { supabase, SUPABASE_ENABLED } from "./supabase";
 import { toGRCSlug } from "./vehicleAssets";
-import { crewPeersNow, crewPresenceTopic, joinPresence, onlineCrewCount, subscribeOnlineCrew, type PresenceHandle, type RawPeer } from "./presenceHub";
+import { crewPeersNow, crewPresenceTopic, joinPresence, onlineCrewCount, setPresenceLogger, shareSrc, subscribeOnlineCrew, type PresenceHandle, type RawPeer } from "./presenceHub";
+import { logEvent } from "./crashBreadcrumb";
+
+// The hub's crew-presence crumb (presenceHub, THE crew-presence CRUMB) needs a writer; the hub takes it injected so it
+// stays importable under plain node for tools/sim-qc. Wired here, at import — the phone's presence consumer — and again
+// by carDataService for a cold car session, whose JS context may never import this file.
+setPresenceLogger(logEvent);
 
 export type ConvoyPresencePeer = {
   user_id: string;
@@ -97,7 +103,10 @@ type Status = "idle" | "joining" | "subscribed" | "error" | "disabled";
 export function useConvoyPresence(
   channelName: string | null,
   me: ConvoyMe | null,
-  coords: { lat: number; lng: number; heading?: number } | null
+  coords: { lat: number; lng: number; heading?: number } | null,
+  // The phone's LIVE fix, beside `coords` (what the privacy gate lets us publish): where they differ, the gate has
+  // swapped in the parked car spot, and the payload says so (`src`, presenceHub.shareSrc) so the swap is a priority send.
+  live?: { lat: number; lng: number } | null,
 ) {
   const [peers, setPeers] = useState<ConvoyPresencePeer[]>([]);
   const [status, setStatus] = useState<Status>("idle");
@@ -105,6 +114,7 @@ export function useConvoyPresence(
   // Fresh me/coords so the hub's getPayload closure always reads the latest.
   const meRef = useRef(me); meRef.current = me;
   const coordsRef = useRef(coords); coordsRef.current = coords;
+  const liveRef = useRef(live); liveRef.current = live;
   const lastTrackRef = useRef<number>(0);
   // Last status we actually broadcast — lets a live<->parked flip (CarPlay connect/
   // disconnect) bypass the position throttle so the parked pin reaches peers even when
@@ -114,6 +124,9 @@ export function useConvoyPresence(
   // bypasses the 1.5 s throttle like a status flip does — otherwise a stationary driver's "Drive this today"
   // inside the window never reached the crew until the next position tick (Codex review, 2026-09-24).
   const lastIdentRef = useRef<string>("");
+  // The share source the crew last saw (live fix vs parked car spot) — a flip bypasses the 1.5 s window like a status
+  // flip: after it `coords` sits still on the car spot, so a throttled flip would have no later tick to ride.
+  const lastSrcRef = useRef<string>("");
 
   // Build OUR presence payload from the freshest me/coords (the hub calls this
   // on every track(), and once automatically when the channel goes SUBSCRIBED).
@@ -138,6 +151,7 @@ export function useConvoyPresence(
       arrSec: m.arrSec,
       arrPick: m.arrPick,
       scanId: m.scanId,
+      src: shareSrc(c, liveRef.current),
       lat: c.lat,
       lng: c.lng,
       heading: c.heading,
@@ -203,7 +217,8 @@ export function useConvoyPresence(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelName, me?.user_id]);
 
-  // Re-broadcast our position as it changes (throttled to ~1 update / 1.5s). A STATUS
+  // Re-broadcast our position as it changes (throttled to ~1 update / 1.5s here; presenceHub's budget then lets a
+  // position through at most every ~7.5 s — Supabase's 5-per-30 s presence limit, 2026-09-25). A STATUS
   // change (live <-> parked, e.g. CarPlay connect/disconnect) ALWAYS re-tracks and
   // bypasses the throttle — otherwise a parked flip whose pinned coords didn't change
   // would never reach peers (the position deps wouldn't fire, the throttle would eat it).
@@ -215,10 +230,13 @@ export function useConvoyPresence(
     const statusChanged = (me.status ?? "live") !== lastStatusRef.current;
     const ident = [me.marker, me.cls, me.clsPri, me.clsSec, me.arrPri, me.arrSec, me.arrPick, me.scanId, me.activeColor, me.carColor].join("|");
     const identChanged = ident !== lastIdentRef.current;
-    if (!statusChanged && !identChanged && now - lastTrackRef.current < 1500) return;
+    const src = shareSrc(coords, liveRef.current);
+    const srcChanged = src !== lastSrcRef.current;
+    if (!statusChanged && !identChanged && !srcChanged && now - lastTrackRef.current < 1500) return;
     lastTrackRef.current = now;
     lastStatusRef.current = me.status ?? "live";
     lastIdentRef.current = ident;
+    lastSrcRef.current = src;
     handleRef.current.track();
   }, [coords?.lat, coords?.lng, coords?.heading, me?.user_id, me?.handle, me?.carType, me?.carBody, me?.carColor, me?.activeColor, me?.topSpeed, me?.status, me?.marker, me?.cls, me?.clsPri, me?.clsSec, me?.arrPri, me?.arrSec, me?.arrPick, me?.scanId]);
 

@@ -4767,7 +4767,10 @@ export default function MapScreen() {
       // last-known spot after the car head unit disconnected.
       status: presenceStatus,
     } : null,
-    presencePos
+    presencePos,
+    // The live fix beside what the gate lets us publish: where they differ the payload carries src 'spot', which makes
+    // the live → car-spot swap a priority send under presenceHub's budget (2026-09-25).
+    coords ? { lat: coords.lat, lng: coords.lng } : null,
   );
   // Other members online right now — the crew pill's colour (presenceHub.onlineCrewCount, the same rule as the car pill).
   const crewOnlineCount = useOnlineCrewCount();

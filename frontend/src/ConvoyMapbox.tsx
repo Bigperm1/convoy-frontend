@@ -1568,16 +1568,15 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // when it lands; pushes stand down while it runs; the push that follows lands on that frame. See src/returnFly.ts.
     if (returnFlyRef) {
       const st = returnFlyStep(returnFlyRef.current as any, now);
-      if (st.action === 'wait') { returnFlyRef.current = st.next; lastCamAt.current = now; return; }
+      // While the fly runs: no pushes, and lastCamAt is NOT refreshed, so lockstep freshness lapses within 500 ms and
+      // the marker's per-tick size follows the map's LIVE zoom through the animation (Codex, 2026-09-24: publishing
+      // the destination zoom here scaled the self car for z 17 while the map was still at z 12 — a speck).
+      if (st.action === 'wait') { returnFlyRef.current = st.next; return; }
       if (st.action === 'fly') {
         returnFlyRef.current = st.next;
-        if (zoomSnapRef) zoomSnapRef.current = false;
-        camZoom.current = c.zoomLevel; camPitch.current = c.pitch;
-        camZoomGoal.current = c.zoomLevel; camPitchGoal.current = c.pitch;
-        if (camZoomOutRef) camZoomOutRef.current = camZoom.current;
-        if (camPitchOutRef) camPitchOutRef.current = camPitch.current;
+        // The landing push snaps zoom, pitch and the heading lag to the chase frame the fly ends on.
+        if (zoomSnapRef) zoomSnapRef.current = true;
         const flyCarHdg = typeof hdg === 'number' ? hdg : c.heading;
-        if (typeof flyCarHdg === 'number') camHdgLag.current = flyCarHdg;
         const aim = predictAhead(la, ln, flyCarHdg, speedMs, RETURN_FLY_MS);
         const flyHeading = (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : flyCarHdg;
         try {

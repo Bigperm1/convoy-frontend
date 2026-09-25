@@ -1696,6 +1696,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // kept pushing frames over the overview and it never landed.
             camHoldUntilRef.current = Date.now() + 15000;
             crewOverviewRef.current = true;
+            // The expiry edge lives in getCam, which pushCam skips while the lockstep stands down — so on a plain
+            // 15 s hold nothing would ever record the hold as active and the edge (snap + fly) would be missed
+            // (Codex, 2026-09-24). Record it here.
+            camHoldWasActiveRef.current = true;
             lockReadyRef.current = false;
             // FACE NORTH for the duration of the overview. This deliberately does NOT
             // set the carNorthUp STATE any more: that is the compass toggle's latch,

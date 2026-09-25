@@ -298,6 +298,14 @@
         "src/carplay/CarMapView.tsx#car-gesture-crewfit region a0676457acfb → 6ed8ad9b7b3f",
         "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region cf8538e67889 → c62f85728b3c"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: why is everybody's car oversized and Olaf's car top center is really small? We need to make sure that these are a good size, including mine. I think they're too big. And also, when the image goes … back to the navigation chase view route, can it do a cool animation where it like swivels and zooms down to where I'm driving? → Go",
+      "changes": [
+        "src/ConvoyMapbox.tsx#mbx-pushcam-glide-noselead region 91cc2802d221 → b4cbd4fe0f80",
+        "src/carplay/CarMapView.tsx#car-gesture-crewfit region 6ed8ad9b7b3f → b148710d078a"
+      ]
     }
   ],
   "files": {
@@ -536,7 +544,7 @@
         "mbx-selfcar-lift-query": "sha256:0c50093772499faaca34681f6c7df2260574d629df4a02e171ae0734f4444d72",
         "mbx-selfcar-angdelta": "sha256:f3fac890a6555edce00adc3a152151946b51026b2e09fd4db41192df8be99761",
         "mbx-cam-glide-pending": "sha256:43084c4689333780235fe668b28b2b439c60b879a304d09dd05414e33e1c37d6",
-        "mbx-pushcam-glide-noselead": "sha256:91cc2802d221ae366c1ec2bdb20f4c923e566a33cd2aa5fd333e3709c3b38f2e",
+        "mbx-pushcam-glide-noselead": "sha256:b4cbd4fe0f8017ce1f0e76ecc09ef47bf95d8f1e997e1b34a7fa4613cfa45199",
         "mbx-pushcam-setcamera": "sha256:d1b136789e761bb69be9188a4e7a1514f8a40aed92eb445ed0021980aa75c6bd",
         "mbx-selfcar-bgtick": "sha256:d09c739f75ab5b31435ce0a291bc4cdb430720cb5d88dcb6dc48052681f95481",
         "mbx-car-frame-pump": "sha256:346b94255999305006afb788d45ec9438efbe076c6da75c5b6c5077ae4dc3c4a",
@@ -649,7 +657,7 @@
         "car-cam-coldstart-snap": "sha256:98c29111cec4c2c002d0005b5855bec0d9da81829baea8c6fa485d8b52179f45",
         "car-zoom-apply-now": "sha256:2f942f43965f7da0533ff6ed8ab7504e44e7d0e8c6870cb7215af546789d9326",
         "car-gesture-zoom-compass": "sha256:b15273b67edd3fb4c5bc3113b2f09b6ebaff5e1a21dcc6f0ac95f164fd8e8532",
-        "car-gesture-crewfit": "sha256:6ed8ad9b7b3fc1f3df3e27ff1feb26f81e46240e07302125e8cb6fcbd53f2099",
+        "car-gesture-crewfit": "sha256:b148710d078a16befa7c94b47f713917f547e0fd06edbc4dedac3241ce7ff372",
         "car-aa-follow-reassert": "sha256:d2b57d34353c040358080757129c00a04941270f73e28053a06e5f71366167b5",
         "car-ribbon-partition": "sha256:a7bfe36b255714fc3c01430e32924335ee53b879eedb8a64d1e1b0bbfd117e5c",
         "car-route-proj-trim-lead": "sha256:16c09a9dae8d265218aa7019f8545a6e1737608643eb2e07bf6613d99e485330",

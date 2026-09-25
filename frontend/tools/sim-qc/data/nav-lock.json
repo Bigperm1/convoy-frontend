@@ -306,6 +306,11 @@
         "src/ConvoyMapbox.tsx#mbx-pushcam-glide-noselead region 91cc2802d221 → b4cbd4fe0f80",
         "src/carplay/CarMapView.tsx#car-gesture-crewfit region 6ed8ad9b7b3f → b148710d078a"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: why is everybody's car oversized and Olaf's car top center is really small? We need to make sure that these are a good size, including mine. I think they're too big. And also, when the image goes … back to the navigation chase view route, can it do a cool animation where it like swivels and zooms down to where I'm driving? → Go",
+      "changes": []
     }
   ],
   "files": {

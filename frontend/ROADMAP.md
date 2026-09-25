@@ -1066,6 +1066,24 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **⏳ COMMITTED, NOT PUBLISHED — `e739f9e8` + `a66fde22` (2026-09-25 00:15–01:05 PDT), ships on Jeff's "ship":** the Report panel
+  round two. (1) Buttons reordered on every surface on his words ("Top - mic, Second from top - hazards, Second from bottom - 2D/3D,
+  Bottom - crew. Phone doesn't have mic"): CarPlay comms · hazards · view · crew, AA map strip hazards above crew, phone compass
+  (the mic's slot) · Hazards · 2D/3D · Crew — two value locks relocked, 43 approvals. (2) The phone panel is no longer a bottom
+  sheet: a card CENTRED on the screen, anchored above the measured FAB stack (`fabStackH`), weather-forecast-card look, transparent
+  backdrop at zIndex 300/301 (the first cut let a search-bar tap through), TOP_CLEAR cap on short phones. (3) Jeff: "MAKE SURE THE
+  PANEL AUTO DISAPPEARS TOO" → `HAZARD_PANEL_AUTO_CLOSE_MS` 8 s on the phone AND both head-unit grids (`armHazardsAutoPop`); measured
+  8.0 s on the sim (`hazard-panel op=close why=auto`). (4) "A SCOUT NOTIFICATION THAT A SPECIFIC HAZARD IS AHEAD … A GOOD DISTANCE
+  AWAY" → `src/hazardAhead.ts`: the fixed 500 m call becomes 45 s of travel (1–2 km), a ±50° forward cone on the fix's course, the
+  kind + distance spoken ("Heads up, police reported about 1 kilometer ahead."); sim receipt on a real pin: `hazard-ahead
+  kind=traffic d=1122 lead=1125 kmh=90 spoke=1` + `tts-play`. (5) FAB triangle 26 → 30 pt. (6) ⛔ Codex r2's Android BackHandler
+  REMOVED: with a `hardwareBackPress` listener registered in an effect the panel opened in state but never painted (iOS sim, 4 of 4;
+  2 of 2 painted without) — mechanism unexplained, auto-close covers the concern. The report path itself was exercised for real from a
+  remote bench location (Traffic tile → `hazard-panel pick`, Supabase row, pin at the car; row expired by hand after). Gates:
+  hazard_panel_test D1–D11 + E1–E4, hazard_ahead_test 19, 59/59 sim-qc, typecheck, eslint 0, trap-check, doc-check, nav-lock PASS.
+  Codex ×3 on the panel (r1/r2 findings fixed; r3 on the batch owed at the time of writing). Hazard lifetime, for the record
+  (backend `_HAZARD_TTL_MIN`): police 90 min · traffic 90 min · crash 4 h · road hazard 6 h; a "still there" confirm refreshes it, two
+  "gone" votes remove it.
 - **✅ PUBLISHED in OTA-BZ `968c7ab8` (code `976e8734`, 2026-09-24 23:43 PDT, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"; KEY_PRESENT=1
   iOS + Android) — the PHONE Hazards button.** It had none: the report drawer has been dormant since 07-23 and hazards were voice-only,
   so the head-unit panel broke the four-surfaces rule on its own. `src/components/HazardSheet.tsx` + a Hazards FAB in `map.tsx` between

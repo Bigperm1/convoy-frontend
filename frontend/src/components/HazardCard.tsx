@@ -72,7 +72,7 @@ export default function HazardCard({ hazard, mode, mine, anchorBottom, onClose, 
         <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
         <View style={styles.head}>
           <View style={[styles.tileFace, { borderColor: rgba(paint.bright, 0.7), backgroundColor: rgba(paint.bright, 0.12) }]}>
-            <Image source={HAZARD_ART[paint.glyph][metal]} style={styles.glyph} resizeMode="contain" />
+            <Image source={HAZARD_ART[paint.glyph][metal]} style={[styles.glyph, { tintColor: paint.bright }]} resizeMode="contain" />
           </View>
           <View style={{ flex: 1 }}>
             <Text maxFontSizeMultiplier={1.2} style={styles.title} numberOfLines={2}>{title}</Text>

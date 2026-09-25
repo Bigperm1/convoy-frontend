@@ -28,6 +28,7 @@ import { MusicToast, HailToast, InfoToast, ReportPill } from "../../src/componen
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
 import HazardSheet, { HAZARD_FAB_ART } from "../../src/components/HazardSheet";
 import HazardCard from "../../src/components/HazardCard";
+import { CREW_RETURN_MS } from "../../src/crewReturn";
 import { hazardAheadLeadM, bearingDeg, isAheadOf, hazardAheadLine, HAZARD_AHEAD_REARM_EXTRA_M, HAZARD_AHEAD_MIN_KMH } from "../../src/hazardAhead";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
@@ -514,6 +515,9 @@ export default function MapScreen() {
   // Measured height of the right-hand FAB stack (onLayout): the Report panel anchors ABOVE it, so it never covers
   // a button, the weather HUD or the speedo (Jeff, 2026-09-24, off his screenshot of the first cut).
   const [fabStackH, setFabStackH] = useState(0);
+  // The Crew FAB's 7 s way home (src/crewReturn.ts); cleared by a second press and on unmount.
+  const crewReturnRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (crewReturnRef.current) clearTimeout(crewReturnRef.current); }, []);
   const [selected, setSelected] = useState<Hazard | null>(null);
   const [destination, setDestination] = useState<{ lat: number; lng: number; label: string } | null>(null);
   // When a crew member shares a route, the recipient gets this metadata so the
@@ -5892,7 +5896,7 @@ export default function MapScreen() {
         mine={!!user?.handle && selected?.reporter_handle === user.handle}
         anchorBottom={controlsBottom + fabStackH}
         onClose={() => setSelected(null)}
-        onRemove={() => { if (selected) handleHazardLongPress(selected); }}
+        onRemove={() => { if (selected) { const h = selected; setSelected(null); void deleteHazard(h.id); } }}   // no confirm popup (Jeff, 2026-09-25)
         onGone={() => { if (selected) disputeHazard(selected); }}
         onStillThere={() => { if (selected) confirmHazard(selected); }}
       />
@@ -6139,6 +6143,14 @@ export default function MapScreen() {
             handleUserPan();
             setCrewSignal((n) => n + 1);
             // 🔒 NAV-LOCK end map-crew-fit-drops-follow
+            // The crew press's own way home (Jeff, 2026-09-25: "put a 7sec timer on the crew press to zoom back to user
+            // location"): the pan rule above would only bring the chase back after 20 s. src/crewReturn.ts.
+            if (crewReturnRef.current) clearTimeout(crewReturnRef.current);
+            crewReturnRef.current = setTimeout(() => {
+              crewReturnRef.current = null;
+              recenterNow();
+              try { logEvent(`crew-return ms=${CREW_RETURN_MS}`); } catch {}
+            }, CREW_RETURN_MS);
           }}
         >
           <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />

@@ -177,7 +177,9 @@ export default function HazardSheet({ visible, onClose, onReport, onCompass, dis
               }}
             >
               <View style={[styles.tileFace, { width: tile, height: tile, borderRadius: tileRadius, borderColor: neonFor(t.kind), shadowColor: neonFor(t.kind) }]}>
-                <Image source={HAZARD_ART[t.glyph][metal]} style={{ width: glyphPt, height: glyphPt }} resizeMode="contain" />
+                {/* The glyph in the SAME neon as the rim (Jeff, 2026-09-25: "just like the food/gas/etc."): tintColor recolours the
+                    solid-with-holes PNG; the Compass tile keeps its metal art (its rim is the metal too). */}
+                <Image source={HAZARD_ART[t.glyph][metal]} style={{ width: glyphPt, height: glyphPt, ...(t.kind ? { tintColor: neonFor(t.kind) } : null) }} resizeMode="contain" />
               </View>
               <Text maxFontSizeMultiplier={1.2} style={styles.label}>{t.title}</Text>
             </PressableScale>

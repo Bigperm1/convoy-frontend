@@ -65,7 +65,10 @@
 //      HF9c / HF9d / HF9e clock jumps: back an hour with walking fixes through noteFix, forward and back, and a lost
 //      Android Auto disconnect whose TTL a backward jump would revive (HF9c-0 / HF9e-0 = 90dd1484); V8 the re-arm
 //      rule across clock jumps (V8b-0 = without its restart); HF9f a stale latch is expired before noteFix reads it —
-//      the first fast fix after it is not recorded as the car spot (HF9f-0 = 90dd1484).
+//      the first fast fix after it is not recorded as the car spot (HF9f-0 = 90dd1484); HF9g an expired Android Auto
+//      attachment stays expired when the device clock is set back into its window (HF9g-0 = b286ad9b); PT a property
+//      test — random device-clock jumps (±1 h, ±24 h, repeated) never produce a live walking share or a spot write
+//      after a witnessed or lost disconnect, and a real drive under the same jumps stays live on every fix.
 //   W  the drive's latch still inside its 90 s window at the disconnect: a 12 km/h and a 26 km/h fix share the car
 //      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
@@ -100,8 +103,13 @@ registerHooks({
   },
 });
 
+// `clock` is TRUE time. The device's WALL clock is `clock + wallSkew` (a test moves wallSkew to change the clock), and
+// performance.now() follows true time, never backwards (a scenario that restarts `clock` earlier freezes it there).
 let clock = 0;
-Date.now = () => clock;
+let wallSkew = 0;
+Date.now = () => clock + wallSkew;
+let monoT = 0, monoLast = 0;
+(globalThis as any).performance.now = () => { if (clock > monoLast) monoT += clock - monoLast; monoLast = clock; return monoT; };
 const utc = (h: number, m: number, s: number, ms = 0) => Date.UTC(2026, 8, 25, h, m, s, ms);
 const S = 1000;
 
@@ -247,6 +255,11 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
   ok("V1c no other PARK_REARM_ export (the round-4 SLOW congestion path is gone)", JSON.stringify(exported) === JSON.stringify(Object.keys(want).sort()), exported.join(","));
   const lp0 = await fresh();
   ok("V1b the pure rule's entry speed here is locationPrivacy's DRIVING_ENTER_SPEED_MS", lp0.DRIVING_ENTER_SPEED_MS === DRIVING_ENTER, String(lp0.DRIVING_ENTER_SPEED_MS));
+  // DF the ONE freshness predicate's contract (pure): never recorded, future-dated (a negative age) and >= 90 s old are
+  // all expired. With privacyNow() no caller can hand it a negative age any more; the rule stays as the second line.
+  const F = (lp0 as any).drivingEvidenceFresh as (a: number, n: number) => boolean;
+  ok("DF drivingEvidenceFresh: 0 → expired; future (negative age) → expired; 89.999 s → fresh; 90 s → expired",
+    F(0, 5e9) === false && F(1e9 + 1000, 1e9) === false && F(1e9, 1e9 + 89_999) === true && F(1e9, 1e9 + 90_000) === false && F(1e9, 1e9) === true);
   // Each defence alone, on the pure rule (the attacks above are each stopped by more than one, so these isolate them).
   const RR: any = R;
   const run = (fixes: { t: number; p: { lat: number; lng: number }; v: number }[]) => { const r = RR.createParkRearm({ enterMs: DRIVING_ENTER }); for (let i = 0; i < fixes.length; i++) if (r.note(fixes[i].t, fixes[i].p.lat, fixes[i].p.lng, fixes[i].v, SPOT)) return i; return -1; };
@@ -1083,14 +1096,15 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
         await lp.hydrateLocationPrivacy();
         let p = north(SPOT, -1500);
         for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
-        const driveEnd = clock; const spotBefore = lp.carSpot();
-        clock += (jump === "back" ? -3600 : 3600) * S;
+        const spotBefore = lp.carSpot();
+        wallSkew = (jump === "back" ? -3600 : 3600) * S;             // the DEVICE clock changes; true time does not
         const live: string[] = [];
         const direct: any = lp.shareablePosition({ ...north(p, 5), speed: 3.3, heading: 0 });
         if (direct.share && direct.lat !== spotBefore?.lat) live.push("direct");
         const walk = (n: number, tag: string) => { for (let i = 0; i < n; i++) { clock += S; p = north(p, 3.3); lp.noteFix(p.lat, p.lng, 3.3, null); const sh: any = lp.shareablePosition({ ...p, speed: 3.3, heading: 0 }); if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`${tag}+${i}`); } };
         walk(30, "after");
-        if (jump === "fwd") { clock = driveEnd + 10 * S; walk(20, "back-to-normal"); }
+        if (jump === "fwd") { wallSkew = 0; walk(20, "back-to-normal"); }
+        wallSkew = 0;
         const spotAfter = lp.carSpot();
         return { live, spotMoved: !!spotBefore && !!spotAfter && (spotAfter.lat !== spotBefore.lat || spotAfter.lng !== spotBefore.lng), latch: lp.privacyDebug().latch, parked: lp.privacyDebug().parked };
       };
@@ -1102,9 +1116,9 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
         let p = north(SPOT, -1500);
         for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
         clock += 100 * S;                                        // the TTL lapsed
-        clock -= 3600 * S;                                       // then the clock moved back an hour
+        wallSkew = -3600 * S;                                    // then the DEVICE clock moved back an hour
         const w = north(p, 40); const sh: any = lp.shareablePosition({ ...w, speed: 1.4, heading: 0 });
-        LOC_V.__os = undefined;
+        LOC_V.__os = undefined; wallSkew = 0;
         return { live: !!(sh.share && sh.lat === w.lat && sh.lng === w.lng), sh };
       };
       const base = await lpAt("90dd1484");
@@ -1142,6 +1156,129 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
       if (b4) { const f0 = await staleFast(Promise.resolve(b4.lp)); ok("HF9f-0 NEGATIVE CONTROL (90dd1484): the first fast walking fix after a stale latch is recorded as the car spot", !!f0 && f0.moved, JSON.stringify(f0)); rmSync(b4.dir, { recursive: true, force: true }); }
       const f = await staleFast(fresh(false));
       ok("HF9f a stale latch is expired before noteFix reads it: one 26 km/h walking fix 100 s after the drive does not move the car spot", !!f && !f.moved, JSON.stringify(f));
+      // HF9g ROLLBACK INTO THE WINDOW (Codex delta review 4, its exact sequence): Android Auto asserts at T and its
+      // disconnect is lost; at T+100 s a walking fix (the attachment has expired); then the DEVICE clock is set back to
+      // T+10 s — inside the original 90 s window — and a 1.4 m/s walking fix arrives. Measured on the wall clock the
+      // attachment came back: the fix became the car spot and was shared live (HF9g-0 on b286ad9b).
+      const hf9g = async (lpP: Promise<LP | null>) => {
+        const lp = await lpP; if (!lp) return null;
+        LOC_V.__os = "android"; LOC_V.__store = {}; clock = utc(22, 40, 0); wallSkew = 0;
+        await lp.hydrateLocationPrivacy();
+        const T = clock;
+        lp.noteCarConnected(true, "androidauto");
+        clock = T + 100 * S; let p = north(SPOT, 200); lp.noteFix(p.lat, p.lng, 1.4, null);
+        const spotBefore = lp.carSpot();
+        wallSkew = (T + 10 * S) - (clock + S);                        // the device clock now reads T+10 s
+        clock += S; p = north(p, 1.4); lp.noteFix(p.lat, p.lng, 1.4, null);
+        const sh: any = lp.shareablePosition({ ...p, speed: 1.4, heading: 0 });
+        const spotAfter = lp.carSpot();
+        LOC_V.__os = undefined; wallSkew = 0;
+        return { live: !!(sh.share && sh.lat === p.lat && sh.lng === p.lng), spotBefore, spotAfter, spotWritten: JSON.stringify(spotBefore) !== JSON.stringify(spotAfter) };
+      };
+      const b5 = await lpAt("b286ad9b");
+      if (b5) {
+        const g0 = await hf9g(Promise.resolve(b5.lp));
+        ok("HF9g-0 NEGATIVE CONTROL (b286ad9b): the rolled-back clock revives the attachment — the walking fix becomes the car spot and is shared LIVE", !!g0 && g0.live && g0.spotWritten, JSON.stringify(g0));
+        rmSync(b5.dir, { recursive: true, force: true });
+      } else console.log("  skip HF9g-0 negative control: b286ad9b unavailable");
+      const g = await hf9g(fresh(false));
+      ok("HF9g an expired Android Auto attachment stays expired when the clock is set back into its window: no spot write, not live", !!g && !g.live && !g.spotWritten, JSON.stringify(g));
+    }
+    {
+      // PT PROPERTY: random DEVICE-clock jumps (±1 h, ±24 h, ±1 min, −2 min, −30 s; sometimes several in a row) every
+      // 20–90 s, interleaved with
+      // 10 min of 1 Hz fixes. (a) After a WITNESSED CarPlay disconnect, walking 1.1–2.0 m/s with 1 in 20 fixes reading
+      // 26 km/h: never shared live, the car spot never written. (b) After a LOST Android Auto disconnect, once its 90 s
+      // attachment has lapsed, walking 1.1–2.0 m/s (no fast readings — an unwitnessed park keeps the one-fast-fix rule):
+      // never live, never a spot write. (c) A phone-only DRIVE at 15–25 m/s under the same jumps: shared live on every fix.
+      const rnd = (seed: number) => { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t2 = Math.imul(a ^ (a >>> 15), 1 | a); t2 = (t2 + Math.imul(t2 ^ (t2 >>> 7), 61 | t2)) ^ t2; return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296; }; };
+      const JUMPS = [3600, -3600, 86400, -86400, 60, -60, -120, -30];   // (small ones too: a rollback INTO a window)
+      const jumper = (u: () => number) => { let next = 20 + Math.floor(u() * 70); return (i: number) => { if (i < next) return; next = i + 20 + Math.floor(u() * 70); const k = u() < 0.25 ? 3 : 1; for (let j = 0; j < k; j++) wallSkew += JUMPS[Math.floor(u() * JUMPS.length)] * S; }; };
+      // "A spot write" = the car spot's POSITION or its recorded time changing (a slow final turn may legitimately retire
+      // the parked HEADING of the same spot — src/carSpotTrust.ts headingTrackStep — which moves nothing).
+      const spotKey = (x: any) => JSON.stringify(x ? { lat: x.lat, lng: x.lng, t: x.t } : null);
+      const SEEDS = Array.from({ length: 30 }, (_, i) => i + 1);
+      const lostAa = async (lpP: Promise<LP | null>, sd: number) => {
+        const lp = await lpP; if (!lp) return "no-module";
+        const u = rnd(1000 + sd); const jump = jumper(u);
+        LOC_V.__os = "android"; LOC_V.__store = {}; wallSkew = 0; clock = utc(11, 0, 0);
+        await lp.hydrateLocationPrivacy();
+        lp.noteCarConnected(true, "androidauto");                     // its disconnect will be LOST
+        let p = north(SPOT, -1200);
+        for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+        clock += 40 * S;                                               // 100 s after the assertion: the attachment lapsed
+        const spot0 = spotKey(lp.carSpot()); let bad = "";
+        for (let i = 0; i < 600 && !bad; i++) {
+          jump(i); clock += S; const v = 1.1 + 0.9 * u(); p = north(p, v);
+          lp.noteFix(p.lat, p.lng, v, null);
+          const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+          if (sh.share && sh.lat === p.lat && sh.lng === p.lng) bad = `live@${i}`;
+          else if (spotKey(lp.carSpot()) !== spot0) bad = `spot@${i}`;
+        }
+        LOC_V.__os = undefined; wallSkew = 0;
+        return bad;
+      };
+      let aBad = 0, bBad = 0, cBad = 0; const why: string[] = [];
+      for (const sd of SEEDS) {
+        {
+          const u = rnd(sd); const jump = jumper(u);
+          const lp = await fresh(); wallSkew = 0; clock = utc(10, 0, 0);
+          lp.noteCarConnected(true, "carplay");
+          let p = north(SPOT, -1200);
+          for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+          lp.noteCarConnected(false, "carplay");                      // witnessed
+          const spot0 = spotKey(lp.carSpot()); let bad = "";
+          for (let i = 0; i < 600 && !bad; i++) {
+            jump(i); clock += S; const v = u() < 0.05 ? kmh(26) : 1.1 + 0.9 * u(); p = north(p, Math.min(v, 2));
+            lp.noteFix(p.lat, p.lng, v, null);
+            const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+            if (sh.share && sh.lat === p.lat && sh.lng === p.lng) bad = `live@${i}`;
+            else if (spotKey(lp.carSpot()) !== spot0) bad = `spot@${i}`;
+          }
+          if (bad) { aBad++; why.push(`a${sd}:${bad}`); }
+          wallSkew = 0;
+        }
+        {
+          const bad = await lostAa(fresh(), sd);
+          if (bad) { bBad++; why.push(`b${sd}:${bad}`); }
+        }
+        {
+          const u = rnd(2000 + sd); const jump = jumper(u);
+          const lp = await fresh(); wallSkew = 0; clock = utc(12, 0, 0);
+          let p = north(SPOT, 0); let notLive = 0;
+          for (let i = 0; i < 600; i++) {
+            jump(i); clock += S; const v = 15 + 10 * u(); p = north(p, v);
+            lp.noteFix(p.lat, p.lng, v, 0);
+            const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+            if (!(sh.share && sh.lat === p.lat && sh.lng === p.lng)) notLive++;
+          }
+          if (notLive > 0) { cBad++; why.push(`c${sd}:${notLive} not live`); }
+          wallSkew = 0;
+        }
+      }
+      {
+        let hits = 0, ran = 0;
+        for (const sd of SEEDS) { const b = await lpAt("b286ad9b"); if (!b) break; ran++; if (await lostAa(Promise.resolve(b.lp), sd)) hits++; rmSync(b.dir, { recursive: true, force: true }); }
+        if (ran) ok("PT-0 NEGATIVE CONTROL (b286ad9b, wall-clock windows): the lost-disconnect walks under the same jumps DO leak on some seeds", hits > 0, `${hits}/${SEEDS.length} leaked`);
+        else console.log("  skip PT-0 negative control: b286ad9b unavailable");
+      }
+      ok(`PTa ${SEEDS.length} walks × 10 min after a witnessed disconnect, device clock jumping (±1 h, ±24 h, ±1 min, −2 min, −30 s): never live, never a spot write`, aBad === 0, why.filter((x) => x.startsWith("a")).join(" ") || "none");
+      ok(`PTb ${SEEDS.length} walks × 10 min after a lost Android Auto disconnect (attachment lapsed), same jumps: never live, never a spot write`, bBad === 0, why.filter((x) => x.startsWith("b")).join(" ") || "none");
+      ok(`PTc ${SEEDS.length} phone-only drives × 10 min, same jumps: shared live on every fix`, cBad === 0, why.filter((x) => x.startsWith("c")).join(" ") || "none");
+      {
+        // PTd LIVENESS: a real drive-away from a WITNESSED park while the device clock is set back an hour 10 s into it.
+        // A rollback closes every privacy window (src/privacyClock.ts: a backward step adds an hour), so the re-arm proof
+        // restarts at the jump — the accepted cost — and must still land: within 10 s + R2's bound (40 s) = 50 s.
+        const lp = await fresh(); parkWithCarPlay(lp);
+        const T = utc(17, 30, 0); let pos = SPOT; let at: number | null = null;
+        for (let i = 0; i <= 90 && at == null; i++) {
+          clock = T + i * S; if (i === 10) wallSkew = -3600 * S;
+          const v = Math.min(i * 1.0, 11); pos = north(pos, v); lp.noteFix(pos.lat, pos.lng, v, 0);
+          if (lp.privacyDebug().latch) at = i;
+        }
+        wallSkew = 0;
+        ok("PTd a witnessed-park drive-away with the device clock set back an hour mid-proof still re-arms (restarted at the jump; within 50 s)", at != null && at <= 50, `re-armed at +${at} s`);
+      }
     }
   }
   {

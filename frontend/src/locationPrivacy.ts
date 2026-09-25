@@ -32,6 +32,7 @@ import { Platform } from "react-native";
 import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 import { createParkRearm } from "./parkRearm";
 import { logEventReliable } from "./crashBreadcrumb";
+import { privacyNow } from "./privacyClock";
 
 // Same key map.tsx has always used, so an existing install keeps its car spot and there
 // is no migration to get wrong.
@@ -91,9 +92,10 @@ export const DRIVING_ENTER_SPEED_MS = 4.17;   // ~15 km/h
 // Hysteresis so a red light does not flap live<->parked mid-drive.
 export const DRIVING_HYSTERESIS_MS = 90_000;
 /** THE freshness rule for driving evidence — the ONE predicate every reader and writer of the latch uses (noteFix before
- * it reads or renews anything, shareablePosition, isParked, the hydrate restore; Codex delta reviews 2 and 3,
- * 2026-09-25). Fresh = recorded (> 0), NOT in the future (a clock that moved backwards makes the age negative: that is
- * expired, never eternal), and younger than DRIVING_HYSTERESIS_MS. A clock that jumps forward only ages it. Pure. */
+ * it reads or renews anything, shareablePosition, isParked, the hydrate restore; Codex delta reviews 2–4,
+ * 2026-09-25). Fresh = recorded (> 0), NOT in the future (a negative age is expired, never eternal), and younger than
+ * DRIVING_HYSTERESIS_MS. Both arguments are src/privacyClock.ts privacyNow() values — elapsed time that never runs
+ * backwards and counts sleep — never the wall clock (review 4: a rolled-back wall clock reopened expired windows). */
 export function drivingEvidenceFresh(lastDrivingAt: number, now: number): boolean {
   const age = now - lastDrivingAt;
   return lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS;
@@ -141,6 +143,9 @@ const DRIVING_SAVE_THROTTLE_MS = 15_000;
 let _carConnected = false;
 // When the flag was last ASSERTED. Paired with _carConnected so the signal is a
 // claim that expires, not a latch — see CAR_CONNECT_TTL_MS.
+// ⏱ Every IN-PROCESS time below (_carConnectedAt, _lastDrivingAt, _spotSavedAt, _drivingSavedAt, _hydrateAt, and the
+// times the re-arm proof sees) is src/privacyClock.ts privacyNow() — elapsed, never backwards (Codex delta review 4).
+// Only values written to disk (the spot's `t` = _carSpotAt, the last-driving stamp) are wall-clock time.
 let _carConnectedAt = 0;
 let _lastDrivingAt = 0;
 let _carSpot: { lat: number; lng: number; hdg?: number } | null = null;
@@ -229,7 +234,7 @@ export function subscribeHeadUnit(fn: (attached: boolean) => void): () => void {
  * read that hangs; HF0 = 0255f36a sharing the walk live and overwriting the record). */
 export function hydrateLocationPrivacy(): Promise<void> {
   if (_hydrateDone) return Promise.resolve();   // (not the attempt: a newer one may still be hanging)
-  const now = Date.now();
+  const now = privacyNow();
   // One attempt per 5 s: callers inside the window share it — in flight (single flight) or failed (the backoff: they
   // proceed un-hydrated, i.e. fail-closed). After the window the next caller starts a new one, whether the last one
   // failed or is still hanging.
@@ -241,7 +246,7 @@ export function hydrateLocationPrivacy(): Promise<void> {
       _hydrateDone = true;
       // A latch left by fixes processed before this read (a head unit's, while reads failed) whose 90 s window ran out
       // with no fix to expire it is cleared here too (shareablePosition already ignores it — Codex delta review 2).
-      if (_drivingLatched && !drivingEvidenceFresh(_lastDrivingAt, Date.now())) { _drivingLatched = false; _latchProvisional = false; }
+      if (_drivingLatched && !drivingEvidenceFresh(_lastDrivingAt, privacyNow())) { _drivingLatched = false; _latchProvisional = false; }
       _signalHydrated();
     }
     if (why !== "late" && _hydrateRows < 5) { _hydrateRows += 1; try { logEventReliable(`priv-hydrate ok=${ok ? 1 : 0} why=${why}`); } catch {} }
@@ -333,7 +338,13 @@ async function _hydrateOnce(): Promise<string> {
     // 🔒 NAV-LOCK end priv-hydrate-spot-adopt
     // 🔒 NAV-LOCK begin priv-hydrate-latch-restore — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
     const t = drivingRaw ? Number(drivingRaw) : 0;
-    if (Number.isFinite(t) && t > _lastDrivingAt) _lastDrivingAt = t;
+    // The disk stamp is WALL time: converted ONCE into the in-process clock (privacyNow), conservatively — a stamp in
+    // the future (the clock moved back since) or older than the window restores nothing (Codex delta review 4).
+    const wallAge = Date.now() - t;
+    if (Number.isFinite(t) && t > 0 && wallAge >= 0 && wallAge < DRIVING_HYSTERESIS_MS) {
+      const restoredAt = privacyNow() - wallAge;
+      if (restoredAt > _lastDrivingAt) _lastDrivingAt = restoredAt;
+    }
     // ── RESTORE THE LATCH, DON'T JUST THE STAMP (2026-08-29) ────────────────────
     // _drivingLatched is in-memory only, so every force-quit cleared it while
     // _lastDrivingAt survived on disk. With the latch clear, `inCar` in
@@ -352,7 +363,7 @@ async function _hydrateOnce(): Promise<string> {
     // play"). A spot persisted with hu=1 (adopted just above) proves the drive ended at a head-unit disconnect, and a
     // relaunch inside the 90 s window would otherwise hand shareablePosition's movingNow a latch the disconnect already
     // dropped (noteCarConnected) — sharing live at >= 9 km/h. Gate: park_rearm_test H2.
-    if (drivingEvidenceFresh(_lastDrivingAt, Date.now()) && !_parkWitnessed) {
+    if (drivingEvidenceFresh(_lastDrivingAt, privacyNow()) && !_parkWitnessed) {
       _drivingLatched = true;
       _latchProvisional = true;
     }
@@ -421,7 +432,7 @@ export function noteCarConnected(connected: boolean, source: HeadUnitSource = "m
   _carConnected = next;
   // Stamp on every assertion, clear outright on release. The stamp is what makes
   // this a claim that expires rather than a latch — see CAR_CONNECT_TTL_MS.
-  _carConnectedAt = !next ? 0 : asserted ? Date.now() : _carConnectedAt;
+  _carConnectedAt = !next ? 0 : asserted ? privacyNow() : _carConnectedAt;
   if (changed) for (const l of Array.from(_huListeners)) { try { l(next); } catch {} }
   // 🔒 NAV-LOCK end priv-car-connected-transition
 }
@@ -495,9 +506,10 @@ function carAttached(): boolean {
   // genuinely different guarantees about hearing a disconnect, and that asymmetry — not
   // tidiness — is what decides it.
   if (Platform.OS !== 'android') return true;
-  // A clock that moved BACKWARDS makes the age negative: expired, not attached for as long as the clock takes to catch
-  // up (Codex delta review 3 class audit — the same rule as drivingEvidenceFresh; park_rearm_test HF9e).
-  const huAge = Date.now() - _carConnectedAt;
+  // Measured on privacyNow() (elapsed, never backwards — Codex delta review 4): once the TTL has lapsed it stays lapsed
+  // until a NEW assertion re-stamps it; a rolled-back wall clock can no longer reopen it (park_rearm_test HF9e, HF9g).
+  // The negative-age guard is kept as a second line (review 3).
+  const huAge = privacyNow() - _carConnectedAt;
   return huAge >= 0 && huAge < CAR_CONNECT_TTL_MS;
   // 🔒 NAV-LOCK end priv-car-attached-ttl
 }
@@ -523,12 +535,14 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
     if (!carAttached()) {
       // A head unit's fixes may have armed the latch while hydration was failing; its 90 s window still runs out here
       // (Codex delta review: an Android TTL lapse would otherwise leave it armed until a read succeeded).
-      if (_drivingLatched && !drivingEvidenceFresh(_lastDrivingAt, Date.now())) { _drivingLatched = false; _latchProvisional = false; }
+      if (_drivingLatched && !drivingEvidenceFresh(_lastDrivingAt, privacyNow())) { _drivingLatched = false; _latchProvisional = false; }
       return;
     }
   }
   const spd = speedMs ?? 0;
-  const now = Date.now();
+  // `now` is the in-process privacy clock (every window below); `wallNow` only for what is written to disk.
+  const now = privacyNow();
+  const wallNow = Date.now();
   // ── ARM AND RECORD MUST NOT HAPPEN IN THE SAME CALL (2026-08-29) ──────────────
   // Until today they did: line 1 armed the latch off this fix's own speed, and 25 lines
   // later the SAME fix was recorded as the car spot. The latch's whole job is to prove
@@ -592,7 +606,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
     // see DRIVING_SAVE_THROTTLE_MS.
     if (now - _drivingSavedAt > DRIVING_SAVE_THROTTLE_MS) {
       _drivingSavedAt = now;
-      void AsyncStorage.setItem(LAST_DRIVING_KEY, String(now)).catch(() => {});
+      void AsyncStorage.setItem(LAST_DRIVING_KEY, String(wallNow)).catch(() => {});
     }
   }
   // 🔒 NAV-LOCK end priv-notefix-driving-latch
@@ -621,7 +635,9 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // heading of a spot that is already on disk, take it off the record now — a phone-only driver writes no further
   // spot below walking pace, so nothing else would.
   const hadObs = _hdgTrack.obs != null;
-  _hdgTrack = headingTrackStep(_hdgTrack, { lat, lng, spd, course: courseDeg, at: now }, mayWriteSpot, carAttached());
+  // (The heading tracker keeps WALL time: its observation is restored from the persisted spot's `t`, and it decides only
+  // which way the parked marker faces — not what is shared.)
+  _hdgTrack = headingTrackStep(_hdgTrack, { lat, lng, spd, course: courseDeg, at: wallNow }, mayWriteSpot, carAttached());
   if (hadObs && _hdgTrack.obs == null && _carSpot && _carSpot.hdg != null) {
     _carSpot = { lat: _carSpot.lat, lng: _carSpot.lng };
     if (_lastSpotMeta) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, ..._lastSpotMeta })).catch(() => {});
@@ -638,14 +654,14 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   const hdg = spotHeadingFor(_hdgTrack.obs, { lat, lng }, _hdgTrack.creepM);
   if (hdg == null && _hdgTrack.obs) _hdgTrack = { ..._hdgTrack, obs: null, creepM: 0 };   // displaced: no facing here
   _carSpot = hdg != null ? { lat, lng, hdg } : { lat, lng };
-  _carSpotAt = now;
+  _carSpotAt = wallNow;
   if (now - _spotSavedAt > SPOT_SAVE_THROTTLE_MS) {
     _spotSavedAt = now;
     // `t` is what lets hydrate age this out — see SPOT_MAX_AGE_MS. Writing a plain
     // {lat,lng} here (as the deleted map.tsx writer did) puts an immortal spot on disk.
     // `att` records that a head unit was attached when this was written: without a later
     // witnessed disconnect (`hu`, written by noteCarConnected) hydrate refuses the spot.
-    _lastSpotMeta = { t: now, att: carAttached() ? 1 : 0, mv: Math.round(spd * 10) / 10 };
+    _lastSpotMeta = { t: wallNow, att: carAttached() ? 1 : 0, mv: Math.round(spd * 10) / 10 };
     void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, ..._lastSpotMeta })).catch(() => {});
   }
   // 🔒 NAV-LOCK end priv-notefix-spot-write
@@ -680,7 +696,7 @@ export function privacyDebug(): { latch: boolean; parked: boolean; hu: boolean; 
 /** Parked = not attached to a head unit and not driving recently. */
 // 🔒 NAV-LOCK begin priv-is-parked — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function isParked(): boolean {
-  return !carAttached() && !drivingEvidenceFresh(_lastDrivingAt, Date.now());
+  return !carAttached() && !drivingEvidenceFresh(_lastDrivingAt, privacyNow());
 }
 // 🔒 NAV-LOCK end priv-is-parked
 
@@ -729,7 +745,7 @@ export function shareablePosition(
   // only while its last genuine driving evidence (`_lastDrivingAt`, which noteFix refreshes on every driving fix and
   // which a restored latch carries from disk) is inside DRIVING_HYSTERESIS_MS of NOW — exactly the window noteFix
   // expires it on, so a live drive is unaffected. A clock that moved backwards counts as expired (fail-closed).
-  const latchFresh = _drivingLatched && drivingEvidenceFresh(_lastDrivingAt, Date.now());
+  const latchFresh = _drivingLatched && drivingEvidenceFresh(_lastDrivingAt, privacyNow());
   const movingNow = _hydrateDone && latchFresh && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
   const inCar = carAttached() || movingNow;
   const status: "live" | "parked" = isParked() ? "parked" : "live";

@@ -302,6 +302,37 @@ poi7m7-227888 `draw-cmp … latch=1 parked=1 hu=0` 282 s after `carplay-disconne
 | The drive's latch outlived the disconnect by up to 90 s, so `movingNow` shared any ≥ 9 km/h fix LIVE on it; a relaunch inside that window restored it over a witnessed spot | the witness drops the latch (`noteCarConnected`); hydrate never restores the latch over a `hu=1` spot, and adopting one drops a racing latch | `park_rearm_test` W, H2, S2 |
 | Car-surface telemetry rows kept printing coordinates after the disconnect (CarMapView stays mounted) | `drawTelemetry.setCarSurfaceLive` (set only by `carPlayBootstrap` and `AndroidAutoRoot`); every coordinate-bearing car row — draw-cmp, pose-fix, corner-trace, snap-mode, cam-apply (`reportCamApply`) — is emitted from `drawTelemetry` only | `car_feed_leak_test` T; trap-check `car-row-outside-drawtelemetry` |
 
+**⏱ The privacy clock (Codex delta review 4 — the clock class, closed).** Every in-process privacy window — the Android
+head-unit TTL, driving-evidence freshness (`drivingEvidenceFresh`), the 90 s hysteresis, the re-arm proof's windows, the
+hydrate backoff, the save throttles — is measured on `src/privacyClock.ts` `privacyNow()`: elapsed time that never runs
+backwards and advances by max(Δmonotonic `performance.now()`, Δwall) per call (so a sleep still counts even if the
+monotonic clock pauses — HYPOTHESIS per platform, unmeasured); a wall clock that jumps forward ages everything, and one
+set BACK by more than a second adds an hour, closing every window. An expiry is therefore irreversible until a NEW event
+(an assertion, a vehicular fix under the latch rules, a proven re-arm). The wall clock is kept only for what is written
+to disk (the spot's `t`, `LAST_DRIVING_KEY`), converted once at hydrate with future-dated or too-old stamps restoring
+nothing. The car-feed settle rule uses plain monotonic time (`carFeedOwner.settleNow`, and map.tsx's `subAt`), whose
+safe direction is "wait". Cost: a rollback expires the drive's latch (it re-arms on the next vehicular fix) and restarts
+a re-arm proof in progress (`park_rearm_test` PTd: +42 s instead of +35 s). Gates: `park_rearm_test` HF9g (Codex's
+rollback INTO the attachment window; HF9g-0 = b286ad9b reviving it), HF9c–f, PTa/PTb/PTc (30 seeds × 10 min each of
+random device-clock jumps ±1 h / ±24 h / ±1 min / −2 min / −30 s, sometimes several at once: no live walking share and
+no spot write after a witnessed or a lost disconnect; a real drive stays live on every fix; PT-0 = b286ad9b leaking on
+5 of 30), PTd; `car_feed_leak_test` S1.
+
+**Documented residuals (privacy, 2026-09-25 — anything later that is not a NEW class joins this list):**
+1. GPS alone cannot tell slow traffic from a noisy brisk walker or drift (0–20 / 200 per white-noise canyon set;
+   σv 2–3 m/s walkers, runners, cyclists, buses, trains un-pin) — the fix is the build-80 motion-activity item below.
+2. Slow congestion (under 300 m per 2 min) stays pinned until traffic speeds up or a head unit reconnects.
+3. A LOST Android Auto disconnect (didDisconnect and `op=hold on=0` both lost) keeps the car feed (the 'androidauto'
+   lock) alive: its dead-man probe reads the same session flag. Needs a liveness signal that survives both being lost
+   (the phone watcher has its own belt, above; the privacy gate uses the 90 s TTL).
+4. After such a lost disconnect the park is unwitnessed: once the TTL lapses, the ordinary one-fast-fix rule applies.
+5. While storage reads keep failing, a drive after the Android TTL shares the head unit's last spot, not live.
+6. A device-clock rollback costs a drive its latch until the next vehicular fix and restarts a re-arm proof (PTd).
+7. The parked-heading tracker (`carSpotTrust.headingTrackStep`) stays on wall time — it chooses the marker's facing
+   only, and its observation is restored from the spot's persisted `t`.
+8. JS cannot guarantee native GPS teardown (expo-location start/remove race) — the build-80 native item below.
+9. Not verified on a device or a head unit (below).
+
 **Receipt for the Android Auto cold-start guard** (the mount starts a session only once native's hold receipt said
 "alive"; SELECT by the lead, 2026-09-25): across the 21 Android instances on runtime 1.29.0 in 14 days that logged
 `aa-native op=ctx`, 21 / 21 also logged `aa-native op=hold on=1` in JS — 0 `op=ctx` without a hold — including all 8

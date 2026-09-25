@@ -42,7 +42,7 @@
 //      What M cannot see: whether React re-runs the effect at the right moments (F checks the deps text), hook order,
 //      the real expo-location, and the ingest body on the live path.
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { createCarFeedOwner, removeWhenSettled, CAR_FEED_SETTLE_MS, CAR_FEED_RECEIPT_MAX, LOC_RELEASE_RECEIPT_MAX, type WatchSub } from "../../src/carFeedOwner.ts";
+import { createCarFeedOwner, removeWhenSettled, settleNow, CAR_FEED_SETTLE_MS, CAR_FEED_RECEIPT_MAX, LOC_RELEASE_RECEIPT_MAX, type WatchSub } from "../../src/carFeedOwner.ts";
 
 let fails = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -269,6 +269,20 @@ ok("P1 carFeedOwner constants are the approved values", CAR_FEED_SETTLE_MS === 1
   const s2 = new FakeSub(2, () => {});
   removeWhenSettled(s2, clock - CAR_FEED_SETTLE_MS, () => clock, later);
   ok("R3 an already-settled watch is removed at once", s2.removed);
+}
+
+// ── S · the settle clock is MONOTONIC (Codex delta review 4) ──────────────────────────────────────────────────────
+// A watch born now, and the DEVICE clock jumps an hour forward before the removal is asked for: the removal must still
+// wait for the native settle (a wall-clock age would call it settled and remove it before its stream started — the
+// stranded-stream race). And the default clock of both removeWhenSettled and the owner is settleNow().
+{
+  const realDateNow = Date.now;
+  const sub = new FakeSub(1, () => {}); const waits: number[] = [];
+  const bornAt = settleNow();
+  Date.now = () => realDateNow() + 3_600_000;
+  removeWhenSettled(sub, bornAt, undefined, (_fn, ms) => { waits.push(ms); });
+  Date.now = realDateNow;
+  ok("S1 a device-clock jump forward does not make a young watch look settled: its removal still waits for the settle", sub.removeCalls === 0 && waits.length === 1 && waits[0] > 0, JSON.stringify({ removeCalls: sub.removeCalls, waits }));
 }
 
 // ── F · static: the single creation path and the release paths ───────────────────────────────────────────────────
@@ -500,6 +514,9 @@ if (!process.env.CAR_FEED_ROOT) {
   const realNow = Date.now;
   let t = realNow();
   Date.now = () => t;
+  // The monotonic clocks (src/carFeedOwner.ts settleNow, src/privacyClock.ts) follow the same simulated time.
+  const perf = (globalThis as any).performance; const realPerfNow = perf.now.bind(perf);
+  perf.now = () => t;
   const connectDisconnect = async (mod: any, native: FakeNative) => {
     void mod.acquireBgLocation("carplay");     // carPlayBootstrap.onConnect, in its order
     void mod.startForegroundCarFeed();
@@ -797,6 +814,7 @@ if (!process.env.CAR_FEED_ROOT) {
       const native = new FakeNative(); let ingest = 0;
       const ctx: any = {
         headUnitAttachedNow: () => huNow, logEventReliable: (r: string) => { mrows.push(r); }, fgwatchSelfStopRows: 0,
+        settleNow: () => mclock,
         ensureLocationPermission: async () => true, appActive: o.appActive, navActiveRef: { current: o.nav },
         fgWatchKeepRef: { current: o.keepPrev }, fgWatchKeep: o.keep, settings: { liteGps: false },
         Location: { Accuracy: { High: 4, BestForNavigation: 6 }, watchPositionAsync: (_o: unknown, cb2: (l: any) => void) => native.watch(cb2) },
@@ -893,7 +911,7 @@ if (!process.env.CAR_FEED_ROOT) {
       huNow = true;
     }
   }
-  Date.now = realNow;
+  Date.now = realNow; perf.now = realPerfNow;
 }
 
 if (fails) { console.log(`FAIL car_feed_leak (${fails})`); process.exit(1); }

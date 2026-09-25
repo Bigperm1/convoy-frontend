@@ -64,6 +64,9 @@
 //
 // Pure: no react-native imports. The entry speed is passed in by src/locationPrivacy.ts (its owner), so this rule can
 // never drift from it; tools/sim-qc/park_rearm_test.mts drives the real noteFix and pins every value below.
+// ⏱ The `now` it is given is src/privacyClock.ts privacyNow() — elapsed time that never runs backwards (Codex delta
+// review 4) — so every window here is immune to the device clock being changed; the out-of-order and backward-jump
+// handling below stays as a second line for any other caller (park_rearm_test V8).
 
 // The fast look-back. Walking is 1.4–1.6 m/s (a brisk 2.0 m/s at most), so a walker covers at most 1.6 × 120 = 192 m
 // (2.0 × 120 = 240 m) of net displacement inside it — below PARK_REARM_MIN_M.

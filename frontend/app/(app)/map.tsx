@@ -54,7 +54,7 @@ import { getDepartureBearing, departureBearingSource, noteCourse, orderRoutesFor
 import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, headUnitAttachedNow, carSpot, subscribeHeadUnit } from "../../src/locationPrivacy";
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
-import { removeWhenSettled } from "../../src/carFeedOwner";
+import { removeWhenSettled, settleNow } from "../../src/carFeedOwner";
 import { type CongestionLevel } from "../../src/mapboxDirections";
 import { useMapView2D, useMapView2DLocked, toggleMapView2D, setMapView2D, resetMapView2D } from "../../src/mapViewMode";
 import { logEvent, logEventReliable } from "../../src/crashBreadcrumb";
@@ -4033,7 +4033,7 @@ export default function MapScreen() {
           }
         ).then((s) => {
           sub = s;
-          subAt = Date.now();
+          subAt = settleNow();   // the settle clock (monotonic), not the wall clock — src/carFeedOwner.ts
           // The cleanup already ran while the start was in flight: never keep it (removed once the native start
           // has settled — src/carFeedOwner.ts removeWhenSettled; its first delivery removes it sooner, above).
           if (cancelled) removeWhenSettled(s, subAt);

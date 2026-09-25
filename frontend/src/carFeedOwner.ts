@@ -108,7 +108,20 @@ export function boundedLog(max: number, log: (row: string) => void): (row: strin
  * when it is at least CAR_FEED_SETTLE_MS old, otherwise when it reaches that age. For a caller that owns exactly one
  * watch (app/(app)/map.tsx's phone watcher) and learns it is unwanted as the start resolves.
  */
-export function removeWhenSettled(sub: WatchSub, bornAt: number, now: () => number = () => Date.now(), later: Later = (fn, ms) => setTimeout(fn, ms)): void {
+// ⏱ Settle ages are MONOTONIC (Codex delta review 4): a wall clock that jumped forward must not make a young native watch
+// look settled and get it removed before its stream started (a stranded GPS stream), and one that jumped back must not
+// hold a removal for as long as the clock takes to catch up. performance.now(); Date.now() only if it is unavailable.
+// This module stays import-free (tools/sim-qc loads it directly), so the clock lives here; a caller's `bornAt` must be
+// settleNow() too (app/(app)/map.tsx's phone watcher).
+export function settleNow(): number {
+  try {
+    const p = (globalThis as any).performance;
+    const v = p && typeof p.now === "function" ? p.now() : NaN;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  } catch {}
+  return Date.now();
+}
+export function removeWhenSettled(sub: WatchSub, bornAt: number, now: () => number = settleNow, later: Later = (fn, ms) => setTimeout(fn, ms)): void {
   const wait = CAR_FEED_SETTLE_MS - (now() - bornAt);
   const go = () => { try { sub.remove(); } catch {} };
   if (!(wait > 0)) go();
@@ -116,7 +129,7 @@ export function removeWhenSettled(sub: WatchSub, bornAt: number, now: () => numb
 }
 
 export function createCarFeedOwner<L, S extends WatchSub = WatchSub>(d: CarFeedDeps<L, S>): CarFeedOwner {
-  const now = d.now ?? (() => Date.now());
+  const now = d.now ?? settleNow;
   const later: Later = d.later ?? ((fn, ms) => setTimeout(fn, ms));
   const receipt = boundedLog(CAR_FEED_RECEIPT_MAX, d.log);
   const held = new Set<Entry<S>>();

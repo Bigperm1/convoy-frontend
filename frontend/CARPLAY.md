@@ -296,9 +296,9 @@ poi7m7-227888 `draw-cmp … latch=1 parked=1 hu=0` 282 s after `carplay-disconne
 | The car GPS watch started twice per connect (guard before the await, assignment after it); `stop` reached one, the other ran on with background delivery | `src/carFeedOwner.ts` is the ONLY creator: single-flight start, stop removes every subscription with no delivery needed, a fix arriving with no lock holder removes its watch and is dropped | `tools/sim-qc/car_feed_leak_test.mts` A–E, G (G0 reproduces the leak on the pre-fix `navNotification.ts`; G6 = a failed background start) |
 | map.tsx's phone watcher: `sub = await watchPositionAsync(…)` lost a watch that resolved after cleanup; its background gate was never re-evaluated when a route ended | a `cancelled` flag + `removeWhenSettled` (also in the cleanup); `fgWatchKeep` = app active OR phone route OR head unit, in the deps | `car_feed_leak_test` M (the effect extracted from map.tsx and run), F15–F16 |
 | iOS reported a head unit only from map.tsx, so a cold CarPlay disconnect was never witnessed and a cold connect never cleared yesterday's witness | `carPlayBootstrap` (the CarPlay session lifecycle) is a head-unit SOURCE and, once it has reported, the only iOS one; map.tsx is a fallback mirror that cannot create or cancel a witness; hydrate never adopts a witness while attached | `car_feed_leak_test` CP (the bootstrap run for real), `park_rearm_test` K |
-| Android Auto: `AndroidAutoRoot` mounts once per JS process, so a SECOND car session in the same process never asserted a head unit, never re-took the lock, and its disconnect witnessed nothing (5 of 21 instrumented AA process lifetimes had 2–3 sessions) | a session starts at the mount OR at the native per-session connect receipt (`aaNativeTrace op=ctx`, emitted only by `CarPlayModule.setCarContext` for a real session — never by the spurious `checkForConnection`) and ends at every `didDisconnect` and the unmount; one acquire, one release per session | `car_feed_leak_test` AA (the root run for real through 3 sessions against the real `locationPrivacy`; AA0 = round 3's root sharing the walk live) |
+| Android Auto: `AndroidAutoRoot` mounts once per JS process, so a SECOND car session in the same process never asserted a head unit, never re-took the lock, and its disconnect witnessed nothing (5 of 21 instrumented AA process lifetimes had 2–3 sessions); a JS context that JOINED a live session through a reload (red-pill Restart, ErrorRecovery) never ran the root at all (SMSGRC 09-20, 89u9bd: `op=hold on=1 via=init`, no root, the end witnessed by nobody); and a session destroyed while JS was cold-starting still got the root and `op=ctx`, i.e. an acquire with no release | the session lives at module scope in `AndroidAutoRoot.tsx`, keyed on CarJsKeepAlive's per-session hold receipt: it starts at `aaNativeTrace op=hold on=1` (any `via=`: acquire / join / regrab / init — init is a new JS context under a live session) and ends at `op=hold on=0` or `didDisconnect`, exactly once each; the mount starts a session only when native already reported the hold alive (or on a binary with no hold receipts, where the mount and `op=ctx` start it as before); the dead-man probe reads the same flag | `car_feed_leak_test` AA (the root module run for real against the real `locationPrivacy`, driven by the native receipt sequences): AA1–AA5 three sessions (AA0 = round 3's root); AA6 reload mid-session → witnessed (AA6-0 = round 4's root sharing the walk live); AA7 destroyed-before-JS → no acquire (AA7-0 = round 4's root: 1 acquire, 0 releases); AA8 init receipt before or after the mount; AA9 no receipts |
 | At a relaunch, fast fixes that landed before storage resolved armed the latch and wrote `_carSpot`, so hydrate skipped the saved `hu=1` witness (Codex, reproduced) | hydration is single-flight; until it resolves a fix may not arm the latch, write the spot or clear anything — only a head unit asserted now counts | `park_rearm_test` Y1/Y2/Y5, Y6 single-flight (Y0 = round 3 sharing live) |
-| After a witnessed park one fast fix re-armed the latch and cleared the witness; v2 of the proof then let two outliers + fast-reading walking un-pin, and never proved in a slow jam | `src/parkRearm.ts` v3: jump rejection (a fix beyond max(2·v·Δt, v·Δt + 50 m) earns nothing and starts a new segment), credit only when the track covered ≥ 80 % of the claimed distance over 10 s AND over its own fast run, median-of-5 endpoints; FAST path 120 s / 15 s credit / 250 m net / 250 m from the spot; SLOW path (congestion) 600 s / 30 s credit / 300 m from the spot | `park_rearm_test` V2–V4 (each defence alone), J, O, E, R, L, G, S, X, Z, Q (X0 / Z0 / Q0 = round 3 un-pinning walkers and never proving a jam) |
+| After a witnessed park one fast fix re-armed the latch and cleared the witness; v2 of the proof then let two outliers + fast-reading walking un-pin; v3's SLOW congestion path un-pinned noisy walkers (88–189 of 200 with 8–12 m noise and 1 in 10 single-fix 15–18 km/h readings) and a phone sitting in a café 350 m away (167 / 200) | `src/parkRearm.ts` v4: jump rejection (a fix beyond max(2·v·Δt, v·Δt + 50 m) earns nothing and starts a new segment), credit only when the track covered ≥ 80 % of the claimed distance — each fix claiming speed × min(real Δt, 3 s) — over 10 s AND over its own fast run, median-of-5 endpoints; ONE path: 120 s / 15 s credit / 250 m net / 250 m from the spot. The slow path is removed | `park_rearm_test` V2–V5 (each defence alone; V5c = round 4's 2 s claim proving an 8 m-filter track), J, O, E, R, L, G, S, X, Z, WK (WK0 = round 4 un-pinning the walkers; WK6-0 = the rule without its 10 s baseline un-pinning a moving-walkway concourse), Q (jams stay pinned; Q0 = round 4's slow path un-pinning one) |
 | The drive's latch outlived the disconnect by up to 90 s, so `movingNow` shared any ≥ 9 km/h fix LIVE on it; a relaunch inside that window restored it over a witnessed spot | the witness drops the latch (`noteCarConnected`); hydrate never restores the latch over a `hu=1` spot, and adopting one drops a racing latch | `park_rearm_test` W, H2, S2 |
 | Car-surface telemetry rows kept printing coordinates after the disconnect (CarMapView stays mounted) | `drawTelemetry.setCarSurfaceLive` (set only by `carPlayBootstrap` and `AndroidAutoRoot`); every coordinate-bearing car row — draw-cmp, pose-fix, corner-trace, snap-mode, cam-apply (`reportCamApply`) — is emitted from `drawTelemetry` only | `car_feed_leak_test` T; trap-check `car-row-outside-drawtelemetry` |
 
@@ -315,16 +315,22 @@ drive is `carplay-disconnect` → `loc-release tag=carplay fgLive=0 task=0` → 
 
 Consequences, accepted and privacy-favouring:
 - a CarPlay / Android Auto unplug **mid-drive**, or a drive away from a witnessed park without a head unit, shares the
-  old car spot (and pins the marker there) until the re-arm proof or a reconnect. MEASURED at 1 Hz (`src/parkRearm.ts`
-  header): 24–31 s pulling away, 23–71 s on stop-sign grids, 52–103 s in stop-and-go, 4–11 min in jams averaging
-  0.6–1.3 m/s (245 / 310 / 506 s noise-free, 287 / 462 / 654 s with 3 m noise). Slower fix rates are slower: at one fix
-  per 5 s a grid takes 90–105 s and a noisy 16 km/h jam does not prove within 15 min. The 90 s parked STATUS label
-  (`isParked`, `_lastDrivingAt`) is unchanged.
-- **The residual — GPS alone cannot separate slow traffic from a noisy walk.** In the review's urban-canyon walker
-  model (10 min, 500 seeds per variant) the rule keeps 1.4 m/s walkers with drift σv ≤ 1 m/s pinned (0–1 / 500; round 3
-  un-pinned up to 298) but walkers whose reported position wanders 240–360 m with speed readings that follow the noisy
-  track still un-pin (181–500 / 500), and runners ≥ 15 km/h, cyclists, buses and trains un-pin in 24–65 s — after which
-  the car spot follows them.
+  old car spot (and pins the marker there) until the re-arm proof or a reconnect. MEASURED at 1 Hz with 3 m noise
+  (`src/parkRearm.ts` header): 24–31 s pulling away, 51–71 s on stop-sign grids, 73 s in stop-and-go (103 s with 10 s
+  standing), 63–68 s in a 10–20 km/h crawl; at one fix per 2 s 26–108 s, per 5 s 50–105 s. The 90 s parked STATUS
+  label (`isParked`, `_lastDrivingAt`) is unchanged.
+- **Slow congestion stays pinned (round 5, the safe direction).** A phone-only drive (no head unit reconnects) in
+  traffic averaging under 250 m per 2 min (2.08 m/s, 7.5 km/h) keeps the shared position AND the driver's own marker
+  pinned at the witnessed park until traffic averages above that for about 2 min, or a head unit reconnects: jams
+  averaging 0.6–1.3 m/s never prove in 30 min, and the same jam clearing to 40 km/h goes live 20 s later
+  (`park_rearm_test` Q1–Q4). The real fix is the build-80 motion-activity item below.
+- **The residual — GPS alone cannot separate slow traffic from a noisy walk.** Every walker set of the fifth review
+  stays pinned (0 of 200: 1.4 m/s walks with 8 / 10 / 12 m noise and 1 in 10 single-fix 15–18 km/h readings at 1 Hz,
+  2 Hz, 2 m filter and Lite cadence; walk 350 m then sit; speed invalid except the spikes). Still un-pinned: brisk
+  2.0 m/s walkers or 1 m/s drift with WHITE 8–12 m noise (1–38 of 200 per set — 240 m per 2 min is 10 m under the
+  floor), a moving-walkway concourse with 8 m noise and 1 in 5 fast readings (112 / 200), walkers whose reported
+  position wanders 240–360 m (drift σv 2–3 m/s: 6–499 / 500), and runners ≥ 15 km/h, cyclists, buses and trains
+  (24–65 s) — after which the car spot follows them.
 - a cold iOS CarPlay drive now counts as head-unit attached, exactly like a warm one: shared live while connected,
   spots recorded with `att=1` and witnessed with `hu=1` at the disconnect — so, as on the warm path, a drive whose
   process dies before the disconnect leaves no adoptable pin (`unwitnessed-attached`).
@@ -332,8 +338,8 @@ Consequences, accepted and privacy-favouring:
 **Build 80 (native, HYPOTHESIS until a bench receipt) — OS motion activity for the re-arm.** The discriminator GPS
 lacks is the phone's own motion classifier: iOS `CMMotionActivityManager` (`automotive` with `confidence ≥ medium`) and
 Android Activity Recognition (`IN_VEHICLE` via the Transition API). A native module would feed `locationPrivacy` an
-"in a vehicle since t" signal; the re-arm would then require it (and could accept a slow jam at once), and a walker,
-runner or cyclist could never prove. The bench check that confirms it before any rule depends on it: log the
+"in a vehicle since t" signal; the re-arm would then require it (and could accept a slow jam at once — the fix for the
+congestion consequence above), and a walker, runner or cyclist could never prove. The bench check that confirms it before any rule depends on it: log the
 classifier alongside fixes on (1) a walk with the phone in a pocket and in hand, (2) a run and a bike ride, (3) a city
 drive with a 5-minute jam, (4) a bus ride — and measure the lag from pulling away to `automotive`/`IN_VEHICLE` and the
 false-positive rate on (1)–(2). Needs the Motion & Fitness permission on iOS and ACTIVITY_RECOGNITION on Android

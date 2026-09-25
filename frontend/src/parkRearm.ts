@@ -20,41 +20,47 @@
 // 12 and 7 km/h while the positions drifted 67 m in 20.5 s, then ONE multipath fix 338 m away at 51 km/h
 // (20:01:28.633, 49.173307,-122.660864) and the same coordinate again 41 s later at 49 km/h (20:02:09.411).
 //
-// ── THE RULE (v3, 2026-09-25, third review) ──────────────────────────────────────────────────────────────────────
+// ── THE RULE (v4, 2026-09-25, fifth review) ──────────────────────────────────────────────────────────────────────
 // v1 (a contiguous 15 s run at >= 15 km/h, reset below 9 km/h, 150 m from the run's first fix) never proved a drive on a
 // stop-sign grid or in stop-and-go traffic. v2 (15 s credited within 120 s, 250 m of median-of-3 displacement) fixed
-// that but (a) its median survived ONE outlier and a jump earned its own credit — 14 s of 16 km/h-reading walking plus
-// two multipath fixes un-pinned a walker 380 m from the car (review-priv3/c_logic.mts N=14), and (b) traffic averaging
-// under 2.08 m/s could never make 250 m in 120 s — a jam stayed pinned 30 min / 2 km (review-priv3/jam_lp.mts). v3:
+// that, but its median survived ONE outlier and a jump earned its own credit (review-priv3/c_logic.mts N=14). v3 added
+// jump rejection, median-of-5 endpoints and span consistency, plus a SLOW congestion path (30 s of credit within 10 min,
+// 300 m from the spot) — and that path un-pinned noisy walkers: 88–189 of 200 straight walkers with 8–12 m GPS noise and
+// 1 in 10 single-fix 15–18 km/h readings, and 167 of 200 phones that walked 350 m and then sat in a café
+// (review-priv4 walker_cadence / sit_after_walk). v4 REMOVES the slow path and judges coverage against real time:
 //  • JUMPS: a fix further from the previous ACCEPTED fix than max(PARK_REARM_JUMP_FACTOR × v × Δt, v × Δt +
 //    PARK_REARM_JUMP_SLACK_M) — v the mean of the two fixes' reported speeds — is rejected: no credit, not an endpoint,
 //    not the reference. The first fix accepted after a jump starts a new SEGMENT; credit and displacement never span one.
 //  • CREDIT: a fix at >= the entry speed (15 km/h) earns min(Δt, PARK_REARM_FIX_CREDIT_MS) only if the reported track
-//    covered >= PARK_REARM_MOVE_RATIO of what the reported speeds claim over the last PARK_REARM_BASELINE_MS AND over its
-//    own fast run (from the fix before the run, capped at the baseline). One noisy step can look fast; a walker's
-//    2–6 s speed spike cannot keep up over its own run.
+//    covered >= PARK_REARM_MOVE_RATIO of what the reported speeds claim — each fix claiming speed × min(real Δt,
+//    PARK_REARM_CLAIM_MAX_MS) — over the last PARK_REARM_BASELINE_MS AND over its own fast run (from the fix before the
+//    run, capped at the baseline). One noisy step can look fast; a walker's speed spike cannot keep up over its span.
 //  • ENDPOINTS: component-wise median of PARK_REARM_ROBUST_N (5) accepted fixes — three outliers among five to move one.
-//  • FAST PATH: within the last PARK_REARM_WINDOW_MS of the segment, >= PARK_REARM_VEHICULAR_MS of credit, >=
+//  • PROOF: within the last PARK_REARM_WINDOW_MS of the segment, >= PARK_REARM_VEHICULAR_MS of credit, >=
 //    PARK_REARM_MIN_M from the first five fixes to the last five, and the last five >= PARK_REARM_MIN_M from the spot.
-//  • SLOW PATH (congestion): within the last PARK_REARM_SLOW_WINDOW_MS of the segment, >= PARK_REARM_SLOW_VEHICULAR_MS
-//    of credit, and the last five >= PARK_REARM_SLOW_MIN_M from the spot.
 // A head-unit reconnect still clears the witness at once (locationPrivacy.noteCarConnected), so a CarPlay / Android
 // Auto drive is live from its first fix. With no witnessed park nothing here runs; every new witness resets it.
 //
-// MEASURED (1 Hz fixes; tools/sim-qc/park_rearm_test.mts and the review scripts, all through this module):
-//   proves — highway pull-away 24–25 s; urban pull-away 31 s; stop-sign grids 23–47 s (51–71 s with 3 m noise);
-//   stop-and-go 52–73 s (103 s with 10 s standing); jams averaging 1.13 / 1.32 m/s 310 / 245 s and a 0.63 m/s queue
-//   506 s (with 3 m noise 462 / 287 / 654 s); Jeff's real 09-19 / 09-23 drive-aways 4 / 17 s past the 250 m floor.
-//   Slower fix rates cost more: at 0.2 Hz grids take 90–105 s and a noisy 16 km/h jam never proves within 15 min.
-//   stays pinned — Jeff's 09-25 and 08-29 walks (recorded, densified, 41 s stuck on the multipath point, 14–31 s of
-//   16 km/h readings first), two consecutive / ping-pong 400 m outliers, the canyon walker model (review-priv3/
-//   canyon.mts, 10 min each) at drift σv <= 1 m/s: 0–1 of 500 per variant for 1.4 m/s walkers (round 3: up to 298).
+// MEASURED (tools/sim-qc/park_rearm_test.mts and the review scripts, all through this module; 3 m noise unless noted):
+//   proves at 1 Hz — highway pull-away 24–25 s; urban pull-away 31 s; stop-sign grids 51–71 s; stop-and-go 73 s
+//   (103 s with 10 s standing); 10–20 km/h crawls 63–68 s; Jeff's real 09-19 / 09-23 drive-aways 4 / 17 s past the
+//   250 m floor. At 0.5 Hz the same drives take 26–108 s, at 0.2 Hz 50–105 s (not the stop-and-go with standing).
+//   stays pinned — every walker set 0 of 200: straight 1.4 m/s walkers with 8 / 10 / 12 m GPS noise and 1 in 10
+//   single-fix 15–18 km/h readings, delivered at 1 Hz, 2 Hz, 2 m filter and Lite (8 m filter); walk 350 m then sit;
+//   speed invalid except the spikes; Jeff's 09-25 and 08-29 walks (recorded, densified, 41 s stuck on the multipath
+//   point, 14–31 s of 16 km/h readings first); two consecutive / ping-pong 400 m outliers.
+// ⚠ WHAT IT COSTS: a phone-only drive (no head unit reconnects) in slow congestion — traffic averaging under 250 m per
+// 2 min (2.08 m/s, 7.5 km/h) — keeps the shared position AND the driver's own marker pinned at the witnessed park
+// until traffic averages above that for about 2 min, or a head unit reconnects. Jams averaging 0.6–1.3 m/s never
+// prove (30 min runs). That is the safe direction: the crew sees the car where it was parked, never the person.
 // ⚠ THE RESIDUAL, honestly: GPS alone cannot separate slow traffic from a walker whose reported position really moves
-// at car-like speed. With drift σv 2–3 m/s (240–360 m of wander) and speed readings that follow the noisy track, the
-// canyon model still un-pins 181–500 of 500 walks; runners at 15 km/h, cyclists, buses and trains un-pin in 24–65 s
-// (review-priv3/walkers.mts A6) and the car spot then follows them. The fix for that is not in GPS: the OS motion
-// classifier (iOS CMMotionActivity `automotive`, Android Activity Recognition IN_VEHICLE) — a NATIVE build-80 item
-// (CARPLAY.md §6c), HYPOTHESIS until a bench receipt.
+// at car-like speed. Brisk 2.0 m/s walkers (240 m per 2 min, 10 m under the floor) or 1 m/s drift, with white 8–12 m
+// position noise, still un-pin 1–38 of 200 per set (scratch canyon_r5.mts); a moving-walkway concourse (1.9 m/s on
+// average) with 8 m noise and 1 in 5 fast readings 112 of 200 (review-priv4/attacks.mts A); drift σv 2–3 m/s
+// (240–360 m of wander) 6–499 of 500 (review-priv4/canyon.mts); runners at 15 km/h, cyclists, buses and trains un-pin
+// in 24–65 s (review-priv3/walkers.mts A6) and the car spot then follows them. The fix for that is not in GPS: the OS
+// motion classifier (iOS CMMotionActivity `automotive`, Android Activity Recognition IN_VEHICLE) — a NATIVE build-80
+// item (CARPLAY.md §6c) that would also let a jam prove — HYPOTHESIS until a bench receipt.
 //
 // Pure: no react-native imports. The entry speed is passed in by src/locationPrivacy.ts (its owner), so this rule can
 // never drift from it; tools/sim-qc/park_rearm_test.mts drives the real noteFix and pins every value below.
@@ -70,7 +76,7 @@ export const PARK_REARM_MIN_M = 250;
 // Covered >= 80 % of the claimed distance. Swept against the canyon model (200 seeds each, scratch sweep.mts): 0.7
 // un-pinned 86/200 brisk (2.0 m/s) walkers with 15–17 km/h spikes, 134/200 at 2.1 m/s and 199/200 1.4 m/s σv=2
 // "consistent" walkers; 0.8 → 0/200, 0/200 and 142/200. A car's Doppler speed and track agree to ~0.9+ over 10 s even
-// with 3 m noise (noisy jams still prove, 287–654 s).
+// with 3 m noise.
 export const PARK_REARM_MOVE_RATIO = 0.8;
 // The most one fix may credit. The feeds deliver every <= 2 s at 15 km/h: iOS ~1 Hz while moving (navNotification.ts
 // drive-time note, "delivery ~1 Hz measured"), the Lite GPS phone watcher's 8 m filter at 4.17 m/s every 1.9 s. Also the
@@ -86,13 +92,14 @@ export const PARK_REARM_JUMP_FACTOR = 2;
 export const PARK_REARM_JUMP_SLACK_M = 50;
 // Median of five: survives two outliers among the last five (the review's two-consecutive-outlier attack).
 export const PARK_REARM_ROBUST_N = 5;
-// The congestion path. Swept (review-priv3/jam_lp.mts shapes, canyon model, 200 seeds): 45 s / 400 m left the 0.63 m/s
-// queue and the noisy 16 km/h jam pinned for 30 min; 30 s / 300 m proves them in 505–654 s and the others in 210–462 s,
-// adding 0/200 walker un-pins at drift σv <= 1 m/s over no slow path at all (+1 to +14/200 in the extreme σv 2–3 m/s
-// models); 20 s added 12–38/200 brisk walkers with spikes and +72/200 at σv 3.
-export const PARK_REARM_SLOW_WINDOW_MS = 600_000;
-export const PARK_REARM_SLOW_VEHICULAR_MS = 30_000;
-export const PARK_REARM_SLOW_MIN_M = 300;
+// The longest elapsed time one fix may CLAIM at its own speed: claim = speed × min(real Δt, this). Round 4 capped the
+// claim at the 2 s CREDIT cap, so a Lite GPS walker (8 m filter, fixes 4.0–5.7 s apart) had every 8 m step "cover" a
+// 15 km/h reading (8.3 m) with no noise at all; at 3 s the same step must cover 0.8 × 12.5 m and cannot. Swept 2–10 s
+// (review-priv4 walker_cadence / walker_compare / sit_after_walk / attacks, review-priv3 drivers, scratch canyon_r5;
+// 200 seeds): the walker sets are 0 un-pinned at every cap once the slow path is gone, but a cap of 5–10 s lets a fix
+// after an unreported stop claim the stop at driving speed — 0.5 Hz noise-free grids, 0.2 Hz grids and 0.1 Hz crawls
+// then never prove. 3 s keeps every round-4 fast-path proof (0.2 Hz grids 105–150 s).
+export const PARK_REARM_CLAIM_MAX_MS = 3_000;
 
 export type ParkRearm = {
   /** Feed every fix while a witnessed park stands. True once the re-arm is PROVEN (and stays true until reset). */
@@ -116,11 +123,12 @@ function medianOf(ps: P[]): P {
   return { lat: lat[m], lng: lng[m] };
 }
 
-// claim = the metres this fix's own speed says it covered since the previous fix (speed × min(Δt, the credit cap)).
+// claim = the metres this fix's own speed says it covered since the previous fix: speed × the REAL elapsed time
+// (capped at PARK_REARM_CLAIM_MAX_MS), never the credit cap.
 type Fix = { t: number; lat: number; lng: number; spd: number; claim: number; credit: number };
 
 export function createParkRearm(speeds: { enterMs: number }): ParkRearm {
-  // Accepted fixes of the CURRENT SEGMENT, oldest first (pruned to the slow window). A segment ends at a jump.
+  // Accepted fixes of the CURRENT SEGMENT, oldest first (pruned to PARK_REARM_WINDOW_MS). A segment ends at a jump.
   let seg: Fix[] = [];
   let prev: Fix | null = null;          // the last ACCEPTED fix (the jump test's reference)
   let bridging = false;                 // a fix was rejected since `prev`: the next accepted one starts a new segment
@@ -148,9 +156,9 @@ export function createParkRearm(speeds: { enterMs: number }): ParkRearm {
         }
         if (bridging) { seg = []; bridging = false; }                // the first fix after a jump starts a new segment
       }
-      const dtCap = prev && seg.length ? Math.min(now - prev.t, PARK_REARM_FIX_CREDIT_MS) : 0;
-      const claim = spd * (dtCap / 1000);
-      if (dtCap > 0 && spd >= speeds.enterMs) {
+      const dt = prev && seg.length ? now - prev.t : 0;
+      const claim = spd * (Math.min(dt, PARK_REARM_CLAIM_MAX_MS) / 1000);
+      if (dt > 0 && spd >= speeds.enterMs) {
         // CONSISTENCY, measured over spans — never one step (one noisy step can look fast): the reported track must
         // have covered >= PARK_REARM_MOVE_RATIO of what the reported speeds claim (a) over the last
         // PARK_REARM_BASELINE_MS, and (b) over the fast-reading RUN this fix belongs to, from the fix before the run
@@ -166,21 +174,18 @@ export function createParkRearm(speeds: { enterMs: number }): ParkRearm {
           for (let i = from + 1; i < seg.length; i++) claimed += seg[i].claim;
           return metres(seg[from], { lat, lng }) >= PARK_REARM_MOVE_RATIO * claimed;
         };
-        if (base >= 0 && covers(base) && covers(runBase)) credit = dtCap;
+        if (base >= 0 && covers(base) && covers(runBase)) credit = Math.min(dt, PARK_REARM_FIX_CREDIT_MS);
       }
       const f: Fix = { t: now, lat, lng, spd, claim, credit };
       prev = f;
       seg.push(f);
-      while (seg.length && seg[0].t < now - PARK_REARM_SLOW_WINDOW_MS) seg.shift();
+      while (seg.length && seg[0].t < now - PARK_REARM_WINDOW_MS) seg.shift();
+      // The proof — the last PARK_REARM_WINDOW_MS of this segment (seg holds nothing older).
       const R = PARK_REARM_ROBUST_N;
       if (seg.length < R) return false;
       const here = medianOf(seg.slice(-R));
-      const spotOk = (m: number) => !spot || !Number.isFinite(spot.lat) || !Number.isFinite(spot.lng) || metres(spot, here) >= m;
-      // FAST: the last PARK_REARM_WINDOW_MS of this segment.
-      const fast = seg.filter((x) => x.t >= now - PARK_REARM_WINDOW_MS);
-      if (fast.length >= R && creditIn(fast) >= PARK_REARM_VEHICULAR_MS && metres(medianOf(fast.slice(0, R)), here) >= PARK_REARM_MIN_M && spotOk(PARK_REARM_MIN_M)) proven = true;
-      // SLOW (congestion): the last PARK_REARM_SLOW_WINDOW_MS of this segment, and well away from the car.
-      else if (creditIn(seg) >= PARK_REARM_SLOW_VEHICULAR_MS && spot && spotOk(PARK_REARM_SLOW_MIN_M)) proven = true;
+      const spotFar = !spot || !Number.isFinite(spot.lat) || !Number.isFinite(spot.lng) || metres(spot, here) >= PARK_REARM_MIN_M;
+      if (creditIn(seg) >= PARK_REARM_VEHICULAR_MS && metres(medianOf(seg.slice(0, R)), here) >= PARK_REARM_MIN_M && spotFar) proven = true;
       if (proven) { seg = []; prev = null; bridging = false; }
       return proven;
     },

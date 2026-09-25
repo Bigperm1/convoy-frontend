@@ -26,7 +26,7 @@
 
 import { useMapView2DLocked } from '../mapViewMode';
 import { useEffect, useRef } from 'react';
-import { DeviceEventEmitter } from 'react-native';
+import { DeviceEventEmitter, NativeModules } from 'react-native';
 import { CarSurface } from './ConvoyCarPlay';
 import { useCarStore } from './carStore';
 import { acquireBgLocation, releaseBgLocation, registerBgConsumerProbe, hydrateCarRouteFromDisk, startForegroundCarFeed } from '../navNotification';
@@ -86,14 +86,86 @@ function aaCrumb(stage: string): void {
 // How many times this JS process has set the car root. Rides the aa-stack rows so a
 // SECOND Android Auto session in the same process is distinguishable from the first.
 let _aaRootSets = 0;
-// `aa-session op=start|end why=mount|ctx|disconnect|unmount` — one per session edge, at most 40 per process (a flapping
-// head unit must not spend Supabase rows). Reliable: a car cold start logs before the Supabase client exists.
+// `aa-session op=start|end why=hold-<via>|mount|ctx|hold-off|disconnect|unmount` — one per session edge, at most 40 per
+// process (a flapping head unit must not spend Supabase rows). Reliable: a car cold start logs before the Supabase
+// client exists.
 let _aaSessionRows = 0;
 function aaSessionRow(msg: string): void {
   if (_aaSessionRows >= 40) return;
   _aaSessionRows += 1;
   try { logEventReliable(`aa-session ${msg}`); } catch {}
 }
+
+// ── ONE CAR SESSION = ONE ACQUIRE, ONE RELEASE (privacy, 2026-09-25 reviews 4 and 5) ───────────────────────────────
+// Jeff, 2026-09-25: "it should not follow me when i discconect from car play... this is a privacy concern. fix it and
+// lock it." The root below MOUNTS ONCE PER JS PROCESS (46 instances in 30 d, every `aa-stack op=root` is n=1, 0
+// `op=root-unmount`) while CarPlaySession.kt runs AppRegistry.runApplication("AndroidAuto") into it for every car
+// session — so a second session in one process used to assert nothing (review 4: 5 of 21 instrumented AA process
+// lifetimes had 2–3 sessions). And a JS context that JOINS a live session through a reload (the red-pill Restart,
+// ErrorRecovery) never runs the root at all: CarPlaySession re-runs nothing for a new ReactContext (review 5 —
+// SMSGRC 2026-09-20, instance 89u9bd: `op=hold on=1 via=init` at 13:56:27 after an OTA Restart, no root until 15:05,
+// the session's end at 14:31:56 witnessed by nobody, `draw-cmp … latch=1 hu=0` after arrival).
+// So the session lives HERE, at module scope, keyed on native's own per-session receipt — CarJsKeepAlive's hold
+// (react-native-carplay patch, utils/CarJsKeepAlive.kt): `op=hold on=1 via=acquire|join|regrab|init` is emitted only
+// while a car session holds it (acquire at the session's onCreateScreen; init when a NEW ReactContext comes up under a
+// live session — a reload, or a car-started cold boot), `op=hold on=0` only when the LAST session is destroyed. This
+// module is required by registerAndroidAuto.ts during bundle evaluation, right after its own `aa-native` logger, so
+// it hears what that logger hears. A session STARTS at `op=hold on=1` and ENDS at `op=hold on=0` or didDisconnect,
+// each exactly once (_aaSessionAlive).
+// COLD START: a head unit that connects and is destroyed while JS is still starting releases the hold with no JS
+// context to hear it, and CarPlaySession's one-shot listener still runs the root and setCarContext (`op=ctx`) for the
+// dead session afterwards (review 5, from the native code; 0 such rows in 30 d). So neither the mount nor `op=ctx`
+// starts a session on a binary that emits hold receipts; the mount starts one only when native already reported the
+// hold alive. On a binary that emits none (no setAaKeepAliveOptions, i.e. no CarJsKeepAlive — build 78), the mount and
+// `op=ctx` start it as before. Gate: tools/sim-qc/car_feed_leak_test.mts AA (this module run for real).
+let _aaSessionAlive = false;
+// The last hold receipt this JS context heard (null: none yet), and whether this binary emits them at all.
+let _aaNativeHold: boolean | null = null;
+let _aaHoldReceipts = (() => { try { return typeof (NativeModules as any).RNCarPlay?.setAaKeepAliveOptions === 'function'; } catch { return false; } })();
+function startAaSession(why: string): void {
+  if (_aaSessionAlive) return;
+  _aaSessionAlive = true;
+  setCarSurfaceLive('androidauto', true);  // car-surface telemetry rows allowed until this session ends (2026-09-25)
+  // THE head-unit signal for Android, once per SESSION — never per render. On build 70 nothing unmounted this root and
+  // no didDisconnect arrived while startForegroundCarFeed kept writing positions into carStore (which re-renders
+  // the root): a re-assert on render would keep the flag fresh after the car session ended and publish raw walking
+  // GPS for the life of the process. The flag still lapses after CAR_CONNECT_TTL_MS (the gate then falls back to the
+  // driving latch, the private direction).
+  noteCarConnected(true, 'androidauto');
+  void acquireBgLocation('androidauto');   // shared bg task + fg car feed
+  startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
+  startCarStatus('androidauto');           // car-screen "what is missing" + the Allow location action (build 79)
+  void startForegroundCarFeed();           // continuous GPS writer for the car map — JOINS acquire's in-flight start (src/carFeedOwner.ts)
+  void hydrateCarRouteFromDisk();          // persisted route ribbon on cold connect
+  aaSessionRow(`op=start why=${why}`);
+}
+function endAaSession(why: string): void {
+  if (!_aaSessionAlive) return;
+  _aaSessionAlive = false;
+  // The WITNESSED park first (the drive's latch drops), then the lock (every car watch, src/carFeedOwner.ts) and the
+  // car-surface rows that carry coordinates. CARPLAY.md §6c.
+  noteCarConnected(false, 'androidauto');
+  void releaseBgLocation('androidauto');
+  setCarSurfaceLive('androidauto', false);
+  stopCarDataService();
+  stopCarStatus();
+  aaSessionRow(`op=end why=${why}`);
+}
+try {
+  DeviceEventEmitter.addListener('aaNativeTrace', (e: any) => {
+    const msg = String(e?.msg ?? '');
+    const hold = /^op=hold on=([01])\b/.exec(msg);
+    if (hold) {
+      _aaHoldReceipts = true;
+      _aaNativeHold = hold[1] === '1';
+      if (_aaNativeHold) startAaSession(`hold-${/\bvia=(\w+)/.exec(msg)?.[1] ?? 'unknown'}`);
+      else endAaSession('hold-off');
+    } else if (!_aaHoldReceipts && /^op=ctx\b/.test(msg)) startAaSession('ctx');
+  });
+} catch {}
+// Dead-man probe: the 'androidauto' hold is legitimate only while a car SESSION is live (see the carplay probe note —
+// 2026-08-26 background-GPS leak). Module scope: a context that joined a session through a reload never mounts the root.
+registerBgConsumerProbe('androidauto', () => _aaSessionAlive);
 
 export default function AndroidAutoRoot() {
   // FIRST RENDER = the native session actually ran this root (AppRegistry
@@ -180,55 +252,6 @@ export default function AndroidAutoRoot() {
     };
   }, []);
 
-  // Liveness for the dead-man sweep — true only while a car SESSION is live (between its connect and its disconnect).
-  // A plain ref: the probe is called from module scope.
-  const aaAliveRef = useRef(false);
-  // ── ONE CAR SESSION = ONE ACQUIRE, ONE RELEASE (privacy, 2026-09-25 review) ────────────────────────────────────
-  // Jeff, 2026-09-25: "it should not follow me when i discconect from car play... this is a privacy concern. fix it and
-  // lock it." This root MOUNTS ONCE PER JS PROCESS (46 instances in 30 d, every `aa-stack op=root` is n=1, 0
-  // `op=root-unmount`) while CarPlaySession.kt runs AppRegistry.runApplication("AndroidAuto") into the same root for
-  // every car session. Everything below used to happen only at the mount, and the disconnect listener fired every
-  // session — so a SECOND session in one process never told locationPrivacy a head unit was attached (its connect did
-  // not clear the previous park, its disconnect was a false→false no-op and witnessed nothing: the drive's latch
-  // survived and the walk away was shared LIVE), never re-took the location lock, and ran with no car data service.
-  // Field: 5 of 21 instrumented AA process lifetimes had 2–3 sessions (x7f6qy SPL_GRC, j9173u/4epwxc Victor,
-  // 89u9bd/vypvj9 SMSGRC); vypvj9 showed session 1's witness still standing 2.4 min into session 3.
-  // A session now starts at the mount OR at the native per-session connect receipt (`aaNativeTrace` `op=ctx`, emitted
-  // only by CarPlayModule.setCarContext, i.e. only by CarPlaySession.invokeStartTask for a real car session — never by
-  // the JS-callable checkForConnection whose didConnect is spurious on Android), and ends at every didDisconnect and at
-  // the unmount. Guarded by aaAliveRef, so each start is matched by exactly one end. Build 78 emits no `op=ctx`: there
-  // the mount remains the only start (the old behaviour). Gate: tools/sim-qc/car_feed_leak_test.mts AA (this root run
-  // for real through 3 sessions against the real locationPrivacy).
-  const startAaSession = (why: string) => {
-    if (aaAliveRef.current) return;
-    aaAliveRef.current = true;
-    setCarSurfaceLive('androidauto', true);  // car-surface telemetry rows allowed until this session ends (2026-09-25)
-    // THE head-unit signal for Android, once per SESSION — never per render. On build 70 nothing unmounted this root and
-    // no didDisconnect arrived while startForegroundCarFeed kept writing positions into carStore (which re-renders
-    // this root): a re-assert on render would keep the flag fresh after the car session ended and publish raw walking
-    // GPS for the life of the process. The flag still lapses after CAR_CONNECT_TTL_MS (the gate then falls back to the
-    // driving latch, the private direction).
-    noteCarConnected(true, 'androidauto');
-    void acquireBgLocation('androidauto');   // shared bg task + fg car feed
-    startCarDataService();                   // cold peers + hazards (WS/Supabase/REST)
-    startCarStatus('androidauto');           // car-screen "what is missing" + the Allow location action (build 79)
-    void startForegroundCarFeed();           // continuous GPS writer for the car map — JOINS acquire's in-flight start (src/carFeedOwner.ts)
-    void hydrateCarRouteFromDisk();          // persisted route ribbon on cold connect
-    aaSessionRow(`op=start why=${why}`);
-  };
-  const endAaSession = (why: string) => {
-    if (!aaAliveRef.current) return;
-    aaAliveRef.current = false;
-    // The WITNESSED park first (the drive's latch drops), then the lock (every car watch, src/carFeedOwner.ts) and the
-    // car-surface rows that carry coordinates. CARPLAY.md §6c.
-    noteCarConnected(false, 'androidauto');
-    void releaseBgLocation('androidauto');
-    setCarSurfaceLive('androidauto', false);
-    stopCarDataService();
-    stopCarStatus();
-    aaSessionRow(`op=end why=${why}`);
-  };
-
   // ---- DATA/LOCATION FEED BOOTSTRAP (Android parity with iOS's
   // carPlayBootstrap.onConnect — 2026-07-16 deep dive) ----
   // carPlayBootstrap early-returns on Android, so nothing used to start the
@@ -241,6 +264,8 @@ export default function AndroidAutoRoot() {
   // Android app launch — see ANDROID_SPURIOUS_CONNECT_GUARD_MS) starting feeds
   // here can never leak GPS onto a phone with no car attached. All four calls
   // are platform-agnostic; released/stopped when the car session unmounts.
+  // (Since 2026-09-25 the trigger is native's per-session hold receipt, not this mount alone — see "ONE CAR SESSION"
+  // at module scope: the mount runs once per process and also for a session that died during a cold start.)
   // ── RELEASE THE LOCATION HOLD WHEN THE CAR SESSION ACTUALLY ENDS ───────────
   // The cleanup below only runs if this React root UNMOUNTS, and nothing ever unmounts
   // it: CarPlaySession.onDestroy was a no-op upstream and the library has no
@@ -269,24 +294,11 @@ export default function AndroidAutoRoot() {
     return () => { if (off) off(); };
   }, []);
 
-  // Every LATER session in this process: the native per-session connect receipt (see startAaSession).
-  useEffect(() => {
-    let sub: { remove: () => void } | undefined;
-    try {
-      sub = DeviceEventEmitter.addListener('aaNativeTrace', (e: any) => {
-        if (/^op=ctx\b/.test(String(e?.msg ?? ''))) startAaSession('ctx');
-      });
-    } catch {}
-    return () => { try { sub?.remove(); } catch {} };
-  }, []);
-
   useEffect(() => {
     aaCrumb('root-mount');
-    // Dead-man probe: the 'androidauto' hold is legitimate only while this root is
-    // mounted (see carplay probe note — 2026-08-26 background-GPS leak).
-    registerBgConsumerProbe('androidauto', () => aaAliveRef.current);
-    // The mount IS a car session (CarPlaySession runs this root only for one) — the first of this process.
-    startAaSession('mount');
+    // The mount starts a session only when native has reported one alive, or on a binary with no hold receipts (see
+    // "ONE CAR SESSION" above): CarPlaySession also runs this root for a session destroyed during a cold start.
+    if (!_aaHoldReceipts || _aaNativeHold === true) startAaSession('mount');
     return () => endAaSession('unmount');
   }, []);
 

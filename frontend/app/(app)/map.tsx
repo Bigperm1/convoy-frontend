@@ -5197,7 +5197,8 @@ export default function MapScreen() {
         // >75 m case; close parks never pinned until this. Since 2026-09-25 (privacy) noteFix
         // clears the flag only on a PROVEN drive-away (src/parkRearm.ts), so after a head
         // unit is unplugged MID-DRIVE the marker stays at the unplug point until that proof:
-        // 24–31 s pulling away, up to 4–11 min in a slow jam (measured, CARPLAY.md §6c).
+        // 24–31 s pulling away; in a slow jam until traffic averages above 250 m per 2 min for
+        // ~2 min, or a head unit reconnects (measured, CARPLAY.md §6c).
         // 🔒 NAV-LOCK begin map-selfcar-parked-pin — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         selfParked={
           presenceParked && navMode !== "turn-by-turn" && privacyHydrated &&

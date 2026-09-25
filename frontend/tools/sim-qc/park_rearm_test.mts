@@ -38,7 +38,12 @@
 //   X  the third review's attacks: 14–31 s of 16 km/h-reading walking + 41 s stuck on the multipath point; two
 //      consecutive / ping-pong 400 m outliers; every other fix on a far point (X0 / X0b = round 3 un-pinning).
 //   Z  the review's urban-canyon walker model (seed 284 and 20-seed sets of brisk walkers with 15–17 km/h spikes) pinned.
-//   Q  slow jams prove in bounded time on the SLOW path (Q0 = round 3 still pinned after 30 min).
+//   Q  slow congestion STAYS PINNED (round 5 removed the slow path): three jams pinned for 30 min at 1 Hz, with and
+//      without 3 m noise; the same jam then clearing goes live within 60 s (Q0 = round 4's slow path un-pins the jam).
+//   WK the fifth review's walkers on the real module: straight 1.4 m/s walks with 8 / 12 m GPS noise and 1 in 10
+//      single-fix 15–18 km/h readings at 1 Hz and Lite cadence (8 m filter), and a walk-then-sit — all pinned
+//      (WK0 = round 4 un-pins them); a moving-walkway concourse at 2 m / 500 ms cadence (WK6-0 = the rule without its
+//      10 s baseline check proves it). V5 isolates the real-Δt claim (V5c = the 2 s claim of round 4 proves it).
 //   K  the head-unit sources: an iOS COLD CarPlay disconnect is witnessed (K0 = the pre-fix cold path sharing live),
 //      a cold connect clears yesterday's witness (K2/K3), the map mirror cannot create or cancel a witness (K4), and
 //      with no session source the map mirror still works (K5).
@@ -51,7 +56,7 @@
 //      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -71,7 +76,7 @@ registerHooks({
     if (s === "@react-native-async-storage/async-storage") return { url: STORAGE, shortCircuit: true };
     if (s === "react" || s === "react-native" || s.startsWith("expo-")) return { url: EMPTY, shortCircuit: true };
     // The pre-fix copy lives in a temp dir: its relative imports are the worktree's modules.
-    if (s === "./parkRearm.r3.ts") return n(s, c);                          // round 3's rule, beside its locationPrivacy copy
+    if (s === "./parkRearm.r3.ts" || s === "./parkRearm.r4.ts") return n(s, c);   // an earlier round's rule, beside its locationPrivacy copy
     if (s.startsWith(".") && /locationPrivacy\.base\.ts(\?.*)?$/.test(c.parentURL ?? "")) return { url: new URL(`${s.slice(2)}.ts`, SRC).href, shortCircuit: true };
     if (s.startsWith(".") && !/\.[a-z]+$/i.test(s)) { try { return n(s + ".ts", c); } catch {} }
     return n(s, c);
@@ -217,10 +222,12 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
   const want = {
     PARK_REARM_WINDOW_MS: 120_000, PARK_REARM_VEHICULAR_MS: 15_000, PARK_REARM_MIN_M: 250, PARK_REARM_MOVE_RATIO: 0.8,
     PARK_REARM_FIX_CREDIT_MS: 2_000, PARK_REARM_BASELINE_MS: 10_000, PARK_REARM_JUMP_FACTOR: 2, PARK_REARM_JUMP_SLACK_M: 50,
-    PARK_REARM_ROBUST_N: 5, PARK_REARM_SLOW_WINDOW_MS: 600_000, PARK_REARM_SLOW_VEHICULAR_MS: 30_000, PARK_REARM_SLOW_MIN_M: 300,
+    PARK_REARM_ROBUST_N: 5, PARK_REARM_CLAIM_MAX_MS: 3_000,
   };
   const got = Object.fromEntries(Object.keys(want).map((k) => [k, (R as any)[k]]));
   ok("V1 parkRearm constants are the approved values", JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
+  const exported = Object.keys(R).filter((k) => k.startsWith("PARK_REARM_")).sort();
+  ok("V1c no other PARK_REARM_ export (the round-4 SLOW congestion path is gone)", JSON.stringify(exported) === JSON.stringify(Object.keys(want).sort()), exported.join(","));
   const lp0 = await fresh();
   ok("V1b the pure rule's entry speed here is locationPrivacy's DRIVING_ENTER_SPEED_MS", lp0.DRIVING_ENTER_SPEED_MS === DRIVING_ENTER, String(lp0.DRIVING_ENTER_SPEED_MS));
   // Each defence alone, on the pure rule (the attacks above are each stopped by more than one, so these isolate them).
@@ -242,6 +249,21 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
   const clean = run(drive);
   const withOut = run(drive.map((f, i) => (i === clean - 3 ? { ...f, p: north(f.p, 45) } : f)));
   ok("V4 one in-bound outlier cannot bring the proof forward by more than one fix (median of five)", clean > 0 && withOut >= clean - 1, `clean=${clean} withOutlier=${withOut}`);
+  // V5 CLAIM = speed × REAL Δt (review round 5). The Lite GPS watcher's 8 m filter on a phone moving 2.6 m/s: noise-free
+  // 8 m steps 3.08 s apart, EVERY fix reading 15.1 km/h. Its track covers 63 % of what 15 km/h claims over 3 s — no
+  // credit, never proves. With the claim capped at the 2 s credit cap (round 4) each step "covers" 95 % and it proves.
+  const lite = Array.from({ length: 80 }, (_, i) => ({ t: T + Math.round(i * 3077), p: north(SPOT, 30 + 8 * i), v: 4.2 }));
+  ok("V5 an 8 m-filter track 3.08 s apart reading 15 km/h on every fix never proves (claim = speed × real Δt)", run(lite) === -1, `proved at fix ${run(lite)}`);
+  {
+    const d = mkdtempSync(join(tmpdir(), "park-rearm-claim2-")); const f = join(d, "parkRearm.claim2.ts");
+    const src = readFileSync(new URL("parkRearm.ts", SRC), "utf8");
+    writeFileSync(f, src.replace(/export const PARK_REARM_CLAIM_MAX_MS = [^;]+;/, "export const PARK_REARM_CLAIM_MAX_MS = PARK_REARM_FIX_CREDIT_MS;"));
+    const R2: any = await import(pathToFileURL(f).href);
+    const r2 = R2.createParkRearm({ enterMs: DRIVING_ENTER }); let at = -1;
+    for (let i = 0; i < lite.length && at < 0; i++) if (r2.note(lite[i].t, lite[i].p.lat, lite[i].p.lng, lite[i].v, SPOT)) at = i;
+    ok("V5c NEGATIVE CONTROL (this module with round 4's claim, capped at the 2 s credit cap): the same track proves", at >= 0, `proved at fix ${at} (+${((lite[Math.max(0, at)].t - T) / S).toFixed(0)} s)`);
+    rmSync(d, { recursive: true, force: true });
+  }
 }
 
 // Kinematic drive at 2 Hz (the phone watcher's default 500 ms / 2 m): accelerate a m/s² to vmax, cruise, brake b m/s²
@@ -317,7 +339,7 @@ function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): numb
   const resumeAt = t + S;
   let armedDt: number | null = null;
   for (let i = 0; i < 40 && armedDt == null; i++) { step(10); if (lp.privacyDebug().latch) armedDt = (t - resumeAt) / S; }
-  ok("L1 a 25 s red light mid-proof: armed within 20 s of pulling away again (measured 17; the red light starts nothing over)", armedDt != null && armedDt <= 20, `armed ${armedDt} s after resuming`);
+  ok("L1 a 25 s red light mid-proof: armed within 20 s of pulling away again (measured 18; the red light starts nothing over)", armedDt != null && armedDt <= 20, `armed ${armedDt} s after resuming`);
 }
 
 // ── E · stop-sign grids and stop-and-go traffic prove (v1 never did: review-priv/s_edges.mts) ────────────────────
@@ -747,6 +769,21 @@ const freshR3 = async (): Promise<LP | null> => {
   await lp.hydrateLocationPrivacy();
   return lp;
 };
+// Round 4 (8a6fa0aa) as a pair — the slow congestion path and the 2 s claim — for the round-5 negative controls.
+let r4Dir: string | null = null;
+try {
+  const git = (f: string) => execFileSync("git", ["show", `8a6fa0aa:frontend/src/${f}`], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const lpSrc = git("locationPrivacy.ts").replace(`from "./parkRearm";`, `from "./parkRearm.r4.ts";`);
+  r4Dir = mkdtempSync(join(tmpdir(), "park-rearm-r4pair-"));
+  writeFileSync(join(r4Dir, "locationPrivacy.base.ts"), lpSrc); writeFileSync(join(r4Dir, "parkRearm.r4.ts"), git("parkRearm.ts"));
+} catch { r4Dir = null; }
+const freshR4 = async (): Promise<LP | null> => {
+  if (!r4Dir) return null;
+  (globalThis as any).__store = {};
+  const lp: LP = await import(pathToFileURL(join(r4Dir, "locationPrivacy.base.ts")).href + `?i=${++inst}`);
+  await lp.hydrateLocationPrivacy();
+  return lp;
+};
 
 // ── X · the review's re-arm attacks (review-priv3/c_logic.mts, walkers.mts), on the real module ────────────────────
 {
@@ -865,30 +902,147 @@ function canyonWalk(seed: number, walkMs: number, sigV: number, every: number, l
   }
 }
 
-// ── Q · slow traffic after a witnessed park proves in bounded time (review-priv3/jam_lp.mts, the SLOW path) ───────
-// v2 kept the driver (and his own marker) at the old spot for as long as traffic stayed slow: 30 min / 2 km measured.
+// ── Q · slow congestion after a witnessed park STAYS PINNED (round 5: the slow path is removed) ─────────────────────
+// The accepted cost (src/parkRearm.ts header, CARPLAY.md §6c): a phone-only drive in traffic averaging under 250 m per
+// 2 min keeps the shared position and the driver's own marker at the witnessed park until traffic averages above that
+// for ~2 min, or a head unit reconnects. The jam shapes are review-priv3/jam_lp.mts's; 1 Hz fixes while moving.
 {
-  const jam = async (vpk: number, mv: number, st: number, lpP: Promise<LP | null> = fresh()) => {
-    const lp = await lpP; if (!lp) return -1; parkWithCarPlay(lp);
+  const jam = async (vpk: number, mv: number, st: number, lpP: Promise<LP | null>, o: { secs?: number; noise?: number; seed?: number; clearAt?: number } = {}) => {
+    const lp = await lpP; if (!lp) return undefined; parkWithCarPlay(lp);
+    let a = (o.seed ?? 1) >>> 0;
+    const u = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t2 = Math.imul(a ^ (a >>> 15), 1 | a); t2 = (t2 + Math.imul(t2 ^ (t2 >>> 7), 61 | t2)) ^ t2; return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296; };
+    const gz = () => { let x = 0, y = 0; while (x === 0) x = u(); while (y === 0) y = u(); return Math.sqrt(-2 * Math.log(x)) * Math.cos(2 * Math.PI * y); };
+    const nz = o.noise ?? 0;
     let x = 0; let firstLive: number | null = null;
-    for (let s2 = 1; s2 <= 1800 && firstLive == null; s2++) {
-      const c = s2 % (mv + st); const v = c < mv ? kmh(vpk) * Math.sin((Math.PI * c) / mv) : 0;
+    for (let s2 = 1; s2 <= (o.secs ?? 1800) && firstLive == null; s2++) {
+      let v: number;
+      if (o.clearAt != null && s2 > o.clearAt) v = Math.min(kmh(40), (s2 - o.clearAt) * 1.0);   // the jam clears: 1 m/s² to 40 km/h
+      else { const c = s2 % (mv + st); v = c < mv ? kmh(vpk) * Math.sin((Math.PI * c) / mv) : 0; }
       x += v; clock = utc(21, 30, 0) + s2 * S;
-      if (v > 0.3) { const p = north(SPOT, x); lp.noteFix(p.lat, p.lng, v, 0); const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 }); if (sh.share && sh.lat === p.lat) firstLive = s2; }
+      if (v > 0.3) {
+        const p = north(SPOT, x + nz * gz()); const rv = Math.max(0, v + (nz ? kmh(1) * gz() : 0));
+        lp.noteFix(p.lat, p.lng, rv, 0);
+        const sh: any = lp.shareablePosition({ ...p, speed: rv, heading: 0 }); if (sh.share && sh.lat === p.lat) firstLive = s2;
+      }
     }
     return firstLive;
   };
-  const j1 = await jam(16, 20, 30), j2 = await jam(20, 15, 25), j3 = await jam(18, 10, 40);
-  const old = await jam(16, 20, 30, freshR3());
-  if (old !== -1) ok("Q0 NEGATIVE CONTROL (round 3 pair): the 16 km/h jam is still pinned after 30 min", old == null, `first live ${old}`);
-  // Bounds = the measured value rounded up to the next minute (1 Hz, no position noise; 3 m noise adds 1–3 min — see
-  // src/parkRearm.ts). v2: never, 30 min measured. The pre-fix module: 4–8 s (it had no witnessed-park protection).
-  ok("Q1 jam (20 s rolling to 16 km/h, 30 s standing, 1.13 m/s average) goes live within 6 min", j1 != null && j1 <= 360, `+${j1}s`);
-  ok("Q2 jam (15 s rolling to 20 km/h, 25 s standing, 1.32 m/s average) goes live within 5 min", j2 != null && j2 <= 300, `+${j2}s`);
-  ok("Q3 queue (10 s rolling to 18 km/h, 40 s standing, 0.63 m/s average) goes live within 9 min", j3 != null && j3 <= 540, `+${j3}s`);
+  const shapes: [string, number, number, number][] = [
+    ["jam (20 s rolling to 16 km/h, 30 s standing, 1.13 m/s average)", 16, 20, 30],
+    ["jam (15 s rolling to 20 km/h, 25 s standing, 1.32 m/s average)", 20, 15, 25],
+    ["queue (10 s rolling to 18 km/h, 40 s standing, 0.63 m/s average)", 18, 10, 40],
+  ];
+  const old = await jam(16, 20, 30, freshR4());
+  if (old !== undefined) ok("Q0 NEGATIVE CONTROL (round 4 pair, 8a6fa0aa): its slow path puts the 16 km/h jam live", old != null, `first live +${old}s`);
+  else console.log("  skip Q0 negative control: 8a6fa0aa unavailable");
+  for (const [i, [name, vpk, mv, st]] of shapes.entries()) {
+    const clean = await jam(vpk, mv, st, fresh());
+    const noisy = await jam(vpk, mv, st, fresh(), { noise: 3, seed: 7 + i });
+    ok(`Q${i + 1} ${name} stays pinned for 30 min (no noise, and with 3 m noise)`, clean === null && noisy === null, `first live ${clean ?? "never"} / ${noisy ?? "never"}`);
+  }
+  const cleared = await jam(16, 20, 30, fresh(), { clearAt: 600, noise: 3, seed: 11 });
+  ok("Q4 …and when that jam clears after 10 min (1 m/s² to 40 km/h), the drive goes live within 60 s", cleared != null && cleared - 600 <= 60, `live +${cleared != null ? cleared - 600 : "never"} s after it cleared`);
+}
+
+// ── WK · the fifth review's walkers, on the real module (review-priv4 walker_cadence / walker_compare / sit_after_walk) ─
+// A straight 1.4 m/s walk away from the car for 10 min with the app open; GPS noise OU per axis (σ, τ 30 s at 10 Hz —
+// the review's generator), speed 1.4 ± 1 km/h with 1 in 10 delivered fixes reading 15–18 km/h; delivered at 1 Hz, or
+// at Lite cadence (8 m filter, >= 1 s). "Pinned" = the witness stands and nothing is ever shared LIVE.
+function ouWalk(seed: number, sigma: number, filterM: number, sitAfterM = 0, pSit = 0) {
+  let a = seed >>> 0;
+  const u = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t2 = Math.imul(a ^ (a >>> 15), 1 | a); t2 = (t2 + Math.imul(t2 ^ (t2 >>> 7), 61 | t2)) ^ t2; return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296; };
+  const gz = () => { let x = 0, y = 0; while (x === 0) x = u(); while (y === 0) y = u(); return Math.sqrt(-2 * Math.log(x)) * Math.cos(2 * Math.PI * y); };
+  const out: { s: number; p: { lat: number; lng: number }; v: number }[] = [];
+  let nx = 0, ny = 0; let last: { lat: number; lng: number } | null = null, lastT = -99;
+  for (let k = 0; k <= 6000; k++) {
+    const t = k / 10;
+    nx += -nx / 30 + sigma * Math.sqrt(2 / 30) * gz(); ny += -ny / 30 + sigma * Math.sqrt(2 / 30) * gz();
+    const along = sitAfterM ? Math.min(30 + 1.4 * t, sitAfterM) : 30 + 1.4 * t;
+    const sitting = sitAfterM > 0 && 30 + 1.4 * t >= sitAfterM;
+    const p0 = north(SPOT, along + ny);
+    const p = { lat: p0.lat, lng: p0.lng + (nx / (R_EARTH * Math.cos((SPOT.lat * Math.PI) / 180))) * (180 / Math.PI) };
+    if (t - lastT < 1 - 1e-9 || (last && metres(last, p) < filterM)) continue;
+    const spike = u() < (sitting ? pSit : 0.1);
+    out.push({ s: t, p, v: spike ? kmh(15 + 3 * u()) : Math.max(0, (sitting ? 0 : 1.4) + kmh(gz())) });
+    last = p; lastT = t;
+  }
+  return out;
+}
+{
+  const walkLive = async (lpP: Promise<LP | null>, fixes: ReturnType<typeof ouWalk>) => {
+    const lp = await lpP; if (!lp) return undefined; parkWithCarPlay(lp);
+    const t0 = utc(18, 0, 0); let live: number | null = null;
+    for (const f of fixes) {
+      clock = t0 + Math.round(f.s * S); lp.noteFix(f.p.lat, f.p.lng, f.v, null);
+      const sh: any = lp.shareablePosition({ ...f.p, speed: f.v, heading: 0 });
+      if (live == null && sh.share && sh.lat === f.p.lat && sh.lng === f.p.lng) live = f.s;
+    }
+    return { live, hu: lp.parkEndedByHeadUnit() };
+  };
+  const SEEDS = Array.from({ length: 20 }, (_, i) => i + 1);
+  const sets: [string, (seed: number) => ReturnType<typeof ouWalk>][] = [
+    ["1 Hz, σ 8 m", (sd) => ouWalk(sd, 8, 0)],
+    ["1 Hz, σ 12 m", (sd) => ouWalk(sd, 12, 0)],
+    ["Lite (8 m filter), σ 8 m", (sd) => ouWalk(sd, 8, 8)],
+    ["Lite (8 m filter), σ 12 m", (sd) => ouWalk(sd, 12, 8)],
+    ["1 Hz, σ 12 m, walk 350 m then SIT (1 in 20 sitting fixes read 15–18 km/h)", (sd) => ouWalk(sd, 12, 0, 350, 0.05)],
+  ];
+  for (const [i, [name, gen]] of sets.entries()) {
+    let un = 0, un4 = 0; const which: number[] = [];
+    for (const sd of SEEDS) {
+      const fx = gen(sd);
+      const cur = await walkLive(fresh(), fx);
+      if (!cur || cur.live != null || cur.hu !== true) { un++; which.push(sd); }
+      if (i === 0 || i === 3) { const o = await walkLive(freshR4(), fx); if (o && (o.live != null || o.hu !== true)) un4++; }
+    }
+    if (i === 0 || i === 3) {
+      if (r4Dir) ok(`WK0 NEGATIVE CONTROL (round 4 pair, 8a6fa0aa): walker ${name} un-pins on some of the same ${SEEDS.length} walks`, un4 > 0, `${un4}/${SEEDS.length} un-pinned`);
+      else console.log("  skip WK0 negative control: 8a6fa0aa unavailable");
+    }
+    ok(`WK${i + 1} walker ${name}: ${SEEDS.length} walks × 10 min → all pinned, nothing shared live`, un === 0, `un-pinned seeds ${which.join(",") || "none"}`);
+  }
+  // WK6 the 10 s BASELINE check (review-priv4/attacks.mts A): an airport concourse — walking 1.4 m/s, on moving
+  // walkways at 2.15 m/s for 60 s of every 90 s — at the phone watcher's 2 m / 500 ms cadence, σ 8 m, 1 in 10 fixes
+  // reading 15–18 km/h. Each spike's own one-step run can "cover" its claim by noise; the baseline is what refuses it.
+  const walkway = (seed: number) => {
+    let a = seed >>> 0;
+    const u = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t2 = Math.imul(a ^ (a >>> 15), 1 | a); t2 = (t2 + Math.imul(t2 ^ (t2 >>> 7), 61 | t2)) ^ t2; return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296; };
+    const gz = () => { let x = 0, y = 0; while (x === 0) x = u(); while (y === 0) y = u(); return Math.sqrt(-2 * Math.log(x)) * Math.cos(2 * Math.PI * y); };
+    const out: { s: number; p: { lat: number; lng: number }; v: number }[] = [];
+    let x = 30, nx = 0, ny = 0; let last: { lat: number; lng: number } | null = null, lastT = -99;
+    for (let k = 0; k <= 6000; k++) {
+      const t = k / 10; const v = (t % 90) < 60 ? 2.15 : 1.4; x += v * 0.1;
+      nx += -nx / 30 + 8 * Math.sqrt(2 / 30) * gz(); ny += -ny / 30 + 8 * Math.sqrt(2 / 30) * gz();
+      const p0 = north(SPOT, x + ny);
+      const p = { lat: p0.lat, lng: p0.lng + (nx / (R_EARTH * Math.cos((SPOT.lat * Math.PI) / 180))) * (180 / Math.PI) };
+      if (t - lastT < 0.5 - 1e-9 || (last && metres(last, p) < 2)) continue;
+      out.push({ s: t, p, v: u() < 0.1 ? kmh(15 + 3 * u()) : Math.max(0, v + kmh(gz())) }); last = p; lastT = t;
+    }
+    return out;
+  };
+  const W_SEEDS = Array.from({ length: 40 }, (_, i) => i + 1);
+  let unW = 0; const whichW: number[] = [];
+  for (const sd of W_SEEDS) { const r = await walkLive(fresh(), walkway(sd)); if (!r || r.live != null || r.hu !== true) { unW++; whichW.push(sd); } }
+  {
+    // NEGATIVE CONTROL: this module's rule with the baseline check removed (credit on the run check alone).
+    const d = mkdtempSync(join(tmpdir(), "park-rearm-nobase-")); const f = join(d, "parkRearm.nobase.ts");
+    const src = readFileSync(new URL("parkRearm.ts", SRC), "utf8");
+    const mut = src.replace("if (base >= 0 && covers(base) && covers(runBase)) credit", "if (base >= 0 && covers(runBase)) credit");
+    writeFileSync(f, mut);
+    const RB: any = await import(pathToFileURL(f).href);
+    let unB = 0;
+    for (const sd of W_SEEDS) {
+      const r = RB.createParkRearm({ enterMs: DRIVING_ENTER }); const t0 = utc(18, 0, 0);
+      for (const fx of walkway(sd)) if (r.note(t0 + Math.round(fx.s * S), fx.p.lat, fx.p.lng, fx.v, SPOT)) { unB++; break; }
+    }
+    ok("WK6-0 NEGATIVE CONTROL (this rule with the 10 s baseline check removed): the concourse walker proves on some of the same walks", mut !== src && unB > 0, `${unB}/${W_SEEDS.length} proved`);
+    rmSync(d, { recursive: true, force: true });
+  }
+  ok(`WK6 moving-walkway concourse (2 m / 500 ms cadence, σ 8 m, 1 in 10 fast readings): ${W_SEEDS.length} walks × 10 min → all pinned`, unW === 0, `un-pinned seeds ${whichW.join(",") || "none"}`);
 }
 
 if (baseFile) rmSync(join(baseFile, ".."), { recursive: true, force: true });
 if (r3Dir) rmSync(r3Dir, { recursive: true, force: true });
+if (r4Dir) rmSync(r4Dir, { recursive: true, force: true });
 if (fails) { console.log(`FAIL park_rearm (${fails})`); process.exit(1); }
 console.log("PASS park_rearm");

@@ -30,8 +30,11 @@
 //   T  the REAL drawTelemetry.ts: no surf=car draw-cmp / pose-fix / corner-trace / cam-apply row without a live car.
 //   CP the REAL carPlayBootstrap.ts: connect / disconnect call the head-unit writer, the lock and the telemetry flag
 //      synchronously (a deferred or conditional release fails).
-//   AA the REAL AndroidAutoRoot.tsx through three car sessions in one process against the real locationPrivacy (AA0 =
-//      round 3's root: session 2 never asserted and its walk-away went out live).
+//   AA the REAL AndroidAutoRoot.tsx against the real locationPrivacy, driven by the native receipts CarPlaySession /
+//      CarJsKeepAlive emit: three car sessions in one process (AA0 = round 3's root: session 2 never asserted and its
+//      walk-away went out live); a JS reload that JOINS a live session (AA6, AA6-0 = round 4's root: the disconnect
+//      witnessed by nobody, the walk shared live); a session destroyed before JS started (AA7, AA7-0 = round 4's root:
+//      an acquire with no release); the init receipt before or after the mount (AA8); a binary with no receipts (AA9).
 //   M  map.tsx's phone-watcher effect, extracted from the source and run: a cleanup before, soon after and long after
 //      the watch resolves, deliveries to a dead effect, and the background gate.
 //      What M cannot see: whether React re-runs the effect at the right moments (F checks the deps text), hook order,
@@ -345,17 +348,18 @@ function bodyAfter(src: string, marker: string, from = 0): string | null {
 
   // AndroidAutoRoot is run for real in section AA; these keep the static half meaningful on a tree AA cannot load.
   const aa = blank(read("src/carplay/AndroidAutoRoot.tsx"));
-  const endSt = statements(bodyAfter(aa, "const endAaSession = (why: string) => {") ?? "{}");
+  const endSt = statements(bodyAfter(aa, "function endAaSession(why: string): void {") ?? "{}");
   ok("F9 AndroidAutoRoot endAaSession: head-unit release + lock release + telemetry flag as plain top-level statements, and every didDisconnect ends the session",
     ["noteCarConnected(false, 'androidauto')", "void releaseBgLocation('androidauto')", "setCarSurfaceLive('androidauto', false)"].every((x) => endSt.includes(x))
       && /const onDisconnect = \(\) => endAaSession\('disconnect'\);/.test(aa), JSON.stringify(endSt));
-  const startSt = statements(bodyAfter(aa, "const startAaSession = (why: string) => {") ?? "{}");
+  const startSt = statements(bodyAfter(aa, "function startAaSession(why: string): void {") ?? "{}");
   const mountAt = aa.indexOf("startAaSession('mount');");
   const mountEff = mountAt < 0 ? null : bodyAfter(aa, "useEffect(", aa.lastIndexOf("useEffect(", mountAt));
-  ok("F10 AndroidAutoRoot: a session starts at the mount AND at every native op=ctx, asserts + acquires, and the unmount ends it",
+  ok("F10 AndroidAutoRoot: a session starts at native's hold receipt (the mount only when that hold is alive, or with no receipts), asserts + acquires; the hold's end and the unmount end it",
     ["noteCarConnected(true, 'androidauto')", "void acquireBgLocation('androidauto')", "setCarSurfaceLive('androidauto', true)"].every((x) => startSt.includes(x))
-      && !!mountEff && /return \(\) => endAaSession\('unmount'\);/.test(mountEff)
-      && /addListener\('aaNativeTrace'[\s\S]{0,200}?op=ctx[\s\S]{0,80}?startAaSession\('ctx'\)/.test(aa), JSON.stringify(startSt));
+      && !!mountEff && /if \(!_aaHoldReceipts \|\| _aaNativeHold === true\) startAaSession\('mount'\);/.test(mountEff) && /return \(\) => endAaSession\('unmount'\);/.test(mountEff)
+      && /addListener\('aaNativeTrace'[\s\S]{0,200}?op=hold on=\(\[01\]\)[\s\S]{0,300}?startAaSession\(`hold-[\s\S]{0,120}?endAaSession\('hold-off'\)/.test(aa)
+      && /registerBgConsumerProbe\('androidauto', \(\) => _aaSessionAlive\);/.test(aa), JSON.stringify(startSt));
 
   const map = blank(read("app/(app)/map.tsx"));
   ok("F11 map.tsx: exactly one watchPositionAsync(", count(map, "watchPositionAsync(") === 1);
@@ -422,7 +426,7 @@ if (!process.env.CAR_FEED_ROOT) {
     export const watchPositionAsync = (...a) => L().watchPositionAsync(...a);`);
   const RN = js(`export const Platform = { get OS() { return globalThis.__os ?? "ios"; }, select: (o) => o.ios ?? o.default };
     export const AppState = { currentState: "background", addEventListener: () => ({ remove() {} }) };
-    export const NativeModules = { RNCarPlay: {} }; export const processColor = (c) => c;
+    export const NativeModules = { get RNCarPlay() { return globalThis.__rnCarPlay ?? {}; } }; export const processColor = (c) => c;
     export const DeviceEventEmitter = { addListener: (ev, fn) => { (globalThis.__dee ??= []).push({ ev, fn }); return { remove() { globalThis.__dee = globalThis.__dee.filter((x) => x.fn !== fn); } }; } };`);
   const STORAGE = js(`export default { getItem: () => Promise.resolve(null), setItem: () => Promise.resolve(), removeItem: () => Promise.resolve(), multiRemove: () => Promise.resolve() };`);
   // useEffect / useRef delegate to globalThis.__react when a test renders a component (section AA); otherwise no-ops.
@@ -467,7 +471,7 @@ if (!process.env.CAR_FEED_ROOT) {
         return { url: stubFor(readFileSync(fileURLToPath(parent), "utf8"), spec), shortCircuit: true };
       }
       if (spec.startsWith(".") && /carPlayBootstrap\.ts$/.test(parent)) return { url: recorderFor(readFileSync(fileURLToPath(parent), "utf8"), spec), shortCircuit: true };
-      if (spec.startsWith(".") && /AndroidAutoRoot\.(cur|r3)\.mjs$/.test(parent)) {
+      if (spec.startsWith(".") && /AndroidAutoRoot\.(cur|r3|r4)\.mjs$/.test(parent)) {
         if (spec === "../locationPrivacy") return { url: g.__aaLpUrl, shortCircuit: true };            // the REAL gate, per run
         return { url: recorderFor(readFileSync(fileURLToPath(parent), "utf8"), spec), shortCircuit: true };
       }
@@ -604,79 +608,170 @@ if (!process.env.CAR_FEED_ROOT) {
     delete g.require;
   }
 
-  // ── AA · AndroidAutoRoot.tsx run for real through THREE car sessions in one JS process ──────────────────────────
-  // The root mounts once per process; CarPlaySession runs a new session into it (field: 5 of 21 AA process lifetimes had
-  // 2–3 sessions). Its head-unit calls go to the REAL locationPrivacy (Platform android), the rest are recorded.
-  // AA0 is the NEGATIVE CONTROL on round 3's root (732c8a6e): session 2 never asserts, so its walk-away is shared LIVE.
+  // ── AA · AndroidAutoRoot.tsx run for real, driven by the native receipts ─────────────────────────────────────────
+  // The root mounts once per process; CarPlaySession runs every car session into it (field: 5 of 21 AA process lifetimes
+  // had 2–3 sessions). Native, per session, with a live JS context (react-native-carplay patch): CarJsKeepAlive.acquire
+  // → `op=hold on=1 via=acquire`, then runApplication (the mount, first session only) and setCarContext → `op=ctx`; at
+  // the end didDisconnect (heard only by a MOUNTED root) and, for the last session, `op=hold on=0`. A new ReactContext
+  // under a live session (a reload, a car-started cold boot) → `op=hold on=1 via=init`, and for a reload nothing else.
+  // A session destroyed before any JS context existed emits nothing, but its one-shot listener still mounts the root
+  // and emits `op=ctx`. Head-unit calls go to the REAL locationPrivacy (Platform android); the rest are recorded.
   {
     const ts = (await import("typescript")).default;
     const { mkdtempSync: mkd, writeFileSync: wf, rmSync: rmf } = await import("node:fs");
-    const aaRun = async (src: string, tag: "cur" | "r3") => {
+    let aaN = 0;
+    const B79 = { setAaKeepAliveOptions() {} };   // a binary with CarJsKeepAlive (build 79) — build 78 has neither
+    const harness = async (src: string, tag: "cur" | "r3" | "r4", rn: object = B79) => {
       const dir = mkd(join(tmpdir(), "aa-root-"));
       const file = join(dir, `AndroidAutoRoot.${tag}.mjs`);
       wf(file, ts.transpileModule(src, { fileName: "AndroidAutoRoot.tsx", compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.Preserve } }).outputText);
-      g.__os = "android"; g.__calls = [] as string[]; g.__dee = [];
-      g.__aaLpUrl = new URL(`src/locationPrivacy.ts?aa=${tag}`, ROOT).href;
+      g.__os = "android"; g.__calls = [] as string[]; g.__dee = []; g.__rnCarPlay = rn;
+      g.__aaLpUrl = new URL(`src/locationPrivacy.ts?aa=${tag}-${++aaN}`, ROOT).href;
       const lp: any = await import(g.__aaLpUrl);
       await lp.hydrateLocationPrivacy();
       const disconnects: (() => void)[] = [];
       const CarPlay = { registerOnDisconnect: (f: () => void) => disconnects.push(f), unregisterOnDisconnect() {}, setRootTemplate() {} };
       class NavigationTemplate { c: unknown; constructor(c: unknown) { this.c = c; } updateTemplate() {} }
       g.require = (m: string) => { if (m === "react-native-carplay") return { CarPlay, NavigationTemplate }; throw new Error(`require ${m}`); };
-      const effects: (() => (void | (() => void)))[] = [];
-      g.__react = { useEffect: (fn: () => (void | (() => void))) => { effects.push(fn); }, useRef: (v: unknown) => ({ current: v }) };
-      const Root = (await import(pathToFileURL(file).href)).default;
-      Root();
-      const cleanups = effects.map((fn) => fn());
-      g.__react = null;
+      const mod: any = await import(pathToFileURL(file).href);   // module scope = registerAndroidAuto's require at bundle eval
+      let cleanups: unknown[] = [];
       const calls = g.__calls as string[];
       const count = (x: string) => calls.filter((c) => c === x).length;
-      const ctx = () => { for (const l of [...(g.__dee as any[])]) if (l.ev === "aaNativeTrace") l.fn({ msg: "op=ctx life=RESUMED forced=0 ee=1" }); };
-      const disconnect = () => { for (const f of disconnects) f(); };
       let p = { lat: 49.1, lng: -122.6 };
-      const drive = (secs: number) => { for (let k = 0; k < secs; k++) { t += 1000; p = { lat: p.lat + 20 / 111320, lng: p.lng }; lp.noteFix(p.lat, p.lng, 20, 0); } for (let k = 0; k < 10; k++) { t += 1000; lp.noteFix(p.lat, p.lng, 0, null); } };
-      const st = () => ({ raw: lp.headUnitAttachedRaw(), hu: lp.parkEndedByHeadUnit(), latch: lp.privacyDebug().latch });
-      const out: any = {};
-      drive(300); out.s1drive = st(); disconnect(); out.s1end = st();
-      t += 30 * 60_000;
-      ctx(); out.s2start = st();
-      for (const l of [...(g.__dee as any[])]) if (l.ev === "aaNativeTrace") l.fn({ msg: "op=hold on=1 via=acquire" });   // not a session start
-      drive(300);
-      const midShare = lp.shareablePosition({ lat: p.lat, lng: p.lng, speed: 20, heading: 0 });
-      out.s2live = midShare.share && midShare.lat === p.lat;
-      const car = { ...p }; disconnect(); out.s2end = st();
-      t += 60_000;
-      const w1 = { lat: car.lat + 60 / 111320, lng: car.lng };
-      const sh1 = lp.shareablePosition({ ...w1, speed: 3.3, heading: 0 }); lp.noteFix(w1.lat, w1.lng, 3.3, null);
-      t += 1000; const w2 = { lat: car.lat + 90 / 111320, lng: car.lng }; lp.noteFix(w2.lat, w2.lng, 7.2, null);
-      t += 1000; const w3 = { lat: car.lat + 95 / 111320, lng: car.lng };
-      const sh3 = lp.shareablePosition({ ...w3, speed: 3.3, heading: 0 }); lp.noteFix(w3.lat, w3.lng, 3.3, null);
-      out.walkLive = (sh1.share && sh1.lat === w1.lat) || (sh3.share && sh3.lat === w3.lat);
-      t += 10 * 60_000; ctx(); ctx(); out.s3start = st(); drive(120); disconnect(); out.s3end = st();
-      for (const c of cleanups) if (typeof c === "function") c();   // unmount after the last session
-      out.acquires = count(`../navNotification:acquireBgLocation("androidauto")`);
-      out.releases = count(`../navNotification:releaseBgLocation("androidauto")`);
-      out.surfaceOn = count(`../drawTelemetry:setCarSurfaceLive("androidauto",true)`);
-      out.surfaceOff = count(`../drawTelemetry:setCarSurfaceLive("androidauto",false)`);
-      delete g.require; g.__os = undefined;
-      rmf(dir, { recursive: true, force: true });
-      return out;
+      const h = {
+        lp,
+        mount() {
+          const effects: (() => (void | (() => void)))[] = [];
+          g.__react = { useEffect: (fn: () => (void | (() => void))) => { effects.push(fn); }, useRef: (v: unknown) => ({ current: v }) };
+          mod.default(); cleanups = effects.map((fn) => fn()); g.__react = null;
+        },
+        unmount() { for (const c of cleanups) if (typeof c === "function") c(); cleanups = []; },
+        trace(msg: string) { for (const l of [...(g.__dee as any[])]) if (l.ev === "aaNativeTrace") l.fn({ msg }); },
+        holdOn(via: string) { h.trace(`op=hold on=1 via=${via} n=1 task=1 fab=1 anim=1 host=RESUMED ctx=RESUMED mfr=test sdk=35`); },
+        holdOff() { h.trace("op=hold on=0 why=session-destroy dur=60 bg=0 stp=0 mntBg=0 chorStall=0 slp=0 lost=0 re=0 task=1 host=RESUMED"); },
+        ctx() { h.trace("op=ctx life=RESUMED forced=0 ee=1"); },
+        disconnect() { for (const f of disconnects) f(); },
+        /** A session's native end: didDisconnect (only a mounted root hears it), then the last owner's release. */
+        end() { h.disconnect(); h.holdOff(); },
+        drive(secs: number) { for (let k = 0; k < secs; k++) { t += 1000; p = { lat: p.lat + 20 / 111320, lng: p.lng }; lp.noteFix(p.lat, p.lng, 20, 0); } for (let k = 0; k < 10; k++) { t += 1000; lp.noteFix(p.lat, p.lng, 0, null); } },
+        st: () => ({ raw: lp.headUnitAttachedRaw(), hu: lp.parkEndedByHeadUnit(), latch: lp.privacyDebug().latch }),
+        /** 60 s after the end: a 12 km/h walking fix 60 m from the car, a 26 km/h glitch at 90 m, 12 km/h at 95 m. */
+        walk() {
+          const car = { ...p }; t += 60_000;
+          const w1 = { lat: car.lat + 60 / 111320, lng: car.lng };
+          const sh1 = lp.shareablePosition({ ...w1, speed: 3.3, heading: 0 }); lp.noteFix(w1.lat, w1.lng, 3.3, null);
+          t += 1000; const w2 = { lat: car.lat + 90 / 111320, lng: car.lng }; lp.noteFix(w2.lat, w2.lng, 7.2, null);
+          t += 1000; const w3 = { lat: car.lat + 95 / 111320, lng: car.lng };
+          const sh3 = lp.shareablePosition({ ...w3, speed: 3.3, heading: 0 }); lp.noteFix(w3.lat, w3.lng, 3.3, null);
+          const spot = lp.carSpot();
+          return { live: (sh1.share && sh1.lat === w1.lat) || (sh3.share && sh3.lat === w3.lat), spotMovedM: spot ? Math.round(Math.abs(spot.lat - car.lat) * 111320) : null };
+        },
+        shareLive() { const sh = lp.shareablePosition({ lat: p.lat, lng: p.lng, speed: 20, heading: 0 }); return sh.share && sh.lat === p.lat; },
+        acquires: () => count(`../navNotification:acquireBgLocation("androidauto")`),
+        releases: () => count(`../navNotification:releaseBgLocation("androidauto")`),
+        surfaceOn: () => count(`../drawTelemetry:setCarSurfaceLive("androidauto",true)`),
+        surfaceOff: () => count(`../drawTelemetry:setCarSurfaceLive("androidauto",false)`),
+        done() { delete g.require; g.__os = undefined; g.__rnCarPlay = undefined; rmf(dir, { recursive: true, force: true }); },
+      };
+      return h;
     };
-    const cur = await aaRun(read("src/carplay/AndroidAutoRoot.tsx"), "cur");
-    let r3: string | null = null;
-    try { r3 = execFileSync("git", ["show", "732c8a6e:frontend/src/carplay/AndroidAutoRoot.tsx"], { cwd: fileURLToPath(ROOT), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+    type H = Awaited<ReturnType<typeof harness>>;
+    // Three sessions in one process, phone-first: session 1 mounts the root; 2 and 3 arrive into the mounted root.
+    const threeSessions = async (h: H) => {
+      const out: any = {};
+      h.holdOn("acquire"); h.mount(); h.ctx();
+      h.drive(300); out.s1drive = h.st(); h.end(); out.s1end = h.st();
+      t += 30 * 60_000;
+      h.holdOn("acquire"); h.ctx(); out.s2start = h.st();
+      h.holdOn("join"); h.ctx();                                   // duplicate receipts start nothing
+      h.drive(300); out.s2live = h.shareLive(); h.end(); out.s2end = h.st();
+      out.walkLive = h.walk().live;
+      t += 10 * 60_000; h.holdOn("regrab"); h.ctx(); h.ctx(); out.s3start = h.st(); h.drive(120); h.end(); out.s3end = h.st();
+      h.unmount();                                                   // after the last session
+      out.acquires = h.acquires(); out.releases = h.releases(); out.surfaceOn = h.surfaceOn(); out.surfaceOff = h.surfaceOff();
+      h.done(); return out;
+    };
+    // A JS reload JOINS a live session: the new context hears only `op=hold on=1 via=init`; the root never mounts.
+    const reloadMidSession = async (h: H) => {
+      const out: any = {};
+      h.holdOn("init"); out.start = h.st();
+      h.drive(300); out.driveLive = h.shareLive();
+      h.end(); out.end = h.st();                                     // didDisconnect reaches no mounted root here
+      const w = h.walk(); out.walkLive = w.live; out.spotMovedM = w.spotMovedM;
+      out.acquires = h.acquires(); out.releases = h.releases();
+      h.done(); return out;
+    };
+    // A session destroyed before JS existed: nothing heard, then the one-shot listener mounts the root and sends op=ctx.
+    // Then a real session later in the same process.
+    const destroyedBeforeJs = async (h: H) => {
+      const out: any = {};
+      h.mount(); h.ctx(); out.afterMount = { ...h.st(), acquires: h.acquires(), releases: h.releases() };
+      t += 20 * 60_000;
+      h.holdOn("acquire"); h.ctx(); out.later = h.st(); h.drive(60); h.end(); out.laterEnd = h.st();
+      out.acquires = h.acquires(); out.releases = h.releases();
+      h.done(); return out;
+    };
+    const git = (rev: string, f: string) => { try { return execFileSync("git", ["show", `${rev}:frontend/${f}`], { cwd: fileURLToPath(ROOT), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } };
+    const curSrc = read("src/carplay/AndroidAutoRoot.tsx");
+    const cur = await threeSessions(await harness(curSrc, "cur"));
+    const r3 = git("732c8a6e", "src/carplay/AndroidAutoRoot.tsx");
     if (r3) {
-      const old = await aaRun(r3, "r3");
+      const old = await threeSessions(await harness(r3, "r3"));
       ok("AA0 NEGATIVE CONTROL (round 3 root, 732c8a6e): session 2 never asserts a head unit and its walk-away is shared LIVE",
         old.s2start.raw === false && old.s2end.latch === true && old.walkLive === true, JSON.stringify(old));
     } else console.log("  skip AA0 negative control: 732c8a6e unavailable");
-    ok("AA1 each connect asserts the head unit and clears the previous park (sessions 2 and 3 via op=ctx)",
+    ok("AA1 each connect asserts the head unit and clears the previous park (sessions 2 and 3 on their hold receipt)",
       cur.s2start.raw === true && cur.s2start.hu === false && cur.s3start.raw === true && cur.s3start.hu === false, JSON.stringify({ s2: cur.s2start, s3: cur.s3start }));
     ok("AA2 each disconnect witnesses the park and drops the drive's latch", [cur.s1end, cur.s2end, cur.s3end].every((x: any) => x.raw === false && x.hu === true && x.latch === false), JSON.stringify({ s1: cur.s1end, s2: cur.s2end, s3: cur.s3end }));
     ok("AA3 drive 2 is shared live while connected", cur.s2live === true);
     ok("AA4 the walk after session 2 stays at the car spot (a 26 km/h glitch included)", cur.walkLive === false);
-    ok("AA5 one acquire and one release per session (3 + 3; a duplicate op=ctx and a non-ctx trace start nothing; the unmount after the last disconnect releases nothing twice)",
+    ok("AA5 one acquire and one release per session (3 + 3; duplicate hold / op=ctx receipts start nothing; the unmount after the last session releases nothing twice)",
       cur.acquires === 3 && cur.releases === 3 && cur.surfaceOn === 3 && cur.surfaceOff === 3, JSON.stringify({ a: cur.acquires, r: cur.releases, on: cur.surfaceOn, off: cur.surfaceOff }));
+
+    const r4 = git("8a6fa0aa", "src/carplay/AndroidAutoRoot.tsx");
+    const rl = await reloadMidSession(await harness(curSrc, "cur"));
+    if (r4) {
+      const old = await reloadMidSession(await harness(r4, "r4"));
+      ok("AA6-0 NEGATIVE CONTROL (round 4 root, 8a6fa0aa): a reload that joins a live session asserts nothing, its end is witnessed by nobody, and the walk is shared LIVE",
+        old.start.raw === false && old.end.hu === false && old.end.latch === true && old.walkLive === true, JSON.stringify(old));
+    } else console.log("  skip AA6-0 negative control: 8a6fa0aa unavailable");
+    ok("AA6 a JS reload mid-session: `op=hold on=1 via=init` starts the session; its end is witnessed; the walk stays at the car spot; 1 acquire + 1 release",
+      rl.start.raw === true && rl.driveLive === true && rl.end.raw === false && rl.end.hu === true && rl.end.latch === false && rl.walkLive === false && rl.spotMovedM === 0
+        && rl.acquires === 1 && rl.releases === 1, JSON.stringify(rl));
+
+    const db = await destroyedBeforeJs(await harness(curSrc, "cur"));
+    if (r4) {
+      const old = await destroyedBeforeJs(await harness(r4, "r4"));
+      ok("AA7-0 NEGATIVE CONTROL (round 4 root, 8a6fa0aa): the mount for a session destroyed before JS acquires with no release and asserts a head unit",
+        old.afterMount.acquires === 1 && old.afterMount.releases === 0 && old.afterMount.raw === true, JSON.stringify(old));
+    }
+    ok("AA7 a session destroyed before JS started: the mount and its op=ctx acquire nothing and assert nothing; the next real session pairs 1 + 1",
+      db.afterMount.acquires === 0 && db.afterMount.raw === false && db.later.raw === true && db.laterEnd.raw === false && db.laterEnd.hu === true
+        && db.acquires === 1 && db.releases === 1, JSON.stringify(db));
+
+    // Car-started cold boot: the init receipt BEFORE the mount, and (order is not guaranteed) AFTER it.
+    const orders: string[] = []; let ordersOk = true;
+    for (const initFirst of [true, false]) {
+      const h = await harness(curSrc, "cur");
+      let beforeReceipt: any = null;
+      if (initFirst) { h.holdOn("init"); h.mount(); h.ctx(); } else { h.mount(); h.ctx(); beforeReceipt = h.st(); h.holdOn("init"); }
+      const started = h.st(); h.drive(60); h.end(); const ended = h.st();
+      const a = h.acquires(), r = h.releases(); h.done();
+      const good = started.raw === true && ended.raw === false && ended.hu === true && a === 1 && r === 1 && (initFirst || beforeReceipt.raw === false);
+      if (!good) ordersOk = false;
+      orders.push(`${initFirst ? "init→mount" : "mount→init"}: start=${started.raw} end=${ended.hu} a=${a} r=${r}${initFirst ? "" : ` preReceipt=${beforeReceipt.raw}`}`);
+    }
+    ok("AA8 car-started cold boot: the init receipt starts the session whether it lands before or after the mount (1 + 1)", ordersOk, orders.join(" · "));
+
+    // A binary with no hold receipts (build 78): the mount and op=ctx start sessions as before.
+    {
+      const h = await harness(curSrc, "cur", {});
+      h.mount(); const s1 = h.st(); h.drive(60); h.disconnect(); const e1 = h.st();
+      t += 10 * 60_000; h.ctx(); const s2 = h.st(); h.drive(60); h.disconnect(); const e2 = h.st();
+      const a = h.acquires(), r = h.releases(); h.done();
+      ok("AA9 no hold receipts (no CarJsKeepAlive): the mount and op=ctx start the sessions, each disconnect ends one (2 + 2)",
+        s1.raw && !e1.raw && e1.hu && s2.raw && !e2.raw && e2.hu && a === 2 && r === 2, JSON.stringify({ s1, e1, s2, e2, a, r }));
+    }
   }
 
   // ── M · map.tsx's phone-watcher effect, extracted from the source and run ───────────────────────────────────────

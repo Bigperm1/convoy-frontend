@@ -309,8 +309,9 @@ export function noteCarConnected(connected: boolean, source: HeadUnitSource = "m
   // (map.tsx, 2026-08-05) — but a disconnect is unambiguous, so it may bypass that gate.
   // Cleared by the next CONNECT and by a PROVEN drive-away (noteFix + src/parkRearm.ts — one fast fix no longer does
   // it). A head unit unplugged mid-drive therefore pins the unplug-point spot until that proof — measured at 1 Hz:
-  // 24–31 s pulling away, 23–71 s on stop-sign grids, 52–103 s in stop-and-go, 4–11 min in jams averaging 0.6–1.3 m/s
-  // (src/parkRearm.ts header) — then the drive goes live again (privacy-favouring; CARPLAY.md §6c).
+  // 24–31 s pulling away, 51–71 s on stop-sign grids, 73–103 s in stop-and-go (src/parkRearm.ts header) — then the
+  // drive goes live again. In slow congestion (traffic averaging under 250 m per 2 min) it stays pinned until traffic
+  // averages above that for ~2 min or a head unit reconnects (privacy-favouring; CARPLAY.md §6c).
   // ⚠ Transition-based on purpose: a writer repeating `false` (or `true`) is a no-op
   // here, so this stays correct even if a spurious repeat-writer ever returns.
   if (_carConnected && !next) {

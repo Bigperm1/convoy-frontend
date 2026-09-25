@@ -6,7 +6,7 @@
 import React from "react";
 import { Image, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { GlassFill, hudTint } from "../Glass";
+import { PANEL_FLOOR, PANEL_BORDER, PANEL_RADIUS } from "../panelFloor";
 import { PressableScale } from "../ui/PressableScale";
 import { useAppSkin } from "../appSkin";
 import { haptics } from "../haptics";
@@ -69,7 +69,6 @@ export default function HazardCard({ hazard, mode, mine, anchorBottom, onClose, 
         onLayout={(e) => { const h = Math.round(e.nativeEvent.layout.height); if (h > 0 && h !== cardH) setCardH(h); }}
         style={[styles.card, { width: cardW, left: Math.round((winW - cardW) / 2), bottom }]}
       >
-        <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
         <View style={styles.head}>
           <View style={[styles.tileFace, { borderColor: rgba(paint.bright, 0.7), backgroundColor: rgba(paint.bright, 0.12) }]}>
             <Image source={HAZARD_ART[paint.glyph][metal]} style={[styles.glyph, { tintColor: paint.bright }]} resizeMode="contain" />
@@ -115,8 +114,8 @@ export default function HazardCard({ hazard, mode, mine, anchorBottom, onClose, 
 const styles = StyleSheet.create({
   // = HazardSheet styles.card (= WeatherHUD styles.forecastCard): floor, hairline, radius, shadow.
   card: {
-    position: "absolute", paddingHorizontal: 12, paddingTop: 12, paddingBottom: 12, borderRadius: 16, overflow: "hidden",
-    backgroundColor: "rgba(24,24,28,0.66)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)",
+    position: "absolute", paddingHorizontal: 12, paddingTop: 12, paddingBottom: 12, borderRadius: PANEL_RADIUS, overflow: "hidden",
+    backgroundColor: PANEL_FLOOR, borderWidth: StyleSheet.hairlineWidth, borderColor: PANEL_BORDER,   // the shared floor (src/panelFloor.ts)
     ...Platform.select({ ios: { shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } }, android: { elevation: 10 } }),
   },
   head: { flexDirection: "row", alignItems: "center", gap: 12 },

@@ -20,7 +20,7 @@
 // pop (opacity + 12 pt rise + 0.94 scale). WeatherHUD.tsx styles.forecastCard is the reference — change both or neither.
 import React, { useEffect, useRef, useState } from "react";
 import { Image, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { GlassFill, hudTint } from "../Glass";
+import { PANEL_FLOOR, PANEL_BORDER, PANEL_RADIUS } from "../panelFloor";
 import { PressableScale } from "../ui/PressableScale";
 import { useAppSkin } from "../appSkin";
 import { haptics } from "../haptics";
@@ -164,7 +164,6 @@ export default function HazardSheet({ visible, onClose, onReport, onCompass, dis
           },
         ]}
       >
-        <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
         <Text maxFontSizeMultiplier={1.2} style={styles.title}>Report</Text>
         <View style={styles.row}>
           {PANEL_TILES.map((t) => (
@@ -204,14 +203,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAD_H,
     paddingTop: 12,
     paddingBottom: 12,
-    borderRadius: 16,
+    borderRadius: PANEL_RADIUS,
     overflow: "hidden",
-    // Translucent frosted floor. The card pops inside an animated (transform + opacity) view, where the iOS-26
-    // GlassView won't composite — so this View bg is what actually renders the frosted panel (readable), with the
-    // GlassFill adding real glass on top wherever it does paint. SAME VALUE as the weather forecast card.
-    backgroundColor: "rgba(24,24,28,0.66)",
+    // THE shared panel floor (src/panelFloor.ts) — the weather forecast card's, and no GlassFill on top so the two read
+    // identical (the GlassView composites here but not in the forecast card's animated view). Jeff, 2026-09-25.
+    backgroundColor: PANEL_FLOOR,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderColor: PANEL_BORDER,
     ...Platform.select({
       ios: { shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
       android: { elevation: 10 },

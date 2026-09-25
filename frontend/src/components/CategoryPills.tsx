@@ -11,12 +11,13 @@
 // chip ↔ row ↔ map pin read as one family. Tapping the active chip again opens (and folds) the results
 // list; the list's ✕ or the grid icon clears the pins.
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Pressable, Animated, Easing } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Animated, Easing } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { GOOGLE_MAPS_KEY } from "../api";
 import { getSettings } from "../settings";
 import { passesGasFilters, type Octane } from "../gasJockey";
-import { GlassFill, hudTint, drawerTint } from "../Glass";
+import { GlassFill, hudTint } from "../Glass";
+import { PANEL_FLOOR, PANEL_BORDER, PANEL_RADIUS } from "../panelFloor";
 import { skin } from "../tierTheme";
 import { poiColors } from "../poiPalette";
 import { useWaveMetal, useWaveY } from "../ui/SkinWave";
@@ -196,7 +197,18 @@ type Props = {
 export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  // The More panel (2026-09-25, Jeff: "switch the more panel for the gas/food etc to slide down under the neon food/gas
+  // icons and make sure it layers over the version pill"): no bottom sheet any more — an overlay that slides down from
+  // under the chip row, absolutely positioned so it LAYERS over the crew / version pill instead of pushing it.
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!moreOpen) return;
+    moreAnim.setValue(0);
+    Animated.timing(moreAnim, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [moreOpen, moreAnim]);
+  // The chip row's measured height: the drop-down and the More panel hang ROW_GAP below it.
+  const [rowH, setRowH] = useState(ROW_H_GUESS);
   // Results dropdown: a second tap on the active chip (or a long press) shows it; a tap just drops pins.
   const [listOpen, setListOpen] = useState(false);
   // Results for the active category — drives the dropdown list (and the pins,
@@ -269,6 +281,7 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         // row a thumb that drifts ~10 pt hands the touch to the scroller before 250 ms, so the hold was
         // unreliable (sim-reproduced 2026-09-23; Jeff picked "tap the active chip again" over hold-only).
         onPress={() => {
+          setMoreOpen(false);
           if (activeKey === cat.key) { setListOpen((v) => !v); return; }
           setListOpen(false); run(cat);
         }}
@@ -290,17 +303,18 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
   };
 
   return (
-    <View ref={wavePos.ref} onLayout={wavePos.onLayout} style={styles.wrap} pointerEvents="box-none">
+    <View ref={wavePos.ref} onLayout={wavePos.onLayout} style={[styles.wrap, (moreOpen || (activeKey && listOpen)) ? styles.wrapRaised : null]} pointerEvents="box-none">
       <ScrollView
         horizontal
+        onLayout={(e) => { const h = Math.round(e.nativeEvent.layout.height); if (h > 0 && h !== rowH) setRowH(h); }}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
         keyboardShouldPersistTaps="handled"
       >
         {PRIMARY.map(renderPill)}
-        {/* More pill — always last, opens the overflow sheet. */}
-        <PressableScale testID="cat-pill-more" hitSlop={0} onPress={() => setMoreOpen(true)} style={styles.chip}>
-          <View style={[styles.chipCircle, { borderColor: "rgba(255,255,255,0.28)" }]}>
+        {/* More pill — always last, toggles the overflow panel that slides down under the row. */}
+        <PressableScale testID="cat-pill-more" hitSlop={0} onPress={() => { setListOpen(false); setMoreOpen((v) => !v); }} style={styles.chip}>
+          <View style={[styles.chipCircle, { borderColor: moreOpen ? "#F4F4F4" : "rgba(255,255,255,0.28)" }]}>
             <GlassFill tintColor={hudTint()} style={{ borderRadius: CHIP_R, overflow: "hidden" }} />
             <MaterialCommunityIcons name="dots-horizontal" size={24} color="#F4F4F4" />
           </View>
@@ -314,10 +328,9 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         <Animated.View
           style={[
             styles.dropdown,
-            { opacity: dropAnim, transform: [{ translateY: dropAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }] },
+            { top: rowH + ROW_GAP, opacity: dropAnim, transform: [{ translateY: dropAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }] },
           ]}
         >
-          <GlassFill tintColor={drawerTint()} style={StyleSheet.absoluteFill} />
           <View style={styles.dropHeader}>
             <Text maxFontSizeMultiplier={1} style={styles.dropTitle}>{activeCat ? `${activeCat.label} Nearby` : "Nearby"}</Text>
             <TouchableOpacity onPress={closeDropdown} hitSlop={10} testID="results-close">
@@ -385,33 +398,40 @@ export default function CategoryPills({ origin, onResults, onSelect }: Props) {
         </Animated.View>
       )}
 
-      <Modal visible={moreOpen} transparent animationType="slide" onRequestClose={() => setMoreOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setMoreOpen(false)}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
-            <View style={styles.grip} />
-            <Text maxFontSizeMultiplier={1} style={styles.sheetTitle}>More places</Text>
-            <View style={styles.grid}>
-              {MORE.map((cat) => (
-                <TouchableOpacity
-                  key={cat.key}
-                  testID={`cat-more-${cat.key}`}
-                  activeOpacity={0.8}
-                  style={styles.gridItem}
-                  onPress={() => { setMoreOpen(false); run(cat); }}
-                >
-                  <View style={[styles.gridIcon, { borderColor: poiColors(cat.key).bright }]}>
-                    <MaterialCommunityIcons name={cat.icon} size={22} color={poiColors(cat.key).bright} />
-                  </View>
-                  <Text maxFontSizeMultiplier={1} style={styles.gridLabel} numberOfLines={1}>{cat.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity onPress={() => setMoreOpen(false)} style={styles.doneBtn}>
-              <Text maxFontSizeMultiplier={1} style={styles.doneText}>Done</Text>
+      {/* The More panel — slides down from under the chip row, layered over the crew / version pill (Jeff, 2026-09-25).
+          The same floor as every other map panel (src/panelFloor.ts); a category tap runs it and folds the panel. */}
+      {moreOpen && (
+        <Animated.View
+          testID="cat-more-panel"
+          style={[
+            styles.morePanel,
+            { top: rowH + ROW_GAP, opacity: moreAnim, transform: [{ translateY: moreAnim.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }] },
+          ]}
+        >
+          <View style={styles.dropHeader}>
+            <Text maxFontSizeMultiplier={1} style={styles.dropTitle}>More places</Text>
+            <TouchableOpacity onPress={() => setMoreOpen(false)} hitSlop={10} testID="more-close">
+              <MaterialCommunityIcons name="close" size={20} color="#9A9A9E" />
             </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </View>
+          <View style={styles.grid}>
+            {MORE.map((cat) => (
+              <TouchableOpacity
+                key={cat.key}
+                testID={`cat-more-${cat.key}`}
+                activeOpacity={0.8}
+                style={styles.gridItem}
+                onPress={() => { setMoreOpen(false); setListOpen(false); run(cat); }}
+              >
+                <View style={[styles.gridIcon, { borderColor: poiColors(cat.key).bright }]}>
+                  <MaterialCommunityIcons name={cat.icon} size={22} color={poiColors(cat.key).bright} />
+                </View>
+                <Text maxFontSizeMultiplier={1} style={styles.gridLabel} numberOfLines={1}>{cat.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -424,9 +444,16 @@ const CHIP_R = 14;
 /** The results-row badge: the chip's twin, smaller — the H menu's own 36 pt / 10 pt row tiles. */
 const BADGE_D = 36;
 const BADGE_R = 10;
+/** The chip row's height before it is measured (chip 50 + gap 5 + label ~14). */
+const ROW_H_GUESS = 70;
+/** Air between the chip row and a panel hanging under it. */
+const ROW_GAP = 8;
 
 const styles = StyleSheet.create({
   wrap: { marginTop: 8 },
+  // While a panel hangs under the row the whole block sits ABOVE its later siblings in the top bar (the crew / version
+  // pill is zIndex 5), so the panel layers over the pill instead of being drawn under it.
+  wrapRaised: { zIndex: 40, elevation: 40 },
   // Chips sit as close as the Crew button and the compass do (Jeff, 2026-09-23: "make the icons closer
   // together… same space as the crew/compass" — map.tsx fabStack gap is 10): the chip box is the circle
   // plus 3 pt a side, 4 pt apart, so circle edges are 10 pt apart. Labels run a little wider than the box
@@ -447,18 +474,17 @@ const styles = StyleSheet.create({
   // ran together at 66 wide on the sim); 11 pt keeps "Car Repair" inside it.
   chipLabel: { color: "#C7C7CC", fontSize: 11, fontWeight: "600", letterSpacing: 0.1, width: CHIP_D + 10, textAlign: "center" },
   chipLabelActive: { color: "#F4F4F4" },
-  // ===== "More" bottom sheet =====
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
-  sheet: {
-    backgroundColor: "#15171A",
-    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28,
-    borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)",
+  // ===== The More panel — an overlay under the chip row (was a bottom sheet until 2026-09-25) =====
+  morePanel: {
+    position: "absolute", left: 0, right: 0,
+    backgroundColor: PANEL_FLOOR, borderRadius: PANEL_RADIUS, overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: PANEL_BORDER,
+    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4,
+    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 8 },
+    elevation: 16, zIndex: 50,
   },
-  grip: { width: 38, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.25)", alignSelf: "center", marginBottom: 14 },
-  sheetTitle: { color: "#F4F4F4", fontSize: 18, fontWeight: "700", marginBottom: 14, letterSpacing: -0.2 },
-  grid: { flexDirection: "row", flexWrap: "wrap" },
-  gridItem: { width: "25%", alignItems: "center", marginBottom: 18 },
+  grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 8 },
+  gridItem: { width: "25%", alignItems: "center", marginBottom: 14 },
   gridIcon: {
     width: CHIP_D, height: CHIP_D, borderRadius: CHIP_R,   // the chip's square, so More reads as more chips
     alignItems: "center", justifyContent: "center",
@@ -467,20 +493,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   gridLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: "600", textAlign: "center" },
-  doneBtn: { marginTop: 6, alignSelf: "center", paddingHorizontal: 22, paddingVertical: 10, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)" },
-  doneText: { color: "#F4F4F4", fontWeight: "600", fontSize: 14 },
 
   // ===== Results dropdown =====
   dropdown: {
-    marginTop: 8,
-    alignSelf: "flex-start",
+    // An overlay under the chip row (2026-09-25) — it no longer pushes the crew / version pill down; it layers over it.
+    position: "absolute", left: 0,
     width: "92%", maxWidth: 380,
-    // Lighter translucent floor (was 0.97 opaque) so it reads as frosted glass; it
-    // pops in inside an animated view where the real GlassView can't composite, so
-    // this floor + a hairline is the panel. overflow clips the GlassFill.
-    backgroundColor: "rgba(20,21,24,0.72)",
-    borderRadius: 16, overflow: "hidden",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)",
+    // THE shared panel floor (src/panelFloor.ts) — the weather forecast card's.
+    backgroundColor: PANEL_FLOOR,
+    borderRadius: PANEL_RADIUS, overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: PANEL_BORDER,
     paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8,
     shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 8 },
     elevation: 16, zIndex: 50,

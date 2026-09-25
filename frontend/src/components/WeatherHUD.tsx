@@ -6,6 +6,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { WeatherCondition, ForecastDay } from "../weatherLayer";
 import { weatherKind, windDirectionLabel, type WeatherKind } from "../weatherLayer";
 import { GlassFill, hudTint, glassLift } from "../Glass";
+import { PANEL_FLOOR, PANEL_BORDER, PANEL_RADIUS } from "../panelFloor";
 import { PressableScale } from "../ui/PressableScale";
 import { COLORS } from "../theme";
 
@@ -243,15 +244,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 16,
+    borderRadius: PANEL_RADIUS,
     overflow: "hidden",
-    // Translucent frosted floor. The card pops out inside an animated (transform +
-    // opacity) view, where the iOS-26 GlassView won't composite — so this View bg
-    // is what actually renders the frosted panel (readable), with the GlassFill
-    // adding real glass on top wherever it does paint.
-    backgroundColor: "rgba(24,24,28,0.66)",
+    // Translucent frosted floor — THE floor every map panel shares (src/panelFloor.ts). The card pops out inside an
+    // animated (transform + opacity) view, where the iOS-26 GlassView won't composite — so this View bg is what actually
+    // renders the frosted panel (readable), with the GlassFill adding real glass on top wherever it does paint.
+    backgroundColor: PANEL_FLOOR,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderColor: PANEL_BORDER,
     ...Platform.select({
       ios: { shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
       android: { elevation: 10 },

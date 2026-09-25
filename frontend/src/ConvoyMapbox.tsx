@@ -1385,6 +1385,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   const camApplyBusy = useRef(false);
   const firstCamDoneRef = useRef(false);
   const lastCamAt = useRef(0);
+  // The frame a return fly is flying TO (src/returnFly.ts): the landing push seeds the camera from it and glides on
+  // toward the live target, so a chase target that moved during the 1.8 s cannot cut at touchdown (Codex, 09-24).
+  const flyDestRef = useRef<{ zoom: number; pitch: number; heading: number | undefined } | null>(null);
   // cam-probe bookkeeping (see pushCam). Seeded far away so the first push logs once.
   const camProbeAt = useRef(0);
   const camProbeZoom = useRef(-99);
@@ -1582,6 +1585,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
         const liveSpeed = typeof speedRef.current === 'number' ? speedRef.current : speedMs;
         const aim = predictAhead(la, ln, flyCarHdg, liveSpeed, RETURN_FLY_MS);
         const flyHeading = (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : flyCarHdg;
+        flyDestRef.current = { zoom: c.zoomLevel, pitch: c.pitch, heading: typeof flyHeading === 'number' ? flyHeading : undefined };
         try {
           logEvent(`cam-return-fly surf=${probeRole} ms=${RETURN_FLY_MS} z=${Number(c.zoomLevel).toFixed(2)} pitch=${Math.round(c.pitch)} hdg=${typeof flyHeading === 'number' ? Math.round(flyHeading) : 'null'} spd=${(typeof speedMs === 'number' ? speedMs : 0).toFixed(1)}`);
         } catch {}
@@ -1606,9 +1610,13 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // very next frame resumes the slow automatic glide.
     const userZoomed = !!zoomSnapRef?.current;
     if (userZoomed && zoomSnapRef) zoomSnapRef.current = false;
+    // A landing seeds zoom/pitch from the frame the fly ended on (not today's target, which may have moved during the
+    // fly) and lets the glide carry the camera to the live target from there.
+    const landSeed = landedSnap ? flyDestRef.current : null;
+    if (landedSnap) flyDestRef.current = null;
     if (snap || userZoomed || landedSnap || camZoom.current == null || camPitch.current == null) {
-      camZoom.current = c.zoomLevel;
-      camPitch.current = c.pitch;
+      camZoom.current = landSeed ? landSeed.zoom : c.zoomLevel;
+      camPitch.current = landSeed ? landSeed.pitch : c.pitch;
       camZoomGoal.current = c.zoomLevel;
       camPitchGoal.current = c.pitch;
     } else {
@@ -1635,7 +1643,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const carHdg = typeof hdg === 'number' ? hdg : c.heading;
     let camHeading = carHdg;
     if (NOSE_LEAD_IN_ENABLED && typeof carHdg === 'number') {
-      if (snap || userZoomed || landedSnap || camHdgLag.current == null) camHdgLag.current = carHdg;
+      if (snap || userZoomed || landedSnap || camHdgLag.current == null) camHdgLag.current = (landSeed && typeof landSeed.heading === 'number') ? landSeed.heading : carHdg;
       else {
         const k = 1 - Math.exp(-dt / CAM_HEADING_LAG_MS);
         let h = camHdgLag.current + angDelta(camHdgLag.current, carHdg) * k;

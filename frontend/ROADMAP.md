@@ -1066,6 +1066,17 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-BZ `968c7ab8` (code `976e8734`, 2026-09-24 23:43 PDT, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"; KEY_PRESENT=1
+  iOS + Android) — the PHONE Hazards button.** It had none: the report drawer has been dormant since 07-23 and hazards were voice-only,
+  so the head-unit panel broke the four-surfaces rule on its own. `src/components/HazardSheet.tsx` + a Hazards FAB in `map.tsx` between
+  Crew and the compass → a Report sheet, Police / Crash / Hazard / Traffic in the driver's metal (the panel's Apple-symbol glyphs from
+  `assets/carplay-glyphs/report/`), posting through the existing `reportHazard(kind)`; `ReportToast` names the kind. Codex ×3 (close only
+  on the transition INTO turn-by-turn, an in-flight guard, tiles hitSlop 0). Also: the 24 Report PNGs were mis-cropped from the bake
+  sheet (police_diamond.png was the whole sheet) and the base64 head-unit icons baked from them in OTA-BX/BY were garbage — never seen,
+  no head unit connected since; `gen_b.py` now renders each glyph on its own canvas with real mask cut-outs and `carButtonIcons.ts` is
+  re-baked. Gates: `hazard_panel_test` D1–D6 (phone), 58/58 sim-qc, typecheck, eslint 0, trap-check, doc-check, nav-lock PASS (no
+  relock). Sim receipt: the sheet rendered with the diamond glyphs (iPhone 16 Pro, bundle-swapped). Owed: a `hazard-panel pick
+  surf=phone` row from a real phone.
 - **✅ PUBLISHED in OTA-BY `bfb8316a` (code `93a0ce41`, 2026-09-24 22:52 PDT, Jeff: "ship the fold fix"; KEY_PRESENT=1 iOS + Android) — THE
   FOLD (John Mungai's 18:57 CarPlay photo, "the car under the route line"; built `2cd2521a` on `claude/ribbon-fold-0924`, cherry-picked as
   `7455ee86`, relocked ×2 under his words, 42 approvals).** His reroute went west 11 m, right onto King George, U-turned 239 m up and came

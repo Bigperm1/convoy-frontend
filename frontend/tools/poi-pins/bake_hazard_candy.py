@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bake_hazard_candy.py — the Hazards FAB / CarPlay map-button triangle in the CANDY finish the crew and 2D/3D glyphs wear
+"""bake_hazard_candy.py — the Hazards FAB triangle (and the source the head-unit cut is baked from — bake_car_hazard_icons.py) in the CANDY finish the crew and 2D/3D glyphs wear
 (Jeff, 2026-09-25: "the hazard on the fab doesn't have the same type of effect as the 3d or crew glyphs"): a light-to-deep
 vertical ramp in the metal, a gloss band on the upper half, a thin dark edge and a soft drop shadow, the bang punched out.
 132×132 px = 44 pt @3x — the same box as assets/images/premium/*_candy*.png and the CarPlay icons.

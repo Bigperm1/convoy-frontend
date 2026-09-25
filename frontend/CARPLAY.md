@@ -151,8 +151,8 @@ Exact at 240/280/320pt. **If you change `NAV_STACK_BOTTOM`, `TURN_ROW_H` or `NAV
 Flow: `onMapButtonPressed`/`onBarButtonPressed` → `handleCarMapButton`/`handleCarBarButton`
 (carActions) → `emitCarGesture` → `CarMapView`'s gesture subscription.
 Android Auto mirrors the same ids (`aaMapButtons`); its Report grid is `createTemplate('grid')` + `pushTemplate`, the
-press arrives as `gridButtonPressed` with our template id, and `backButtonPressed` pops it (androidx tints the tile
-art white until a native tinted-icon path ships).
+press arrives as `gridButtonPressed` with our template id, and `backButtonPressed` pops it (HYPOTHESIS, never seen on a
+unit or the DHU: the androidx host tints the tile art white — our bridge's `parseCarIcon` sets no tint).
 The phone has the same panel (2026-09-24, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"): a Hazards FAB on TOP (Hazards · 2D/3D · Crew — the head unit's column minus the mic; the compass is a tile inside the panel on the phone too, 2026-09-25); the Report panel (`src/components/HazardSheet.tsx`) floats ABOVE that stack, centred, on the weather forecast card's floor, with
 the same five tiles as the head units (`hazardPanel.ts` `HAZARD_TILES`, the Compass tile included). A tile reports through
 `map.tsx reportHazard` (the voice intents' path). The pins are the same baked category-coloured teardrops on every surface

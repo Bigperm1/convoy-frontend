@@ -29,7 +29,7 @@ votes delete it for everyone. Reports expire by kind (§5).
 | CarPlay map buttons | `src/carplay/carActions.ts` `carMapButtonConfig()` (used by `carPlayBootstrap.ts` cold, `ConvoyCarPlay.tsx` warm) | Array: `car-comms` · `car-hazards` · `car-view` · `car-crew` = top → bottom. Panning mode hides from the END, so the mic and Hazards survive a pan. |
 | CarPlay grid | `openHazardPanel` → `getHazardTemplateIOS` (`GridTemplate`, id `hairpin-car-hazards`, title "Report") | The same five tiles (`hazardGridButtons`). The four report tiles draw the kind-coloured `hz_*_neon` glyph (the phone's tinted glyph, §3), the Compass its metal. One template instance per session. |
 | Android Auto map strip | `aaMapButtons()` (used by `ConvoyCarPlay.tsx`, `AndroidAutoRoot.tsx`) | `car-zoom-in` · `car-zoom-out` · `car-hazards` · `car-crew` — Hazards above Crew. The action strip (`AA_ACTION_STRIP`: End · Search · view · comms) has no Hazards. |
-| Android Auto grid | `openHazardPanel` → `bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(...))` + `pushTemplate` | The same five tiles, `headerAction: { type: 'back' }`. androidx tints map-strip icons white (code comment; no native tint patch). HYPOTHESIS, never seen on a unit: grid tile art is tinted white too (CARPLAY.md §4). |
+| Android Auto grid | `openHazardPanel` → `bridge.createTemplate(HAZARD_TEMPLATE_ID, hazardGridConfigAA(...))` + `pushTemplate` | The same five tiles, `headerAction: { type: 'back' }`. androidx tints map-strip icons white (code comment; no native tint patch). The four report tiles get the kind-coloured `hz_*_neon` icons like CarPlay. Our bridge sets no tint (`RCTTemplate.kt` `parseCarIcon`); HYPOTHESIS, never seen on a unit or the DHU: the host tints grid tile art white anyway (CARPLAY.md §4). |
 | Voice | `map.tsx` `voiceBus.subscribe` | Intents `report_police` / `report_accident` / `report_road` / `report_traffic` → `reportHazard(kind, { fromVoice: true })` (spoken acknowledgement). The backend emits them from the agent tool `report_hazard` and a keyword fallback. |
 
 Dispatch: warm CarPlay `onMapButtonPressed` → `handleCarMapButton(id, 'warm')`; cold → `handleCarMapButton(id, 'cold')`;
@@ -67,7 +67,7 @@ Backend kinds: `server.py` `create_hazard` rejects anything outside `("police", 
   `HAZARD_FAB_ART`, 34 pt) — the finish of the crew and 2D/3D buttons. The grid tile keeps the flat glyph. **Head units
   wear their own cut** (Jeff, 2026-09-25, CarPlay photo: "a little, little smaller and it's the same distance for each three
   points to the edge of the circle"): the same triangle centred on its circumcentre, all three points at 0.80 of the 44 pt
-  box (the phone's PNG reaches 0.98 at the base corners, which touched CarPlay's circle). The phone FAB is unchanged. The static,
+  box's half-width (≈ 17.5 pt from the centre) (the phone's PNG reaches 0.98 at the base corners, which touched CarPlay's circle). The phone FAB is unchanged. The static,
   value-locked `CAR_MAP_BUTTON_CONFIG` / `AA_MAP_BUTTONS` still reference the flat `CAR_ICON_HAZARDS`; the live builders
   (`carMapButtonConfig()`, `aaMapButtons()`) are what the templates use.
 - **No speed-camera tile.** `hz_camera` art exists but the backend has no such kind (gate A4). Adding it = backend kind +
@@ -217,7 +217,8 @@ those from field conclusions.
   alpha and the `hazardPalette.ts` → `poiPalette.ts` bright colour. Re-run it after any palette or glyph change.
 - **Report-tile glyphs:** masters `assets/carplay-glyphs/report/gen_b.py` `glyph()` (64-unit SVG, cut-outs are real mask
   holes); render EACH glyph on its own 256 px transparent canvas with headless Chrome. Head-unit icons = `sips -Z 132`
-  of those PNGs, base64 into the `CAR_ICON_HZ_*` constants (manual). **Never crop a bake sheet with `sips --cropOffset`**
+  of those PNGs, base64 into the `CAR_ICON_HZ_*_{BRAND,PREMIUM,ULTRA,DIAMOND}` constants (manual) — then re-run
+  `bake_car_hazard_icons.py`, because the `_NEON` grid icons are derived from the BRAND glyph (gate H1 fails until you do). **Never crop a bake sheet with `sips --cropOffset`**
   — that shipped garbage Police / head-unit icons in OTA-BX/BY (fixed in `976e8734`).
 
 ## 13 · Nav-lock touchpoints (`tools/sim-qc/data/nav-lock.json`)

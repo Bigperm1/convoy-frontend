@@ -11,9 +11,9 @@ sheet and crop it with `sips --cropOffset` — that produced the mis-cropped Pol
 OTA-BX/BY (fixed in `976e8734`). No rsvg/cairosvg/sharp on the build Mac; Chrome is the renderer.
 
 Wired since OTA-BX (2026-09-24): the phone reads these PNGs (`src/components/HazardSheet.tsx` `HAZARD_ART`); the head units
-carry them as base64 in `src/carplay/carButtonIcons.ts` (`CAR_ICON_HZ_*`, `sips -Z 132` → base64, pasted by hand — no script
-writes them). The grid's four REPORT tiles use kind-coloured copies instead (`CAR_ICON_HZ_*_NEON`, written by
+carry them as base64 in `src/carplay/carButtonIcons.ts` (`CAR_ICON_HZ_*_{BRAND,PREMIUM,ULTRA,DIAMOND}`, `sips -Z 132` → base64, pasted by hand — then re-run
+`tools/poi-pins/bake_car_hazard_icons.py`, which derives the `_NEON` icons from the BRAND glyph). The grid's four REPORT tiles use kind-coloured copies instead (`CAR_ICON_HZ_*_NEON`, written by
 `tools/poi-pins/bake_car_hazard_icons.py`). The Hazards map button uses the candy triangle (`tools/poi-pins/bake_hazard_candy.py`;
-head-unit cut: `bake_car_hazard_icons.py`). Spec: `HAZARDS.md`. Android Auto tints grid icons white by platform
-rule; the silhouettes are drawn so that still reads. Picked after the three-direction sheet (memory
+head-unit cut: `bake_car_hazard_icons.py`). Spec: `HAZARDS.md`. HYPOTHESIS, never seen on a unit or the DHU: the
+Android Auto host tints grid icons white (our bridge sets no tint); the silhouettes are drawn so that would still read. Picked after the three-direction sheet (memory
 `carplay-glyph-directions-2026-09-24`).

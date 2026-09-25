@@ -20,6 +20,7 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { overviewSizePt, isOverviewZoom } from '../overviewSize';
+import { CREW_RETURN_MS } from '../crewReturn';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, rfPredict, rfFix, rfPose, type RfState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
@@ -139,8 +140,9 @@ const CAR_ZOOM_MAX = CHASE_ZOOM_CLAMP_MAX;
 const CAR_PREVIEW_ZOOM_MIN = 3;
 
 // How long a manual zoom outranks the speed-aware chase zoom before it lapses. Deliberately
-// the SAME 15 s crewFit holds the overview for, so the two map buttons feel like one idea
-// rather than two — that was the ask. Long enough to look ahead down the route and read it,
+// the SAME 15 s crewFit held the overview for, so the two map buttons felt like one idea
+// rather than two — that was the ask. (2026-09-25: the crew hold moved to 7 s, CREW_RETURN_MS, on Jeff's word; this
+// zoom hold is value-locked and stays 15 s until he says otherwise.) Long enough to look ahead down the route and read it,
 // short enough that a driver who forgets they zoomed is not stuck at the wrong framing.
 // ⚠ It is a DEADLINE compared per frame, never a setTimeout. iOS suspends JS timers while
 // the phone is locked, which is how a phone sits in a mount, so a timer-based release can
@@ -1661,8 +1663,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         // 🔒 NAV-LOCK end car-gesture-zoom-compass
         // 🔒 NAV-LOCK begin car-gesture-crewfit — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         case 'crewFit': {
-          // Frame self + every peer, north-up, and hold the chase cam off for 8s
-          // (the lockstep re-grabs automatically when the hold expires — same
+          // Frame self + every peer, north-up, and hold the chase cam off for CREW_RETURN_MS (7 s, the phone's own clock —
+          // Jeff, 2026-09-25: "on carplay the crew button does not have the zoom in timer on it to zoom back in"; it was
+          // 15 s here). The lockstep re-grabs automatically when the hold expires — same
           // spirit as the phone's 20s pan timeout, shorter because a head unit
           // has no other way to dismiss the overview than waiting).
           try {
@@ -1694,10 +1697,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // Engage the hold IMMEDIATELY — the render-time gate above only
             // recomputes on the next store tick (~1s); without this the chase cam
             // kept pushing frames over the overview and it never landed.
-            camHoldUntilRef.current = Date.now() + 15000;
+            camHoldUntilRef.current = Date.now() + CREW_RETURN_MS;
             crewOverviewRef.current = true;
             // The expiry edge lives in getCam, which pushCam skips while the lockstep stands down — so on a plain
-            // 15 s hold nothing would ever record the hold as active and the edge (snap + fly) would be missed
+            // crew hold nothing would ever record the hold as active and the edge (snap + fly) would be missed
             // (Codex, 2026-09-24). Record it here.
             camHoldWasActiveRef.current = true;
             lockReadyRef.current = false;
@@ -1735,7 +1738,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // TRIM RUNS ON THE REAL ZOOM DURING THE HOLD (2026-08-26, Rodrigo's
             // "route overlaps weirdly when the map zooms out to show all the crew").
             // The crew hold stands pushCam down (lockReadyRef=false), and pushCam is
-            // the ONLY writer of camZoomRef — so for the whole 15 s the trim math ran
+            // the ONLY writer of camZoomRef — so for the whole hold the trim math ran
             // at the stale chase zoom (~16-17) while the camera sat at fit zoom
             // (8-15). routeTrimLeadM/fade computed at the wrong zoom collapse to
             // ~1-3 dp on screen (or inflate in the co-located corner), which is the
@@ -1744,7 +1747,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             camZoomRef.current = zoom;
             // Pitch goes top-down for the overview too (pitch: 0 below) — publish it
             // the same way, else camPitchRef holds a stale pre-hold chase pitch for
-            // the whole 15 s hold and the trim's pitch compensation inflates the lead
+            // the whole hold and the trim's pitch compensation inflates the lead
             // against a camera that is actually looking straight down (2026-09-04).
             camPitchRef.current = 0;
             cameraRef.current?.setCamera({

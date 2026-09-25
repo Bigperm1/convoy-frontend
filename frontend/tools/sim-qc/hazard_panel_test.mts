@@ -95,6 +95,9 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
   ok("G9 the tile glyphs are tinted the SAME neon as their rim (compass keeps its metal art); the card glyph too", sheet.includes("...(t.kind ? { tintColor: neonFor(t.kind) } : null)") && card.includes("{ tintColor: paint.bright }"));
   ok("G10 Remove my alert deletes straight away — no confirm popup (Jeff, 2026-09-25)", mapTsx.includes("void deleteHazard(h.id); } }}") && !/onRemove=\{[^}]*handleHazardLongPress/.test(mapTsx));
   ok("G11 the Crew press arms a 7 s way home AFTER the 🔒 block, via recenterNow, cleared on re-press and unmount", /CREW_RETURN_MS = 7000;/.test(crew) && mapTsx.includes("// 🔒 NAV-LOCK end map-crew-fit-drops-follow\n            // The crew press") && mapTsx.includes("crewReturnRef.current = setTimeout(() => {\n              crewReturnRef.current = null;\n              recenterNow();") && mapTsx.includes("}, CREW_RETURN_MS);") && mapTsx.includes("useEffect(() => () => { if (crewReturnRef.current) clearTimeout(crewReturnRef.current); }, []);"));
+  { const car = readFileSync(new URL("../../src/carplay/CarMapView.tsx", import.meta.url), "utf8");
+    const region = car.slice(car.indexOf("NAV-LOCK begin car-gesture-crewfit"), car.indexOf("NAV-LOCK end car-gesture-crewfit"));
+    ok("G12 the head-unit Crew hold is the phone's 7 s CREW_RETURN_MS (Jeff, 2026-09-25: \"on carplay the crew button does not have the zoom in timer\")", region.length > 0 && car.includes("import { CREW_RETURN_MS } from '../crewReturn';") && region.includes("camHoldUntilRef.current = Date.now() + CREW_RETURN_MS;") && !/Date\.now\(\) \+ 15000/.test(region)); }
 }
 
 // H · the CarPlay photo round (Jeff, 2026-09-25, 09:29 on a real head unit): the candy map-button triangle touched the circle

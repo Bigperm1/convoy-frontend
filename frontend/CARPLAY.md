@@ -144,7 +144,7 @@ Exact at 240/280/320pt. **If you change `NAV_STACK_BOTTOM`, `TURN_ROW_H` or `NAV
 | mic (top-left) | CPBarButton image | `toggleCarComms()` — tap-to-toggle crew PTT, 25s cap |
 | Search | CPBarButton text | pushes CPSearchTemplate; empty query lists saved places |
 | End | CPBarButton text | **full stop** — `endNavFromCar` also clears destination + route |
-| crew | CPMapButton | `crewFit` — frames self + all peers, north-up, 15s camera hold |
+| crew | CPMapButton | `crewFit` — frames self + all peers, north-up, 7 s camera hold (`CREW_RETURN_MS`, same clock as the phone; Jeff 2026-09-25), then the 1.8 s fly home; a stopped car comes home on its next GPS fix |
 | hazards | CPMapButton | pushes the Report grid (`openHazardPanel`, `src/carplay/hazardPanel.ts`): Police / Crash / Hazard / Traffic report at the car's position from 5 s ago (`reportHazardFromCar`), Compass fires `compass`; a tile pops the grid, and an untouched grid pops itself after 8 s (`HAZARD_PANEL_AUTO_CLOSE_MS`, both head units and the phone sheet — Jeff, 2026-09-25) (2026-09-24, replaced the compass button on Jeff's word) |
 | compass (tile) | CPGridButton | `compass` — recenter + face north, toggles, auto-releases on nav start |
 

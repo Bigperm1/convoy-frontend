@@ -2,7 +2,7 @@
 // can it do a cool animation where it like swivels and zooms down to where I'm driving?" → "Go").
 //
 // Both surfaces push the chase camera through ONE per-tick setCamera (ConvoyMapbox pushCam, animationMode 'none').
-// When a crew overview lapses (the 15 s hold on the head unit, the driver's recenter on the phone) that push used to
+// When a crew overview lapses (the 7 s CREW_RETURN_MS hold on the head unit, the driver's recenter on the phone) that push used to
 // take the framing back in a single frame — a deliberate cut from 2026-08-14, when the slow low-pass return looked
 // stuck. Now the FIRST push after the overview is one Mapbox flyTo to the chase frame (pitch down, swivel to the
 // heading, zoom in), the per-tick pushes stand down while it runs, and the next normal push lands on the frame the

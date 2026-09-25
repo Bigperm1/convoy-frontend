@@ -238,7 +238,11 @@ export async function hydrateLocationPrivacy(): Promise<void> {
     // the expiry test on line ~320 permanently false and pin the latch on for the life of
     // the process.
     const age = Date.now() - _lastDrivingAt;
-    if (_lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS) {
+    // …but NEVER over a witnessed park (privacy, 2026-09-25, Jeff: "it should not follow me when i discconect from car
+    // play"). A spot persisted with hu=1 (adopted just above) proves the drive ended at a head-unit disconnect, and a
+    // relaunch inside the 90 s window would otherwise hand shareablePosition's movingNow a latch the disconnect already
+    // dropped (noteCarConnected) — sharing live at >= 9 km/h. Gate: park_rearm_test H2.
+    if (_lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS && !_parkWitnessed) {
       _drivingLatched = true;
       _latchProvisional = true;
     }
@@ -255,12 +259,25 @@ export function noteCarConnected(connected: boolean): void {
   // ended at the current car spot. GPS alone cannot tell a walk-away from a >90 s crawl
   // — that ambiguity is the entire reason the self-marker's 75 m separation gate exists
   // (map.tsx, 2026-08-05) — but a disconnect is unambiguous, so it may bypass that gate.
-  // Cleared by the next CONNECT and by the next DRIVING fix (noteFix): a head unit
-  // unplugged mid-drive must not pin a stale spot through the crawl that follows.
+  // Cleared by the next CONNECT and by a PROVEN drive-away (noteFix + src/parkRearm.ts, 2026-09-25: 15 s at
+  // >= 15 km/h AND 150 m — one fast fix no longer does it). A head unit unplugged mid-drive therefore pins the
+  // unplug-point spot for that ~15–20 s, then the drive goes live again (privacy-favouring; CARPLAY.md §6c).
   // ⚠ Transition-based on purpose: a writer repeating `false` (or `true`) is a no-op
   // here, so this stays correct even if a spurious repeat-writer ever returns.
   if (_carConnected && !next) {
     _parkWitnessed = true;
+    // ── THE PARK ENDS THE DRIVE'S LATCH, AT ONCE (privacy, 2026-09-25) ────────────────────────────────────────────
+    // Jeff, 2026-09-25: "it should not follow me when i discconect from car play... this is a privacy concern. fix it
+    // and lock it" — "My icon moved on the map." The latch used to outlive the disconnect for up to
+    // DRIVING_HYSTERESIS_MS (90 s after the last driving fix), and shareablePosition's movingNow reads it directly: any
+    // fix >= 9 km/h in that window — a GPS jump or a brisk walk away from the car — was shared LIVE on the old drive's
+    // latch (park_rearm_test W, negative control on the pre-fix module). A head unit letting go is proof the drive
+    // ended, so the latch drops here with the witness; it re-arms only through noteFix's re-arm proof
+    // (src/parkRearm.ts: >= 15 km/h held 15 s AND 150 m) or a reconnect. Consequence, accepted and privacy-favouring:
+    // a CarPlay / Android Auto unplug MID-DRIVE shares the unplug-point car spot until that proof (~15–20 s at city
+    // speed). The 90 s parked STATUS label is unchanged — isParked() reads _lastDrivingAt, which this does not touch.
+    _drivingLatched = false;
+    _latchProvisional = false;
     // Persisted with the spot so an app restart while parked still pins to the car.
     // Every plain {lat,lng} writer of this key (noteFix, map.tsx's 15 s mirror) drops
     // the flag on the next drive — which is exactly when it should expire.
@@ -280,7 +297,7 @@ export function noteCarConnected(connected: boolean): void {
 }
 
 /**
- * True from a witnessed head-unit disconnect until the next connect or driving fix.
+ * True from a witnessed head-unit disconnect until the next connect or a PROVEN drive-away (src/parkRearm.ts).
  * Lets the self marker pin to the car spot even within the 75 m separation gate: the
  * disconnect proved the drive ended there ("worked in build 72" was never the build —
  * it was parking farther than 75 m; close parks always followed the driver until this).

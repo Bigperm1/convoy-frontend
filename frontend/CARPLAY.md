@@ -291,14 +291,17 @@ What was measured (crash_reports): fresh car-store fixes for minutes to hours af
 | The car GPS watch started twice per connect (guard before the await, assignment after it); `stop` reached one, the other ran on with background delivery | `src/carFeedOwner.ts` is the ONLY creator: single-flight start, stop removes every subscription with no delivery needed, a fix arriving with no lock holder removes its watch and is dropped | `tools/sim-qc/car_feed_leak_test.mts` (G0 reproduces the leak on the pre-fix `navNotification.ts`) |
 | map.tsx's phone watcher: `sub = await watchPositionAsync(…)` lost a watch that resolved after cleanup; its background gate was never re-evaluated when a route ended behind the head unit | a `cancelled` flag + `removeWhenSettled`; `fgWatchKeep` in the deps re-runs the gate when nav ends while the app is not active | `car_feed_leak_test` F11–F16 |
 | After a witnessed park one fast fix re-armed the latch and cleared the witness | `src/parkRearm.ts`: re-arm needs ≥ 15 km/h held 15 s AND 150 m from where that run began; a reconnect still clears it at once | `tools/sim-qc/park_rearm_test.mts` (his 10:12–10:14 fixes; N reproduces it on the pre-fix module) |
+| The drive's latch outlived the disconnect by up to 90 s, so `shareablePosition`'s `movingNow` shared any ≥ 9 km/h fix LIVE on it; a relaunch inside that window restored it over a witnessed spot | the witness drops the latch (`noteCarConnected` true→false); hydrate never restores the latch over a `hu=1` spot | `park_rearm_test` W, H2 (negative controls on the pre-fix module) |
 | Car-surface telemetry rows kept printing coordinates after the disconnect (CarMapView stays mounted) | `drawTelemetry.setCarSurfaceLive` — set only by `carPlayBootstrap` onConnect/onDisconnect and `AndroidAutoRoot` mount/disconnect/unmount, never by `headUnitAttachedRaw()` | — |
 
 `scripts/trap-check.py` rule `watch-assigned-after-await` forbids the orphan shape anywhere in `src/` and `app/`.
 Every release writes `loc-release tag=<t> fgLive=<n> task=<0|1>` (bounded, reliable): the field receipt after a
 drive is `carplay-disconnect` → `loc-release tag=carplay fgLive=0 task=0` → no `loc-src feed=fg`, no fresh
 `draw-cmp surf=car` until the app is opened. Phone-only navigation still tracks in the background by design (the
-`nav` consumer). Not verified on a device or a head unit yet — the gates run the real modules in node with a fake
-expo-location.
+`nav` consumer). Consequence, accepted and privacy-favouring: a CarPlay / Android Auto unplug **mid-drive** shares
+the unplug-point car spot (and pins the marker there) until the re-arm proof — ~15–20 s at city speed — or a
+reconnect. The 90 s parked STATUS label (`isParked`, `_lastDrivingAt`) is unchanged: only the position is pinned.
+Not verified on a device or a head unit yet — the gates run the real modules in node with a fake expo-location.
 
 ## 7. Open / next
 

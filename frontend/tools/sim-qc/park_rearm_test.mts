@@ -31,7 +31,11 @@
 //   G  a gap with no fixes → the run starts over.
 //   C  a CarPlay reconnect → the witness clears at once; the first vehicular fix is live (unchanged).
 //   U  no witnessed park → identical outputs to the pre-fix module, fix by fix (the "byte-for-byte" claim).
-//   H  a witness restored from disk (hydrate, hu=1) is protected the same way.
+//   H  a witness restored from disk (hydrate, hu=1) is protected the same way; H2 with a driving stamp < 90 s old
+//      too (no latch is restored over a witness — negative control on the pre-fix module); H3 without a witness the
+//      restore is unchanged.
+//   W  the drive's latch still inside its 90 s window at the disconnect: a 12 km/h and a 26 km/h fix share the car
+//      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -89,7 +93,7 @@ const metres = (a: { lat: number; lng: number }, b: { lat: number; lng: number }
 const kmh = (v: number) => v / 3.6;
 
 // The drive that ends at the spot, with CarPlay attached, then the witnessed disconnect at 17:08:20.898.
-function parkWithCarPlay(lp: LP, disconnectAt = utc(17, 8, 20, 898)) {
+function parkWithCarPlay(lp: LP, disconnectAt = utc(17, 8, 20, 898), walk = true) {
   clock = utc(17, 5, 0);
   lp.noteCarConnected(true);
   const start = north(SPOT, -720);
@@ -97,12 +101,13 @@ function parkWithCarPlay(lp: LP, disconnectAt = utc(17, 8, 20, 898)) {
   for (let i = 1; i <= 30; i++) { clock = utc(17, 6, 0) + i * S; lp.noteFix(SPOT.lat, SPOT.lng, 0, null); }
   clock = disconnectAt;
   lp.noteCarConnected(false);
+  if (!walk) return;
   // The phone's last fix before he opened the app: 17:12:34.136 `fixAge=180133` → taken 17:09:34.003, `sep=47m` from
   // the spot, `spd=2`. Its coordinates were withheld by the row, so this position (47 m north) is SYNTHESISED; only the
   // distance, time and speed are his. It is what drops the drive's latch (> 90 s after the last driving fix).
   clock = utc(17, 9, 34, 3);
-  const walk = north(SPOT, 47);
-  lp.noteFix(walk.lat, walk.lng, kmh(2), null);
+  const w = north(SPOT, 47);
+  lp.noteFix(w.lat, w.lng, kmh(2), null);
 }
 const pinnedAtSpot = (lp: LP, live: { lat: number; lng: number; speed: number }) => {
   const d = lp.privacyDebug();
@@ -282,6 +287,76 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
   clock += S; lp.noteFix(A2.lat, A2.lng, kmh(26), null);
   const r = pinnedAtSpot(lp, { ...A2, speed: kmh(26) });
   ok("H1 one 26 km/h fix after a relaunch does not un-pin it either", r.ok, r.why);
+}
+
+// ── W · the drive's latch is still inside its 90 s window when the head unit lets go ────────────────────────────
+// The drive's last >= 9 km/h fix is 17:06:00; the disconnect comes 40 s later, so the pre-fix latch is still armed.
+// A 12 km/h fix (above walking, below the 15 km/h entry) and a 26 km/h fix — each asked BEFORE noteFix sees it (the
+// map.tsx order: the watcher callback posts /location, the coords effect calls noteFix a render later) and after.
+{
+  const run = (lp: LP) => {
+    parkWithCarPlay(lp, utc(17, 6, 40), false);
+    const out: { name: string; before: any; after: any; latch: boolean }[] = [];
+    for (const [name, sec, m, v] of [["12 km/h", 45, 20, kmh(12)], ["26 km/h", 50, 60, kmh(26)]] as const) {
+      clock = utc(17, 6, sec); const p = north(SPOT, m);
+      const before = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+      lp.noteFix(p.lat, p.lng, v, 0);
+      const after = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+      out.push({ name, before, after, latch: lp.privacyDebug().latch });
+    }
+    return out;
+  };
+  const atSpot = (sh: any) => sh?.share === true && sh.lat === SPOT.lat && sh.lng === SPOT.lng;
+  const base = await freshBase();
+  if (!base) console.log("  skip W negative control: pre-fix module unavailable");
+  else {
+    const r = run(base);
+    ok("W0 NEGATIVE CONTROL (real pre-fix module): 40 s after the disconnect a 12 km/h fix is shared LIVE on the drive's latch", !atSpot(r[0].before) && r[0].before?.share === true, JSON.stringify(r[0].before));
+    ok("W0b NEGATIVE CONTROL: …and so is the 26 km/h fix", !atSpot(r[1].before) && !atSpot(r[1].after), JSON.stringify(r[1].after));
+  }
+  const lp = await fresh();
+  const r = run(lp);
+  ok("W1 the witnessed park drops the drive's latch at once", r.every((x) => x.latch === false), JSON.stringify(r.map((x) => x.latch)));
+  ok("W2 12 km/h fix → the car spot, before and after noteFix (movingNow false)", atSpot(r[0].before) && atSpot(r[0].after), JSON.stringify([r[0].before, r[0].after]));
+  ok("W3 26 km/h fix → the car spot, before and after noteFix", atSpot(r[1].before) && atSpot(r[1].after), JSON.stringify([r[1].before, r[1].after]));
+  ok("W4 the 90 s parked STATUS label is unchanged (still 'live' 50 s after the last driving fix)", r[1].after?.status === "live", JSON.stringify(r[1].after));
+}
+
+// ── H2 · a relaunch inside the 90 s window with a witnessed park on disk ─────────────────────────────────────────
+// hydrate restores the latch (provisionally) from a driving stamp < 90 s old AND adopts a spot persisted with hu=1.
+{
+  const seed = () => {
+    (globalThis as any).__store = {
+      "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 20 * S, att: 0, mv: 0, hu: 1 }),
+      "convoy.lastDrivingAt.v1": String(clock - 30 * S),
+    };
+  };
+  const walkP = north(SPOT, 20);
+  const base = await freshBase();
+  if (base) {
+    clock = utc(21, 0, 0); seed();
+    await base.hydrateLocationPrivacy();
+    const sh = base.shareablePosition({ ...walkP, speed: kmh(12), heading: 0 });
+    ok("H2a NEGATIVE CONTROL (pre-fix): witnessed spot + restored latch → a 12 km/h fix is shared LIVE", base.parkEndedByHeadUnit() && base.privacyDebug().latch && sh.share === true && (sh as any).lat === walkP.lat, JSON.stringify(sh));
+  } else console.log("  skip H2a negative control: pre-fix module unavailable");
+  const lp = await fresh();
+  clock = utc(21, 0, 0); seed();
+  await lp.hydrateLocationPrivacy();
+  ok("H2 precondition: the witnessed spot is adopted", lp.parkEndedByHeadUnit() === true && lp.carSpot()?.lat === SPOT.lat);
+  ok("H2b no latch is restored over a witnessed park", lp.privacyDebug().latch === false);
+  const sh = lp.shareablePosition({ ...walkP, speed: kmh(12), heading: 0 });
+  ok("H2c a 12 km/h fix after that relaunch → the car spot", sh.share === true && (sh as any).lat === SPOT.lat && (sh as any).lng === SPOT.lng, JSON.stringify(sh));
+  clock += S; lp.noteFix(walkP.lat, walkP.lng, kmh(26), null);
+  const r = pinnedAtSpot(lp, { ...walkP, speed: kmh(26) });
+  ok("H2d …and a 26 km/h fix too", r.ok, r.why);
+}
+{
+  // Without a witnessed park the restore is untouched (the force-quit mid-drive fix, 2026-08-29).
+  const lp = await fresh();
+  clock = utc(22, 0, 0);
+  (globalThis as any).__store = { "convoy.lastDrivingAt.v1": String(clock - 30 * S) };
+  await lp.hydrateLocationPrivacy();
+  ok("H3 no witness: a driving stamp < 90 s old still restores the latch", lp.privacyDebug().latch === true);
 }
 
 if (baseFile) rmSync(join(baseFile, ".."), { recursive: true, force: true });

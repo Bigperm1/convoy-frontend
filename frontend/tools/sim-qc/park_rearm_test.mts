@@ -27,13 +27,18 @@
 //   J2 the same stretch densified to 1 Hz with EVERY fix at 29 km/h (worse than the data) → still pinned: the
 //      displacement rule refuses it however long the speed artifact lasts.
 //   V  the rule's values (src/parkRearm.ts, outside nav-lock) are pinned.
-//   R  a real drive-away after a witnessed park → re-arms once 15 s at >= 15 km/h AND 250 m are in (<= 30 s), live
-//      after; a highway pull-away within 20 s.
-//   L  a 25 s red light mid-proof does not start it over.
+//   R  a real drive-away after a witnessed park → re-arms once 15 s at >= 15 km/h AND 250 m are in (<= 35 s), live
+//      after; a highway pull-away within 30 s.
+//   L  a 25 s red light mid-proof does not start it over (<= 20 s after pulling away again).
 //   E  stop-sign grids (100–160 m blocks) and stop-and-go traffic prove within ~60–75 s (v1 never did).
 //   G  one far fix after a gap cannot prove (the robust median).
 //   O  Jeff's 08-29 walk (rows as recorded, the >= 9 km/h counterfactual, and 41 s stuck on the multipath coordinate).
 //   S  every new witness starts the proof from nothing (S1), and a witness adopted by hydrate drops a racing latch (S2).
+//   Y  a relaunch whose storage read is LATE: 1, 2, 5 fast fixes before it cannot skip the saved witness (Y0 = round 3).
+//   X  the third review's attacks: 14–31 s of 16 km/h-reading walking + 41 s stuck on the multipath point; two
+//      consecutive / ping-pong 400 m outliers; every other fix on a far point (X0 / X0b = round 3 un-pinning).
+//   Z  the review's urban-canyon walker model (seed 284 and 20-seed sets of brisk walkers with 15–17 km/h spikes) pinned.
+//   Q  slow jams prove in bounded time on the SLOW path (Q0 = round 3 still pinned after 30 min).
 //   K  the head-unit sources: an iOS COLD CarPlay disconnect is witnessed (K0 = the pre-fix cold path sharing live),
 //      a cold connect clears yesterday's witness (K2/K3), the map mirror cannot create or cancel a witness (K4), and
 //      with no session source the map mirror still works (K5).
@@ -56,14 +61,17 @@ const js = (body: string) => "data:text/javascript," + encodeURIComponent(body);
 const EMPTY = js(`const f = () => {}; export const Platform = { OS: "ios", select: (o) => o.ios ?? o.default };
   export const useEffect = f, useState = (v) => [v, f], useRef = (v) => ({ current: v }), useCallback = (x) => x;`);
 // AsyncStorage reads come from globalThis.__store (scenario H); writes are recorded there too.
+// getItem waits for globalThis.__delay when a test sets it (a slow storage read at a relaunch — section Y).
 const STORAGE = js(`const S = () => (globalThis.__store ??= {});
-  export default { getItem: (k) => Promise.resolve(S()[k] ?? null), setItem: (k, v) => { S()[k] = v; return Promise.resolve(); },
+  const later = (v) => (globalThis.__delay ? globalThis.__delay.then(() => v()) : Promise.resolve(v()));
+  export default { getItem: (k) => later(() => S()[k] ?? null), setItem: (k, v) => { S()[k] = v; return Promise.resolve(); },
     removeItem: (k) => { delete S()[k]; return Promise.resolve(); }, multiRemove: () => Promise.resolve() };`);
 registerHooks({
   resolve(s: string, c: any, n: any) {
     if (s === "@react-native-async-storage/async-storage") return { url: STORAGE, shortCircuit: true };
     if (s === "react" || s === "react-native" || s.startsWith("expo-")) return { url: EMPTY, shortCircuit: true };
     // The pre-fix copy lives in a temp dir: its relative imports are the worktree's modules.
+    if (s === "./parkRearm.r3.ts") return n(s, c);                          // round 3's rule, beside its locationPrivacy copy
     if (s.startsWith(".") && /locationPrivacy\.base\.ts(\?.*)?$/.test(c.parentURL ?? "")) return { url: new URL(`${s.slice(2)}.ts`, SRC).href, shortCircuit: true };
     if (s.startsWith(".") && !/\.[a-z]+$/i.test(s)) { try { return n(s + ".ts", c); } catch {} }
     return n(s, c);
@@ -77,12 +85,25 @@ const S = 1000;
 
 type LP = typeof import("../../src/locationPrivacy.ts");
 let inst = 0;
-const fresh = async (): Promise<LP> => { (globalThis as any).__store = {}; return import(new URL(`locationPrivacy.ts?i=${++inst}`, SRC).href); };
+// `hydrated` (the default): the module has read its (empty) storage, as every real caller now waits for — noteFix trusts
+// no fix before that (the Y section tests the before). Tests that seed storage or race the read pass false.
+const fresh = async (hydrated = true): Promise<LP> => {
+  (globalThis as any).__store = {};
+  const lp: LP = await import(new URL(`locationPrivacy.ts?i=${++inst}`, SRC).href);
+  if (hydrated) await lp.hydrateLocationPrivacy();
+  return lp;
+};
 let baseSrc: string | null = null;
 try { baseSrc = execFileSync("git", ["show", "c97a1580:frontend/src/locationPrivacy.ts"], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
 let baseFile: string | null = null;
 if (baseSrc) { const d = mkdtempSync(join(tmpdir(), "park-rearm-base-")); baseFile = join(d, "locationPrivacy.base.ts"); writeFileSync(baseFile, baseSrc); }
-const freshBase = async (): Promise<LP | null> => { if (!baseFile) return null; (globalThis as any).__store = {}; return import(pathToFileURL(baseFile).href + `?i=${++inst}`); };
+const freshBase = async (hydrated = true): Promise<LP | null> => {
+  if (!baseFile) return null;
+  (globalThis as any).__store = {};
+  const lp: LP = await import(pathToFileURL(baseFile).href + `?i=${++inst}`);
+  if (hydrated) await lp.hydrateLocationPrivacy();
+  return lp;
+};
 
 let fails = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -91,6 +112,7 @@ const ok = (name: string, cond: boolean, detail = "") => {
 
 // ── geometry ─────────────────────────────────────────────────────────────────────────────────────────────────────
 const SPOT = { lat: 49.172938, lng: -122.666060 };     // 17:12:34.136 mode=pin raw= (the car spot)
+const DRIVING_ENTER = 4.17;                             // locationPrivacy.DRIVING_ENTER_SPEED_MS (asserted equal below)
 const R_EARTH = 6371000;
 const north = (p: { lat: number; lng: number }, m: number) => ({ lat: p.lat + (m / R_EARTH) * (180 / Math.PI), lng: p.lng });
 const metres = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
@@ -192,9 +214,34 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
 // Changing one of these needs Jeff's say-so (RULES.md §4) — the lock tool does not cover this file yet.
 {
   const R = await import(new URL("parkRearm.ts", SRC).href);
-  const want = { PARK_REARM_WINDOW_MS: 120_000, PARK_REARM_VEHICULAR_MS: 15_000, PARK_REARM_MIN_M: 250, PARK_REARM_MOVE_RATIO: 0.5, PARK_REARM_FIX_CREDIT_MS: 2_000 };
+  const want = {
+    PARK_REARM_WINDOW_MS: 120_000, PARK_REARM_VEHICULAR_MS: 15_000, PARK_REARM_MIN_M: 250, PARK_REARM_MOVE_RATIO: 0.8,
+    PARK_REARM_FIX_CREDIT_MS: 2_000, PARK_REARM_BASELINE_MS: 10_000, PARK_REARM_JUMP_FACTOR: 2, PARK_REARM_JUMP_SLACK_M: 50,
+    PARK_REARM_ROBUST_N: 5, PARK_REARM_SLOW_WINDOW_MS: 600_000, PARK_REARM_SLOW_VEHICULAR_MS: 30_000, PARK_REARM_SLOW_MIN_M: 300,
+  };
   const got = Object.fromEntries(Object.keys(want).map((k) => [k, (R as any)[k]]));
   ok("V1 parkRearm constants are the approved values", JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
+  const lp0 = await fresh();
+  ok("V1b the pure rule's entry speed here is locationPrivacy's DRIVING_ENTER_SPEED_MS", lp0.DRIVING_ENTER_SPEED_MS === DRIVING_ENTER, String(lp0.DRIVING_ENTER_SPEED_MS));
+  // Each defence alone, on the pure rule (the attacks above are each stopped by more than one, so these isolate them).
+  const RR: any = R;
+  const run = (fixes: { t: number; p: { lat: number; lng: number }; v: number }[]) => { const r = RR.createParkRearm({ enterMs: DRIVING_ENTER }); for (let i = 0; i < fixes.length; i++) if (r.note(fixes[i].t, fixes[i].p.lat, fixes[i].p.lng, fixes[i].v, SPOT)) return i; return -1; };
+  const T = utc(12, 0, 0);
+  const loopFix = (s2: number) => { const v = kmh(16), a = (v * s2) / 20; return { t: T + s2 * S, p: { lat: SPOT.lat + (20 * Math.sin(a)) / 111320, lng: SPOT.lng + (20 * (1 - Math.cos(a))) / (111320 * Math.cos((SPOT.lat * Math.PI) / 180)) }, v }; };
+  const loop = Array.from({ length: 61 }, (_, s2) => loopFix(s2));
+  const far = north(SPOT, 400);
+  // V2 JUMPS: a car-park loop that earns credit, then the phone STUCK 5 s on a multipath point 400 m away at 50 km/h.
+  const stuck5 = [...loop, ...Array.from({ length: 5 }, (_, i) => ({ t: T + (61 + i) * S, p: north(far, 0.2 * i), v: kmh(50) }))];
+  ok("V2 a 5 s multipath stick 400 m away after a credited loop does not prove (jump rejection)", run(stuck5) === -1);
+  // V3 SEGMENTS: the same stick for 40 s — long enough for the jump bound to admit it; it must start a new segment.
+  const stuck40 = [...loop, ...Array.from({ length: 40 }, (_, i) => ({ t: T + (61 + i) * S, p: north(far, 0.2 * i), v: kmh(50) }))];
+  ok("V3 …for 40 s: admitted only as a new segment, still no proof (credit and distance never span a jump)", run(stuck40) === -1);
+  // V4 MEDIAN: a straight 36 km/h drive; one 45 m forward outlier (inside the jump bound: 55 m ≤ max(20, 60)) three
+  // fixes before the proof. A median of five moves at most one step on a moving track; the last fix alone jumps ahead.
+  const drive = Array.from({ length: 60 }, (_, s2) => ({ t: T + s2 * S, p: north(SPOT, 10 * s2), v: 10 }));
+  const clean = run(drive);
+  const withOut = run(drive.map((f, i) => (i === clean - 3 ? { ...f, p: north(f.p, 45) } : f)));
+  ok("V4 one in-bound outlier cannot bring the proof forward by more than one fix (median of five)", clean > 0 && withOut >= clean - 1, `clean=${clean} withOutlier=${withOut}`);
 }
 
 // Kinematic drive at 2 Hz (the phone watcher's default 500 ms / 2 m): accelerate a m/s² to vmax, cruise, brake b m/s²
@@ -243,7 +290,8 @@ function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): numb
     if (lp.privacyDebug().latch) armed = { s: i, sinceVeh: (clock - (firstVeh ?? clock)) / S, fromSpot: metres(SPOT, pos) };
   }
   ok("R1 not re-armed before 15 s at >= 15 km/h and 250 m from the spot", !!armed && armed.sinceVeh >= 15 && armed.fromSpot >= 250, JSON.stringify(armed));
-  ok("R2 re-armed within 30 s of pulling away (1 m/s² to 40 km/h)", !!armed && armed.s <= 30, JSON.stringify(armed));
+  // v3 credits a fix only against a 10 s baseline, so the proof lands ~10 s after v2's (28 s): measured 31 s.
+  ok("R2 re-armed within 35 s of pulling away (1 m/s² to 40 km/h)", !!armed && armed.s <= 35, JSON.stringify(armed));
   ok("R3 the witnessed park is cleared by the re-arm", lp.parkEndedByHeadUnit() === false);
   clock += S; pos = north(pos, 11); lp.noteFix(pos.lat, pos.lng, 11, 0);
   const sh = lp.shareablePosition({ ...pos, speed: 11, heading: 0 });
@@ -254,7 +302,7 @@ function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): numb
   const lp = await fresh(); parkWithCarPlay(lp);
   const T = utc(17, 35, 0); let pos = SPOT; let at: number | null = null;
   for (let i = 0; i <= 60 && at == null; i++) { clock = T + i * S; const v = Math.min(2.5 * i, kmh(100)); pos = north(pos, v); lp.noteFix(pos.lat, pos.lng, v, 0); if (!lp.parkEndedByHeadUnit()) at = i; }
-  ok("R5 highway pull-away (2.5 m/s² to 100 km/h) proves within 20 s", at != null && at <= 20, `after ${at} s`);
+  ok("R5 highway pull-away (2.5 m/s² to 100 km/h) proves within 30 s (measured 24: 15 s of credit after a 10 s baseline)", at != null && at <= 30, `after ${at} s`);
 }
 
 // ── L · a red light in the middle of the proof does not start it over ─────────────────────────────────────────
@@ -269,7 +317,7 @@ function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): numb
   const resumeAt = t + S;
   let armedDt: number | null = null;
   for (let i = 0; i < 40 && armedDt == null; i++) { step(10); if (lp.privacyDebug().latch) armedDt = (t - resumeAt) / S; }
-  ok("L1 a 25 s red light mid-proof: armed within 15 s of pulling away again (v1 started over and needed 16+)", armedDt != null && armedDt <= 15, `armed ${armedDt} s after resuming`);
+  ok("L1 a 25 s red light mid-proof: armed within 20 s of pulling away again (measured 17; the red light starts nothing over)", armedDt != null && armedDt <= 20, `armed ${armedDt} s after resuming`);
 }
 
 // ── E · stop-sign grids and stop-and-go traffic prove (v1 never did: review-priv/s_edges.mts) ────────────────────
@@ -392,7 +440,7 @@ function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): numb
 }
 {
   // S2: a fast fix reaches noteFix while hydrate is still reading a hu=1 spot (carDataService calls noteFix synchronously).
-  const lp = await fresh();
+  const lp = await fresh(false);
   clock = utc(20, 30, 0);
   (globalThis as any).__store = {
     "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: utc(20, 20, 0), att: 0, mv: 0, hu: 1 }),
@@ -445,7 +493,7 @@ const openAppAndWalk = (lp: LP, mapWrites: boolean) => {
 }
 {
   // K2: yesterday's witnessed park on disk; hydrate first, then the cold connect.
-  const lp = await fresh();
+  const lp = await fresh(false);
   clock = utc(22, 0, 0);
   (globalThis as any).__store = { "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 12 * 3600 * S, att: 0, mv: 0, hu: 1 }) };
   await lp.hydrateLocationPrivacy();
@@ -457,7 +505,7 @@ const openAppAndWalk = (lp: LP, mapWrites: boolean) => {
 }
 {
   // K3: the connect lands first, the hydrate read resolves after it.
-  const lp = await fresh();
+  const lp = await fresh(false);
   clock = utc(22, 30, 0);
   (globalThis as any).__store = { "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 12 * 3600 * S, att: 0, mv: 0, hu: 1 }) };
   lp.noteCarConnected(true, "carplay");
@@ -542,7 +590,7 @@ const openAppAndWalk = (lp: LP, mapWrites: boolean) => {
 
 // ── H · a witnessed park restored from disk (a relaunch while parked) ───────────────────────────────────────────
 {
-  const lp = await fresh();
+  const lp = await fresh(false);
   clock = utc(20, 0, 0);
   (globalThis as any).__store = {
     "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 10 * 60 * S, att: 0, mv: 0, hu: 1 }),
@@ -598,14 +646,14 @@ const openAppAndWalk = (lp: LP, mapWrites: boolean) => {
     };
   };
   const walkP = north(SPOT, 20);
-  const base = await freshBase();
+  const base = await freshBase(false);
   if (base) {
     clock = utc(21, 0, 0); seed();
     await base.hydrateLocationPrivacy();
     const sh = base.shareablePosition({ ...walkP, speed: kmh(12), heading: 0 });
     ok("H2a NEGATIVE CONTROL (pre-fix): witnessed spot + restored latch → a 12 km/h fix is shared LIVE", base.parkEndedByHeadUnit() && base.privacyDebug().latch && sh.share === true && (sh as any).lat === walkP.lat, JSON.stringify(sh));
   } else console.log("  skip H2a negative control: pre-fix module unavailable");
-  const lp = await fresh();
+  const lp = await fresh(false);
   clock = utc(21, 0, 0); seed();
   await lp.hydrateLocationPrivacy();
   ok("H2 precondition: the witnessed spot is adopted", lp.parkEndedByHeadUnit() === true && lp.carSpot()?.lat === SPOT.lat);
@@ -618,13 +666,229 @@ const openAppAndWalk = (lp: LP, mapWrites: boolean) => {
 }
 {
   // Without a witnessed park the restore is untouched (the force-quit mid-drive fix, 2026-08-29).
-  const lp = await fresh();
+  const lp = await fresh(false);
   clock = utc(22, 0, 0);
   (globalThis as any).__store = { "convoy.lastDrivingAt.v1": String(clock - 30 * S) };
   await lp.hydrateLocationPrivacy();
   ok("H3 no witness: a driving stamp < 90 s old still restores the latch", lp.privacyDebug().latch === true);
 }
 
+// ── Y · nothing is proven before the saved park is known (Codex 3rd pass) ─────────────────────────────────────────
+// A relaunch with a witnessed park (hu=1) on disk; storage answers LATE; 1, 2 and 5 fast fixes land before it does.
+// The pre-hydration fixes may not arm the latch or write the spot, so the saved witness is adopted and holds.
+const LOC_V = (globalThis as any);
+async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const store = { "convoy.lastCarSpot.v1": JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: clock - 15 * 60 * S, att: 0, mv: 0, hu: 1 }) } as Record<string, string>;
+  LOC_V.__store = new Proxy(store, { get: (o, k: string) => o[k] });
+  LOC_V.__delay = gate;
+  const h = lp.hydrateLocationPrivacy();
+  const shares: any[] = [];
+  for (let i = 1; i <= nFast; i++) {
+    clock += S; const p = north(SPOT, 30 + 8 * i);
+    shares.push(lp.shareablePosition({ ...p, speed: kmh(26), heading: 0 }));
+    lp.noteFix(p.lat, p.lng, kmh(26), null);
+  }
+  release(); await h; LOC_V.__delay = null;
+  const w = north(SPOT, 90); clock += S;
+  const before = lp.shareablePosition({ ...w, speed: kmh(12), heading: 0 });
+  lp.noteFix(w.lat, w.lng, kmh(12), null);
+  const after = lp.shareablePosition({ ...w, speed: kmh(12), heading: 0 });
+  return { shares, before, after, hu: lp.parkEndedByHeadUnit(), latch: lp.privacyDebug().latch, spot: lp.carSpot() };
+}
+{
+  const atSpot = (x: any) => x?.share === true && x.lat === SPOT.lat && x.lng === SPOT.lng;
+  const noLive = (xs: any[]) => xs.every((x) => !x.share || (x.lat === SPOT.lat));
+  for (const n of [1, 2, 5]) {
+    clock = utc(22, 40, 0);
+    const lp = await fresh(false);
+    const r = await relaunchWithFixesBeforeRead(lp, n);
+    ok(`Y${n} ${n} fast fix(es) before a late storage read → the saved hu=1 witness holds; a 12 km/h walk fix → the car spot`,
+      r.hu === true && r.latch === false && atSpot(r.before) && atSpot(r.after) && r.spot?.lat === SPOT.lat && noLive(r.shares),
+      JSON.stringify({ hu: r.hu, latch: r.latch, before: r.before, after: r.after, preShares: r.shares.map((x: any) => x.share ? `${x.lat}` : x.reason) }));
+  }
+  {
+    // Y6 SINGLE-FLIGHT: a second caller while the read is in flight gets the SAME promise — not an early "done".
+    const lp = await fresh(false);
+    let release: () => void = () => {}; LOC_V.__delay = new Promise<void>((r) => { release = r; });
+    const h1 = lp.hydrateLocationPrivacy(); const h2 = lp.hydrateLocationPrivacy();
+    let early = false; void h2.then(() => { early = true; }); await Promise.resolve(); await Promise.resolve();
+    const sameAndPending = h1 === h2 && !early;
+    release(); await h2; LOC_V.__delay = null;
+    ok("Y6 hydrate is single-flight: a second caller during the read gets the same pending promise", sameAndPending);
+  }
+  // NEGATIVE CONTROL on the previous round's module (732c8a6e): two fixes before the read skip the saved witness.
+  let prevSrc: string | null = null;
+  try { prevSrc = execFileSync("git", ["show", "732c8a6e:frontend/src/locationPrivacy.ts"], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+  if (prevSrc) {
+    const d = mkdtempSync(join(tmpdir(), "park-rearm-r3-")); const f = join(d, "locationPrivacy.base.ts"); writeFileSync(f, prevSrc);
+    clock = utc(22, 50, 0);
+    const lp: LP = await import(pathToFileURL(f).href + `?i=${++inst}`);
+    const r = await relaunchWithFixesBeforeRead(lp, 2);
+    ok("Y0 NEGATIVE CONTROL (round 3, 732c8a6e): 2 fast fixes before the read → the witness is skipped and the walk is shared LIVE",
+      r.hu === false && (r.after as any).lat !== SPOT.lat, JSON.stringify({ hu: r.hu, latch: r.latch, after: r.after }));
+    rmSync(d, { recursive: true, force: true });
+  } else console.log("  skip Y0 negative control: 732c8a6e unavailable");
+}
+
+// Round 3 (732c8a6e) as a pair — its locationPrivacy.ts AND its parkRearm.ts — for the negative controls below.
+let r3Dir: string | null = null;
+try {
+  const git = (f: string) => execFileSync("git", ["show", `732c8a6e:frontend/src/${f}`], { cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const lpSrc = git("locationPrivacy.ts").replace(`from "./parkRearm";`, `from "./parkRearm.r3.ts";`);
+  r3Dir = mkdtempSync(join(tmpdir(), "park-rearm-r3pair-"));
+  writeFileSync(join(r3Dir, "locationPrivacy.base.ts"), lpSrc); writeFileSync(join(r3Dir, "parkRearm.r3.ts"), git("parkRearm.ts"));
+} catch { r3Dir = null; }
+const freshR3 = async (): Promise<LP | null> => {
+  if (!r3Dir) return null;
+  (globalThis as any).__store = {};
+  const lp: LP = await import(pathToFileURL(join(r3Dir, "locationPrivacy.base.ts")).href + `?i=${++inst}`);
+  await lp.hydrateLocationPrivacy();
+  return lp;
+};
+
+// ── X · the review's re-arm attacks (review-priv3/c_logic.mts, walkers.mts), on the real module ────────────────────
+{
+  const P = (lat: number, lng: number) => ({ lat, lng });
+  const REC = [
+    { s: 0, p: P(49.173335, -122.666000), v: 9 }, { s: 10.005, p: P(49.173400, -122.665518), v: 16 },
+    { s: 20.474, p: P(49.173395, -122.665085), v: 12 }, { s: 31.001, p: P(49.173371, -122.665494), v: 7 },
+    { s: 42.543, p: P(49.173307, -122.660864), v: 51 }, { s: 83.321, p: P(49.173307, -122.660870), v: 49 },
+  ];
+  const dens = (seq: typeof REC, over: (s2: number, v: number) => number) => {
+    const out: typeof REC = [];
+    for (let i = 0; i + 1 < seq.length; i++) { const a = seq[i], b = seq[i + 1]; for (let s2 = a.s; s2 < b.s; s2 += 1) { const k = (s2 - a.s) / (b.s - a.s); out.push({ s: s2, p: P(a.p.lat + (b.p.lat - a.p.lat) * k, a.p.lng + (b.p.lng - a.p.lng) * k), v: over(s2, a.v + (b.v - a.v) * k) }); } }
+    out.push(seq[seq.length - 1]); return out;
+  };
+  const replay = (lp: LP, seq: { s: number; p: { lat: number; lng: number }; v: number }[], t0: number) => {
+    let live: string | null = null;
+    for (const f of seq) {
+      clock = t0 + Math.round(f.s * S); lp.noteFix(f.p.lat, f.p.lng, kmh(f.v), null);
+      const sh: any = lp.shareablePosition({ ...f.p, speed: kmh(f.v), heading: 0 });
+      if (!live && sh.share && sh.lat === f.p.lat) live = `+${f.s.toFixed(1)}s`;
+    }
+    return { live, hu: lp.parkEndedByHeadUnit(), spot: lp.carSpot() };
+  };
+  for (const N of [14, 31]) {
+    // c_logic O3+credit: his 08-29 walk densified, the first N s reading 16 km/h, then 41 s stuck on the multipath point.
+    const stuck: typeof REC = [];
+    for (let s2 = 42.543; s2 <= 83.321; s2 += 1) stuck.push({ s: s2, p: P(49.173307, -122.660864 - 0.000006 * ((s2 - 42.543) / 40.778)), v: 50 });
+    const seq = dens(REC.slice(0, 4), (s2, v) => (s2 < N ? 16 : v)).concat(stuck);
+    const run = async (lpP: Promise<LP | null>) => { const lp = await lpP; if (!lp) return null; parkWithCarPlay(lp); return replay(lp, seq, utc(19, 30, 0)); };
+    const cur = await run(fresh());
+    if (N === 14) {
+      const old = await run(freshR3());
+      if (old) ok("X0 NEGATIVE CONTROL (round 3 pair): the same 14 s walk + stuck multipath is shared LIVE and moves the spot", old.live != null && old.spot?.lat !== SPOT.lat, JSON.stringify(old));
+      else console.log("  skip X0 negative control: 732c8a6e unavailable");
+    }
+    ok(`X${N} his 08-29 walk reading 16 km/h for ${N} s + 41 s stuck on the multipath point → pinned`, !!cur && cur.live == null && cur.hu === true && cur.spot?.lat === SPOT.lat, JSON.stringify(cur));
+  }
+  {
+    // The two-outlier attacks (walkers.mts A3b/A3c/A4): the gate-O4 car-park loop (60 s at 16 km/h, credit accrues)
+    // then TWO consecutive 400 m outliers; out/back/out; a walker with every other fix on a point 335 m away.
+    const loop = (t0: number) => { const out: { t: number; p: { lat: number; lng: number }; v: number }[] = []; const v = kmh(16); for (let s2 = 0; s2 <= 60; s2++) { const a = (v * s2) / 20; out.push({ t: t0 + s2 * S, p: { lat: SPOT.lat + (20 * Math.sin(a)) / 111320, lng: SPOT.lng + (20 * (1 - Math.cos(a))) / (111320 * Math.cos((SPOT.lat * Math.PI) / 180)) }, v }); } return out; };
+    const far = north(SPOT, 400);
+    const cases: [string, (t0: number) => { t: number; p: { lat: number; lng: number }; v: number }[]][] = [
+      ["A3b loop + TWO consecutive 400 m outliers", (t0) => { const b = loop(t0); const e = b[b.length - 1].t; return [...b, { t: e + S, p: far, v: kmh(50) }, { t: e + 2 * S, p: north(far, 5), v: kmh(50) }]; }],
+      ["A3c loop + out / back / out", (t0) => { const b = loop(t0); const e = b[b.length - 1].t; return [...b, { t: e + S, p: far, v: kmh(50) }, { t: e + 2 * S, p: b[2].p, v: kmh(16) }, { t: e + 3 * S, p: north(far, -4), v: kmh(50) }]; }],
+      ["A4 walker, every other fix on a point 335 m away reading 50 km/h", (t0) => { const out = []; const pt = north(SPOT, 335); for (let s2 = 0; s2 < 60; s2++) out.push(s2 % 2 ? { t: t0 + s2 * S, p: pt, v: kmh(50) } : { t: t0 + s2 * S, p: north(SPOT, 30 + 1.4 * s2), v: kmh(5) }); return out; }],
+    ];
+    for (const [name, mk] of cases) {
+      if (name.startsWith("A3b")) {
+        const old = await freshR3();
+        if (old) {
+          parkWithCarPlay(old);
+          for (const f of mk(utc(20, 20, 0))) { clock = f.t; old.noteFix(f.p.lat, f.p.lng, f.v, null); }
+          ok("X0b NEGATIVE CONTROL (round 3 pair): loop + TWO 400 m outliers clears the witness", old.parkEndedByHeadUnit() === false, `hu=${old.parkEndedByHeadUnit()}`);
+        }
+      }
+      const lp = await fresh(); parkWithCarPlay(lp);
+      let live = false;
+      for (const f of mk(utc(20, 10, 0))) {
+        clock = f.t; lp.noteFix(f.p.lat, f.p.lng, f.v, null);
+        const sh: any = lp.shareablePosition({ ...f.p, speed: f.v, heading: 0 });
+        const isSpot = f.p.lat === SPOT.lat && f.p.lng === SPOT.lng;   // the loop starts ON the spot
+        if (sh.share && sh.lat === f.p.lat && sh.lng === f.p.lng && !isSpot) live = true;
+      }
+      ok(`X-${name} → pinned`, !live && lp.parkEndedByHeadUnit() === true, `live=${live} hu=${lp.parkEndedByHeadUnit()}`);
+    }
+  }
+}
+
+// ── Z · the review's urban-canyon walker model (review-priv3/canyon_lib.mts, same generator), 10 min per walk ───────
+// truth: a straight walk from 30 m north of the spot; drift: OU velocity σv (τ 20 s) pulled back with τ 180 s; 2 m white
+// noise; speed = walking + N(0, 1 km/h) with spikes to U(lo, hi) km/h lasting 2–6 s starting with p = 1/every per s.
+// Round 3 un-pinned seed 284 of the first variant at +129 s and 500/500 of the third (review-priv3/canyon.out).
+function canyonWalk(seed: number, walkMs: number, sigV: number, every: number, lo: number, hi: number) {
+  let a = seed >>> 0;
+  const u = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t2 = Math.imul(a ^ (a >>> 15), 1 | a); t2 = (t2 + Math.imul(t2 ^ (t2 >>> 7), 61 | t2)) ^ t2; return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296; };
+  const gz = () => { let x = 0, y = 0; while (x === 0) x = u(); while (y === 0) y = u(); return Math.sqrt(-2 * Math.log(x)) * Math.cos(2 * Math.PI * y); };
+  const out: { s: number; p: { lat: number; lng: number }; v: number }[] = [];
+  let vx = 0, vy = 0, dx = 0, dy = 0; const hdg = u() * 2 * Math.PI; let tx = 0, ty = 30; let spike = 0, spikeV = 0;
+  for (let s2 = 0; s2 <= 600; s2++) {
+    tx += walkMs * Math.sin(hdg); ty += walkMs * Math.cos(hdg);
+    vx += -vx / 20 + sigV * Math.sqrt(2 / 20) * gz(); vy += -vy / 20 + sigV * Math.sqrt(2 / 20) * gz();
+    dx += vx - dx / 180; dy += vy - dy / 180;
+    const nN = ty + dy + 2 * gz(), eE = tx + dx + 2 * gz();
+    const p = { lat: SPOT.lat + (nN / R_EARTH) * (180 / Math.PI), lng: SPOT.lng + (eE / (R_EARTH * Math.cos((SPOT.lat * Math.PI) / 180))) * (180 / Math.PI) };
+    let v = Math.max(0, walkMs + kmh(gz()));
+    if (spike <= 0 && u() < 1 / every) { spike = 2 + Math.floor(u() * 5); spikeV = kmh(lo + (hi - lo) * u()); }
+    if (spike > 0) { v = spikeV; spike--; }
+    out.push({ s: s2, p, v });
+  }
+  return out;
+}
+{
+  const variants: [string, number[], [number, number, number, number, number]][] = [
+    ["1.4 m/s, drift σv 1 m/s, spikes 15–40 km/h every ~20 s", [284, ...Array.from({ length: 19 }, (_, i) => i + 1)], [1.4, 1, 20, 15, 40]],
+    ["2.0 m/s, no drift, spikes 15–17 km/h every ~10 s", Array.from({ length: 20 }, (_, i) => i + 1), [2.0, 0, 10, 15, 17]],
+    ["2.1 m/s, no drift, spikes 15–17 km/h every ~10 s", Array.from({ length: 20 }, (_, i) => i + 1), [2.1, 0, 10, 15, 17]],
+  ];
+  {
+    const old = await freshR3();
+    if (old) {
+      parkWithCarPlay(old); const t0 = utc(23, 40, 0); let at: number | null = null;
+      for (const f of canyonWalk(284, 1.4, 1, 20, 15, 40)) { clock = t0 + f.s * S; old.noteFix(f.p.lat, f.p.lng, f.v, null); if (at == null && !old.parkEndedByHeadUnit()) at = f.s; }
+      ok("Z0 NEGATIVE CONTROL (round 3 pair): canyon walker seed 284 un-pins", at != null, `at +${at}s (review-priv3/canyon_lp.out: +129 s)`);
+    }
+  }
+  for (const [name, seeds, prm] of variants) {
+    let un = 0; const which: number[] = [];
+    for (const seed of seeds) {
+      const lp = await fresh(); parkWithCarPlay(lp);
+      const t0 = utc(23, 50, 0);
+      for (const f of canyonWalk(seed, ...prm)) { clock = t0 + f.s * S; lp.noteFix(f.p.lat, f.p.lng, f.v, null); }
+      if (!lp.parkEndedByHeadUnit()) { un++; which.push(seed); }
+    }
+    ok(`Z canyon walker ${name}: ${seeds.length} walks × 10 min → all pinned`, un === 0, `un-pinned seeds ${which.join(",")}`);
+  }
+}
+
+// ── Q · slow traffic after a witnessed park proves in bounded time (review-priv3/jam_lp.mts, the SLOW path) ───────
+// v2 kept the driver (and his own marker) at the old spot for as long as traffic stayed slow: 30 min / 2 km measured.
+{
+  const jam = async (vpk: number, mv: number, st: number, lpP: Promise<LP | null> = fresh()) => {
+    const lp = await lpP; if (!lp) return -1; parkWithCarPlay(lp);
+    let x = 0; let firstLive: number | null = null;
+    for (let s2 = 1; s2 <= 1800 && firstLive == null; s2++) {
+      const c = s2 % (mv + st); const v = c < mv ? kmh(vpk) * Math.sin((Math.PI * c) / mv) : 0;
+      x += v; clock = utc(21, 30, 0) + s2 * S;
+      if (v > 0.3) { const p = north(SPOT, x); lp.noteFix(p.lat, p.lng, v, 0); const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 }); if (sh.share && sh.lat === p.lat) firstLive = s2; }
+    }
+    return firstLive;
+  };
+  const j1 = await jam(16, 20, 30), j2 = await jam(20, 15, 25), j3 = await jam(18, 10, 40);
+  const old = await jam(16, 20, 30, freshR3());
+  if (old !== -1) ok("Q0 NEGATIVE CONTROL (round 3 pair): the 16 km/h jam is still pinned after 30 min", old == null, `first live ${old}`);
+  // Bounds = the measured value rounded up to the next minute (1 Hz, no position noise; 3 m noise adds 1–3 min — see
+  // src/parkRearm.ts). v2: never, 30 min measured. The pre-fix module: 4–8 s (it had no witnessed-park protection).
+  ok("Q1 jam (20 s rolling to 16 km/h, 30 s standing, 1.13 m/s average) goes live within 6 min", j1 != null && j1 <= 360, `+${j1}s`);
+  ok("Q2 jam (15 s rolling to 20 km/h, 25 s standing, 1.32 m/s average) goes live within 5 min", j2 != null && j2 <= 300, `+${j2}s`);
+  ok("Q3 queue (10 s rolling to 18 km/h, 40 s standing, 0.63 m/s average) goes live within 9 min", j3 != null && j3 <= 540, `+${j3}s`);
+}
+
 if (baseFile) rmSync(join(baseFile, ".."), { recursive: true, force: true });
+if (r3Dir) rmSync(r3Dir, { recursive: true, force: true });
 if (fails) { console.log(`FAIL park_rearm (${fails})`); process.exit(1); }
 console.log("PASS park_rearm");

@@ -154,7 +154,10 @@ let _parkWitnessed = false;   // see noteCarConnected / parkEndedByHeadUnit
 let _spotDrop: string | null = null;   // why hydrate refused the persisted spot (carSpotTrust) — printed by draw-cmp
 let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
-let _hydrated = false;
+// Hydration is SINGLE-FLIGHT (Codex 3rd pass, 2026-09-25): every caller awaits the same read, and until it has
+// resolved `_hydrateDone` is false and noteFix trusts no fix on its own (see the head of noteFix).
+let _hydrating: Promise<void> | null = null;
+let _hydrateDone = false;
 let _drivingLatched = false;
 // True when the latch was RESTORED from disk on hydrate rather than earned by a real
 // >= 15 km/h fix in this process. A provisional latch cannot refresh _lastDrivingAt —
@@ -188,10 +191,13 @@ export function subscribeHeadUnit(fn: (attached: boolean) => void): () => void {
   return () => { _huListeners.delete(fn); };
 }
 
-/** Hydrate the persisted car spot + driving stamp. Idempotent; safe to call anywhere. */
-export async function hydrateLocationPrivacy(): Promise<void> {
-  if (_hydrated) return;
-  _hydrated = true;
+/** Hydrate the persisted car spot + driving stamp. Single-flight: every caller gets the same promise, and it resolves
+ * only once the persisted park (and its witness) is known. Safe to call anywhere. */
+export function hydrateLocationPrivacy(): Promise<void> {
+  if (!_hydrating) _hydrating = _hydrateOnce().finally(() => { _hydrateDone = true; });
+  return _hydrating;
+}
+async function _hydrateOnce(): Promise<void> {
   try {
     const [spotRaw, drivingRaw] = await Promise.all([
       AsyncStorage.getItem(CAR_SPOT_KEY),
@@ -301,10 +307,10 @@ export function noteCarConnected(connected: boolean, source: HeadUnitSource = "m
   // ended at the current car spot. GPS alone cannot tell a walk-away from a >90 s crawl
   // — that ambiguity is the entire reason the self-marker's 75 m separation gate exists
   // (map.tsx, 2026-08-05) — but a disconnect is unambiguous, so it may bypass that gate.
-  // Cleared by the next CONNECT and by a PROVEN drive-away (noteFix + src/parkRearm.ts, 2026-09-25: within the last
-  // 120 s, 15 s credited at >= 15 km/h AND 250 m net AND 250 m from the spot — one fast fix no longer does it). A head
-  // unit unplugged mid-drive therefore pins the unplug-point spot until that proof (~15–30 s on an open road, up to
-  // ~70 s in slow stop-and-go), then the drive goes live again (privacy-favouring; CARPLAY.md §6c).
+  // Cleared by the next CONNECT and by a PROVEN drive-away (noteFix + src/parkRearm.ts — one fast fix no longer does
+  // it). A head unit unplugged mid-drive therefore pins the unplug-point spot until that proof — measured at 1 Hz:
+  // 24–31 s pulling away, 23–71 s on stop-sign grids, 52–103 s in stop-and-go, 4–11 min in jams averaging 0.6–1.3 m/s
+  // (src/parkRearm.ts header) — then the drive goes live again (privacy-favouring; CARPLAY.md §6c).
   // ⚠ Transition-based on purpose: a writer repeating `false` (or `true`) is a no-op
   // here, so this stays correct even if a spurious repeat-writer ever returns.
   if (_carConnected && !next) {
@@ -317,8 +323,8 @@ export function noteCarConnected(connected: boolean, source: HeadUnitSource = "m
     // latch (park_rearm_test W, negative control on the pre-fix module). A head unit letting go is proof the drive
     // ended, so the latch drops here with the witness; it re-arms only through noteFix's re-arm proof
     // (src/parkRearm.ts) or a reconnect. Consequence, accepted and privacy-favouring: a CarPlay / Android Auto unplug
-    // MID-DRIVE shares the unplug-point car spot until that proof (~15–30 s on an open road, up to ~70 s in slow
-    // stop-and-go). The 90 s parked STATUS label is unchanged — isParked() reads _lastDrivingAt, untouched here.
+    // MID-DRIVE shares the unplug-point car spot until that proof (the measured bounds are in the note above). The
+    // 90 s parked STATUS label is unchanged — isParked() reads _lastDrivingAt, untouched here.
     _drivingLatched = false;
     _latchProvisional = false;
     _parkRearm.reset();   // a new witness proves from nothing (a proof left over from an earlier park must not count)
@@ -422,6 +428,18 @@ function carAttached(): boolean {
 export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: number | null): void {
   // 🔒 NAV-LOCK begin priv-notefix-driving-latch — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
   if (typeof lat !== "number" || typeof lng !== "number") return;
+  // ── NOTHING IS PROVEN BEFORE THE SAVED PARK IS KNOWN (Codex 3rd pass, 2026-09-25) ────────────────────────────────
+  // Jeff: "it should not follow me when i discconect from car play... fix it and lock it." Reproduced on the real module:
+  // at a relaunch, two >= 15 km/h fixes that land before storage resolves first arm the latch, then write `_carSpot` —
+  // and hydrate's adopt (`if (spotRaw && !_carSpot)`) then skips the saved hu=1 witness, so a later 12 km/h walking
+  // fix was shared live. Until hydration resolves, a fix may not arm the latch, write the spot or clear anything; it
+  // only starts the read. A head unit asserted NOW still counts (carAttached(): its fixes are the car's). The latch
+  // cannot be armed here, so shareablePosition's movingNow cannot share live on fix evidence either.
+  // Gate: tools/sim-qc/park_rearm_test.mts Y (1, 2 and 5 fixes before a delayed read).
+  if (!_hydrateDone) {
+    void hydrateLocationPrivacy();
+    if (!carAttached()) return;
+  }
   const spd = speedMs ?? 0;
   const now = Date.now();
   // ── ARM AND RECORD MUST NOT HAPPEN IN THE SAME CALL (2026-08-29) ──────────────

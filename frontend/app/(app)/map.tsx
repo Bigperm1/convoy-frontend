@@ -5194,9 +5194,10 @@ export default function MapScreen() {
         // >90 s crawl. A head-unit DISCONNECT can: the drive provably ended at the
         // spot. So a park that ended with CarPlay/AA detaching pins the marker to the
         // car even from the couch 20 m away — "worked in build 72" was actually the
-        // >75 m case; close parks never pinned until this. A crawl can't regress: no
-        // disconnect happens mid-drive, and noteFix clears the flag on any driving fix
-        // (the unplugged-mid-drive case).
+        // >75 m case; close parks never pinned until this. Since 2026-09-25 (privacy) noteFix
+        // clears the flag only on a PROVEN drive-away (src/parkRearm.ts), so after a head
+        // unit is unplugged MID-DRIVE the marker stays at the unplug point until that proof:
+        // 24–31 s pulling away, up to 4–11 min in a slow jam (measured, CARPLAY.md §6c).
         // 🔒 NAV-LOCK begin map-selfcar-parked-pin — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         selfParked={
           presenceParked && navMode !== "turn-by-turn" && privacyHydrated &&

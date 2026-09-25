@@ -32,6 +32,8 @@
 // handed to Mapbox below is [lng, lat].
 
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
+import { overviewSizePt, isOverviewZoom } from "./overviewSize";
+import { RETURN_FLY_MS, predictAhead, returnFlyStep } from "./returnFly";
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
 import { createFramePacer, frameDue, msUntilDue, navMapFps } from "./framePacer";
@@ -1216,7 +1218,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, returnFlyRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1249,6 +1251,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // direct setCamera rubber-banded against it. Automatic framing drifts; the driver's
   // own input lands. Cleared by pushCam once consumed.
   zoomSnapRef?: React.MutableRefObject<boolean>;
+  // Return-from-overview fly (src/returnFly.ts): -1 armed → the next push is ONE flyTo to the chase frame, > 0 = flying
+  // until then (pushes stand down), 0 idle. Armed by the car's crew-hold expiry and the phone's recenter after a crew fit.
+  returnFlyRef?: React.MutableRefObject<number>;
   getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any };
   // Optional CAMERA-heading override (the MODEL keeps its real heading). Read live
   // per frame; undefined = normal heading-up chase. CarPlay's compass north-up
@@ -1558,6 +1563,42 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // hard snap (first fix / recenter / resume) jump straight to target — no glide
     // from a stale value. Time-based low-pass so eco 30fps and premium 60fps match.
     const now = Date.now();
+    // RETURN FLY (2026-09-24, Jeff: "can it do a cool animation where it like swivels and zooms down to where I'm
+    // driving?"). The first push after a crew overview is one flyTo to the chase frame, aimed at where the car will be
+    // when it lands; pushes stand down while it runs; the push that follows lands on that frame. See src/returnFly.ts.
+    if (returnFlyRef) {
+      const st = returnFlyStep(returnFlyRef.current as any, now);
+      if (st.action === 'wait') { returnFlyRef.current = st.next; lastCamAt.current = now; return; }
+      if (st.action === 'fly') {
+        returnFlyRef.current = st.next;
+        if (zoomSnapRef) zoomSnapRef.current = false;
+        camZoom.current = c.zoomLevel; camPitch.current = c.pitch;
+        camZoomGoal.current = c.zoomLevel; camPitchGoal.current = c.pitch;
+        if (camZoomOutRef) camZoomOutRef.current = camZoom.current;
+        if (camPitchOutRef) camPitchOutRef.current = camPitch.current;
+        const flyCarHdg = typeof hdg === 'number' ? hdg : c.heading;
+        if (typeof flyCarHdg === 'number') camHdgLag.current = flyCarHdg;
+        const aim = predictAhead(la, ln, flyCarHdg, speedMs, RETURN_FLY_MS);
+        const flyHeading = (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : flyCarHdg;
+        try {
+          logEvent(`cam-return-fly surf=${probeRole} ms=${RETURN_FLY_MS} z=${Number(c.zoomLevel).toFixed(2)} pitch=${Math.round(c.pitch)} hdg=${typeof flyHeading === 'number' ? Math.round(flyHeading) : 'null'} spd=${(typeof speedMs === 'number' ? speedMs : 0).toFixed(1)}`);
+        } catch {}
+        try {
+          cameraRef.current.setCamera({
+            centerCoordinate: [aim.lng, aim.lat],
+            heading: flyHeading,
+            zoomLevel: c.zoomLevel,
+            pitch: c.pitch,
+            padding: c.padding,
+            animationDuration: RETURN_FLY_MS,
+            animationMode: 'flyTo',
+          });
+        } catch {}
+        lastCamAt.current = now;
+        return;
+      }
+      returnFlyRef.current = st.next;   // 0 after a landing (this push lands the frame) or unchanged
+    }
     const dt = lastCamAt.current ? Math.max(0, Math.min(200, now - lastCamAt.current)) : 16;
     lastCamAt.current = now;
     // A driver-initiated zoom lands NOW (see zoomSnapRef). One-shot: cleared here so the
@@ -2252,7 +2293,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     : (typeof liveZ === 'number' && liveZ > 0) ? liveZ
     : (typeof camZoom.current === 'number') ? camZoom.current
     : (getCam ? getCam().zoomLevel : 17);
-  const perTickScale = perTick ? Math.round(modelScaleForPoints(sizePt!, lenUnits!, perTickZoom, r.lat) * 1000) / 1000 : 0;
+  // Overview rule (src/overviewSize.ts, 2026-09-24): 28 pt for every car below z 12, own size from z 14.
+  const perTickScale = perTick ? Math.round(modelScaleForPoints(overviewSizePt(sizePt!, perTickZoom), lenUnits!, perTickZoom, r.lat) * 1000) / 1000 : 0;
   const perTickLift = Math.round(liftRef.current * 100) / 100;
   // 🔒 NAV-LOCK end mbx-selfcar-pertick-size
   // 🔒 NAV-LOCK begin mbx-selfcar-source-layers — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
@@ -2417,7 +2459,7 @@ export function PeerScanModels({ peers, zoom, sizePt, onPress }: {
   const fc = useMemo(() => ({
     type: "FeatureCollection" as const,
     features: peers.map((p) => {
-      const scl = Math.round(modelScaleForPoints(sizePt, CAR_LEN_UNITS, z, p.lat) * 1000) / 1000;
+      const scl = Math.round(modelScaleForPoints(overviewSizePt(sizePt, z), CAR_LEN_UNITS, z, p.lat) * 1000) / 1000;
       const hdg = typeof p.heading === "number" && Number.isFinite(p.heading) ? p.heading : 0;
       return {
         type: "Feature" as const,
@@ -2459,8 +2501,10 @@ const PEER_SCALE_EXPR: any = ["get", "scl"];
 const PEER_ROT_EXPR: any = ["get", "rot"];
 const PEER_TRN_EXPR: any = ["get", "trn"];
 
-function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading?: number; onPress?: () => void }) {
+function CarMarker({ car, mapHeading = 0, onPress, sizePt = 44 }: { car: CarPoint; mapHeading?: number; onPress?: () => void; sizePt?: number }) {
   const src = getVehiclePngOrDefault(car.color);
+  // Overview rule (src/overviewSize.ts, 2026-09-24): the caller passes overviewSizePt(44, zoom); k scales the 44 pt design.
+  const k = sizePt > 0 ? sizePt / 44 : 1;
   const heading = typeof car.heading === "number" && Number.isFinite(car.heading) ? car.heading : 0;
   const rotation = (((heading - mapHeading) % 360) + 360) % 360;
   return (
@@ -2470,17 +2514,17 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // Peer uses the ARROW appearance: a 2-tone navigation chevron in their
           // paint (primary body over a secondary outline), rotated to heading.
           // Peers are MarkerViews (2D), so this mirrors the self 3D arrow flatly.
-          <View style={[{ width: 40, height: 40, alignItems: "center", justifyContent: "center", transform: [{ rotate: `${rotation}deg` }] }]}>
-            <MaterialCommunityIcons name="navigation" size={38} color={car.arrSec || "#FFFFFF"} style={{ position: "absolute" }} />
-            <MaterialCommunityIcons name="navigation" size={30} color={car.arrPri || "#2DEC86"} />
+          <View style={[{ width: 40 * k, height: 40 * k, alignItems: "center", justifyContent: "center", transform: [{ rotate: `${rotation}deg` }] }]}>
+            <MaterialCommunityIcons name="navigation" size={38 * k} color={car.arrSec || "#FFFFFF"} style={{ position: "absolute" }} />
+            <MaterialCommunityIcons name="navigation" size={30 * k} color={car.arrPri || "#2DEC86"} />
           </View>
         ) : car.cls ? (
           // Peer broadcasts a class appearance: live tinted sprite in THEIR paint.
           // Explicit width/height (not just the child's) so @rnmapbox's Android
           // MarkerView measures a concrete size for the annotation — otherwise
           // the wrapper can measure 0 → blank/cut-off peer markers on Android.
-          <View style={[{ width: 44, height: 44, transform: [{ rotate: `${rotation}deg` }] }]}>
-            <ClassSprite vehicleClass={car.cls} primary={car.clsPri} secondary={car.clsSec} size={44} />
+          <View style={[{ width: 44 * k, height: 44 * k, transform: [{ rotate: `${rotation}deg` }] }]}>
+            <ClassSprite vehicleClass={car.cls} primary={car.clsPri} secondary={car.clsSec} size={44 * k} />
           </View>
         ) : (
         <Image
@@ -2490,7 +2534,7 @@ function CarMarker({ car, mapHeading = 0, onPress }: { car: CarPoint; mapHeading
           // the GREY reference makes every peer's car the same size on the map. See
           // vehiclePngScale; 1.0 for grey/white so those are untouched.
           style={[styles.car,
-                  { transform: [{ rotate: `${rotation}deg` }, { scale: vehiclePngScale(car.color) }] }]}
+                  { transform: [{ rotate: `${rotation}deg` }, { scale: vehiclePngScale(car.color) * k }] }]}
           resizeMode="contain"
           fadeDuration={0}
         />
@@ -3020,6 +3064,9 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   // tuned against actual zoom values (read "too small at zoom X" instead of guessing).
   const [dbgZoom, setDbgZoom] = useState(0);
   const lastZoomRef = useRef<number>(0);
+  // Crew overview → return fly (2026-09-24). Set by the fitCrew effect; consumed on the lock-ready edge below.
+  const crewOverviewRef = useRef(false);
+  const returnFlyRef = useRef<number>(0);
   // The last cut anchor on the current ribbon partition (anchorCutM) — the only hint the
   // anchor search is allowed to use; keyed by the partition object so a swap re-seeds.
   const cutAnchorHintRef = useRef<CutAnchorHint>(null);
@@ -3076,6 +3123,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
         if (typeof pr?.lat === "number" && typeof pr?.lng === "number") pts.push([pr.lng, pr.lat]);
       }
       if (pts.length === 0) return;
+      crewOverviewRef.current = true;   // the next recenter flies home (see the lock-ready edge above)
       if (pts.length === 1) {
         cameraRef.current?.setCamera({ centerCoordinate: pts[0], zoomLevel: 13.5, pitch: 0, heading: 0, animationDuration: 550, animationMode: "easeTo" });
         return;
@@ -3323,6 +3371,14 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
   const lockReadyRef = useRef(false);
   lockReadyRef.current = readyRef.current && coldLockDone && followUser && !placesShown && headingUp;
   // 🔒 NAV-LOCK end mbx-follow-pad-lockstep-gate
+  // RETURN FLY ARMING (2026-09-24): the driver recentres after a crew overview → the lockstep comes back on this
+  // edge; instead of the one-frame cut, arm one flyTo (pushCam runs it). Only while the map is still at an overview zoom.
+  const lockWasReadyRef = useRef(false);
+  if (lockReadyRef.current && !lockWasReadyRef.current && crewOverviewRef.current) {
+    crewOverviewRef.current = false;
+    if (isOverviewZoom(lastZoomRef.current)) returnFlyRef.current = -1;
+  }
+  lockWasReadyRef.current = lockReadyRef.current;
 
   // `cam-mode` receipt (2026-09-03). Rodrigo: "my phone compass was changing directions
   // randomly, CarPlay was fine" on a 15-minute drive with CarPlay connected. heat-probe's
@@ -4733,6 +4789,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             sizePt={SELF_MARKER_PT}
             lenUnits={selfIsArrow ? ARROW_LEN_UNITS : CAR_LEN_UNITS}
             mapRef={mapRef}
+            returnFlyRef={returnFlyRef}
             liveZoomRef={lastZoomRef}
             refreshRef={selfRefreshRef}
             headingOffset={selfIsArrow ? ARROW_MODEL_HEADING_OFFSET : undefined}
@@ -4769,7 +4826,7 @@ function ConvoyMapbox(props: ConvoyMapboxProps) {
             always render above the route LineLayers, and we declare the cars LAST
             so they sit on top of the other pins too. */}
         {cars.filter((c) => c.id !== SELF_ID && !c.scanId).map((c) => (
-          <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
+          <CarMarker key={c.id} car={c} mapHeading={mapHeadingDeg} sizePt={overviewSizePt(44, lastZoomRef.current)} onPress={() => { if (c.peer) onPeerPress?.(c.peer); }} />
         ))}
         {/* Peers with a finished 3D scan draw as their own map twin — the same GLB the driver
             sees for themselves — instead of the class sprite (2026-09-03, Jeff: Olaf's peer

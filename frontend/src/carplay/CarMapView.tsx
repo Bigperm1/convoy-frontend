@@ -19,6 +19,7 @@
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { overviewSizePt, isOverviewZoom } from '../overviewSize';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, rfPredict, rfFix, rfPose, type RfState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
@@ -1063,7 +1064,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // scale and the camera padding — never to an icon. Without it a peer keeps a fixed 44pt
     // while the driver's own car shrinks with the canvas, so on AA the crew would tower over
     // the driver on a canvas a quarter the area of CarPlay's.
-    const target = PEER_ICON_PT * (canvasScale > 0 ? canvasScale : 1);
+    // Overview rule (src/overviewSize.ts, 2026-09-24): 28 pt below z 12, 44 pt from z 14, on the live zoom.
+    const liveZ = typeof carLiveZoomRef.current === 'number' && carLiveZoomRef.current > 0 ? carLiveZoomRef.current : 17;
+    const target = overviewSizePt(PEER_ICON_PT, liveZ) * (canvasScale > 0 ? canvasScale : 1);
     return { img: name, size: Math.round(iconSizeForAsset(asset, target) * ink * 1000) / 1000 };
   };
 
@@ -1168,6 +1171,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // fitBounds over the whole crew isn't overwritten on the next rAF tick. Expires
   // on its own — no cleanup path can strand the chase cam off.
   const camHoldUntilRef = useRef(0);
+  // Crew overview → return fly (2026-09-24, src/returnFly.ts): crewFit sets the flag; the hold's expiry edge in getCam
+  // arms ONE flyTo that pushCam (SelfCarModel) runs instead of the one-frame snap.
+  const crewOverviewRef = useRef(false);
+  const returnFlyRef = useRef<number>(0);
   // ── ZOOM SNAP-BACK (Jeff, 2026-08-11) ───────────────────────────────────────
   // "when the zoom buttons first showed up I used them and they worked, but they did not
   //  snap back to the correct zoom/chase cam/tilt that it should have been based on my
@@ -1391,7 +1398,15 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // chase zoom LANDS, same as a button press. This runs at frame rate (getCam), so the
     // edge is caught within one frame of expiring.
     const holdActive = Date.now() < camHoldUntilRef.current;
-    if (camHoldWasActiveRef.current && !holdActive) zoomSnapRef.current = true;
+    if (camHoldWasActiveRef.current && !holdActive) {
+      zoomSnapRef.current = true;
+      // A crew overview just lapsed: fly home instead of cutting (only if the map is still zoomed out).
+      if (crewOverviewRef.current) {
+        crewOverviewRef.current = false;
+        const lz = carLiveZoomRef.current;
+        if (typeof lz === 'number' && isOverviewZoom(lz)) returnFlyRef.current = -1;
+      }
+    }
     camHoldWasActiveRef.current = holdActive;
     camHdgOverrideRef.current = (carNorthUpRef.current || Date.now() < camHoldUntilRef.current)
       ? 0
@@ -1680,6 +1695,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             // recomputes on the next store tick (~1s); without this the chase cam
             // kept pushing frames over the overview and it never landed.
             camHoldUntilRef.current = Date.now() + 15000;
+            crewOverviewRef.current = true;
             lockReadyRef.current = false;
             // FACE NORTH for the duration of the overview. This deliberately does NOT
             // set the carNorthUp STATE any more: that is the compass toggle's latch,
@@ -2516,6 +2532,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           // invisible phone map at 30fps on every screen-off CarPlay drive.
           carFramePump
           zoomSnapRef={zoomSnapRef}
+          returnFlyRef={returnFlyRef}
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}
@@ -2840,7 +2857,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         peers={(s.peers || [])
           .filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number' && !!p.scanId)
           .map((p) => ({ id: 'peer_' + p.id, lat: p.lat as number, lng: p.lng as number, heading: p.heading, scanId: p.scanId!, parked: p.status === 'parked' }))}
-        zoom={trimZoom}
+        // The map's LIVE zoom, not trimZoom: trimZoom is clamped to the chase range (≥ CHASE_ZOOM_CLAMP_MIN), so at a
+        // crew overview a scanned twin was scaled for z 10.5 while the camera sat at z 9.6 — Olaf's tiny car on
+        // Jeff's 2026-09-24 photo. PeerScanModels applies the overview size rule itself.
+        zoom={typeof carLiveZoomRef.current === 'number' && carLiveZoomRef.current > 0 ? carLiveZoomRef.current : trimZoom}
         sizePt={CARPLAY_CAR_PT * uiScale}
       />
       {(s.peers || []).some((p) => typeof p.lat === 'number' && typeof p.lng === 'number') && (

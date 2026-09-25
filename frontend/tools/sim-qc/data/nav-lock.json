@@ -334,6 +334,14 @@
         "src/carplay/carActions.ts:CAR_MAP_BUTTON_CONFIG { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: 'car-compass', image: CAR_ICON_COMPASS, focusedImage: CAR_ICON_COMPASS }, ], } → { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, ], }",
         "src/carplay/carActions.ts:AA_MAP_BUTTONS [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: 'car-compass', icon: CAR_ICON_COMPASS, visibility: AA_PERSISTENT }, ] → [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, ]"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: ship the fold fix — anchorCutM's global re-check at 20 m (src/ribbonAnchor.ts) and the routeFold escape inside projectOntoRoute (mbx-route-project-a), John's King George U-turn reroute",
+      "changes": [
+        "src/ribbonAnchor.ts: code 20500d1e2f0d → 29745fc1f744",
+        "src/ConvoyMapbox.tsx#mbx-route-project-a region a8e0d4f36bf0 → f706a19f4406"
+      ]
     }
   ],
   "files": {
@@ -358,7 +366,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/ribbonAnchor.ts": {
-      "hash": "sha256:20500d1e2f0d7a6efa61846783ffafeafad5214c151384233537c3520e84ddc1",
+      "hash": "sha256:29745fc1f744c814425a26d7f0d8533d05468f092db2c5b704b3f0e9315fc1da",
       "why": "pure drive-engine module: code-locked"
     },
     "src/coldStepHeal.ts": {
@@ -563,7 +571,7 @@
         "mbx-ribbon-trim-ease": "sha256:6f86262daa16d7ec055314829e2c3991461d49835c03a994d031e37a06641064",
         "mbx-route-kind-colours": "sha256:b305b8e90c855b20980ac9b938730b44d240b693b2eeb0e7ae0baff58c47c5e5",
         "mbx-speed-kmh-input": "sha256:d05c92af62557c319cf83fe575a030278d66dc823f335eb026841688e3b6490b",
-        "mbx-route-project-a": "sha256:a8e0d4f36bf0b800e8d9e42ac1525a511f281f88916f5d553915cd38cf4a3cb9",
+        "mbx-route-project-a": "sha256:f706a19f4406df5764cce24d74649a64e400f6969173194dc2f2a08a3ff55de4",
         "mbx-route-project-b": "sha256:ba3e39a861b99d6c92f255637d5761adafbe0d547ef90ccc857fad5508977707",
         "mbx-nose-bearing-pick": "sha256:2b54d698499b682e856d51d16f94f56a4af289bb63e092115af606166382b3e8",
         "mbx-route-start-bearing": "sha256:8060d80ce47ad81dce05fa344c249acc446806ce1b324b97db94188ac07e837b",

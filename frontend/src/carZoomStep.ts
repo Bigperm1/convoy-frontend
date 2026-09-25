@@ -46,6 +46,11 @@ export const CAR_ZOOM_RELEASE_SLEW_PER_S = 0.5;
  *  press (the driver's framing). A release carries its own target `to`, which follows the live follow zoom at no more
  *  than CAR_ZOOM_RELEASE_SLEW_PER_S (advanced by carZoomApply at `toAt`), so it lands on a moving target smoothly. */
 export type CarZoomEase = { kind: "step" | "release"; from: number; v0: number; start: number; dur: number; to?: number; toAt?: number };
+/** What an owner INSTANT write actually put on the camera (CarMapView applyZoomNow / ownerSetPose → zoomSnapRef): the
+ *  lockstep re-seeds from THIS on its next push, however late — never from targets that moved since (a stale one-shot
+ *  used to snap pitch 45° on a +/- press minutes after a compass tap on a stopped car; review of 1f2faada). heading is
+ *  the CHASE heading the write was made for (the lag's state), not a north-up override. */
+export type CamWriteSeed = { zoom: number; pitch?: number; heading?: number };
 /** Shared by CarMapView (writes eases) and pushCam (applies them, stamps pushAt). */
 export type CarZoomChannel = { ease: CarZoomEase | null; pushAt: number };
 export type CarZoomLog = { at: number; pending: string | null; n: number };

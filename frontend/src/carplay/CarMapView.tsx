@@ -21,8 +21,8 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { overviewSizePt } from '../overviewSize';
 import { CREW_RETURN_MS, CREW_FIT_EASE_MS, crewReturnEdge, crewReturnDue } from '../crewReturn';
-import { carZoomPress, carZoomRelease, carZoomDest, carZoomRest, carZoomNow, carZoomHoldLapsed, carZoomJobOwed, carZoomLogGate, newCarZoomChannel, newCarZoomLog, CAR_ZOOM_MOVING_PUSH_MS, CAR_ZOOM_STEP_MS } from '../carZoomStep';
-import { returnFlyInFlight, returnFlyReaim } from '../returnFly';
+import { carZoomPress, carZoomRelease, carZoomDest, carZoomRest, carZoomNow, carZoomHoldLapsed, carZoomJobOwed, carZoomLogGate, newCarZoomChannel, newCarZoomLog, CAR_ZOOM_MOVING_PUSH_MS, CAR_ZOOM_STEP_MS, type CamWriteSeed } from '../carZoomStep';
+import { returnFlyInFlight, returnFlyReaim, RETURN_FLY_GRACE_MS } from '../returnFly';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, rfPredict, rfFix, rfPose, type RfState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
@@ -724,8 +724,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // Standard then loads with default lighting and NO 3D objects (a 2D-looking live
   // map). onDidFinishLoadingStyle fires once the style (incl. imports) is actually
   // in, so bump styleGen → remounts <StyleImport> → config re-applies on the loaded
-  // style. Also re-assert the pitched camera if the first frame hasn't painted yet,
-  // so the very first visible frame is guaranteed pitched at the driver.
+  // style. (The first visible frame is put on the driver by the cold-start snap — see onDidFinishLoadingStyle.)
   const [styleGen, setStyleGen] = useState(0);
 
   // 🔒 NAV-LOCK begin car-hasfix — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
@@ -1423,7 +1422,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     const now = Date.now();
     zoomLog(now, null);
     // A fly IN FLIGHT owns the camera (pushes stand down until it lands): nothing to pump — no 60 Hz no-op pushes.
-    if (returnFlyRef.current > 0 && now < returnFlyRef.current) return false;
+    if (returnFlyRef.current > 0 && now < returnFlyRef.current + RETURN_FLY_GRACE_MS) return false;   // + the native end's grace
     const crewDue = crewReturnDue(camHoldWasActiveRef.current, camHoldUntilRef.current, now);
     // An ARMED fly (-1, or a re-aim < -1) is owed too: getCam also runs outside a push (the re-assert and cold-start
     // snap read its padding), and an edge it consumed there must not wait for the car to move before the fly starts.
@@ -1432,7 +1431,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // keep that landing seed until it moved, and pushCam then preferred it over any framing set since — a 1.0-level
     // cut on pulling away after a pinch. The landing is owed now: one push lands it (a no-op on screen — it is the
     // frame the fly ended on) and retires the deadline and the seed. A landing seed never outlives its fly.
-    const landingDue = returnFlyRef.current > 0 && now >= returnFlyRef.current;
+    const landingDue = returnFlyRef.current > 0 && now >= returnFlyRef.current + RETURN_FLY_GRACE_MS;
     if ((crewDue || flyArmed) && !lockReadyRef.current && paintedRef.current && aaLiveRef.current.hasFix &&
         now >= camHoldUntilRef.current) lockReadyRef.current = true;
     if (!lockReadyRef.current) return false;   // nothing can push yet (overview still on, no paint, no fix): never spin
@@ -1571,7 +1570,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     if (!painted || !hasFix || !cameraRef.current) return;
     // Through the camera owner (2026-09-25): a fix regained mid-fly / mid-overview / mid-ease is reconciled, and the
     // zoom is the owner's framing, never raw followZoom (ownerSetPose).
-    ownerSetPose('system', { centerCoordinate: [lng, lat], heading: camHdgRef.current, pitch: followPitch, padding: getCam().padding });
+    // followHeadingDeg is this render's camHdgRef.current (🔒 car-held-heading-pose-yaw) — the same value.
+    ownerSetPose('system', { centerCoordinate: [lng, lat], heading: followHeadingDeg, pitch: followPitch, padding: getCam().padding });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [painted, hasFix]);
   // 🔒 NAV-LOCK end car-cam-coldstart-snap
@@ -1601,7 +1601,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // and on the crew-hold expiry edge, so pushCam lands it rather than low-passing it with the slow automatic-framing
   // filter. See zoomSnapRef in SelfCarModel. The +/- buttons and tap-zoom no longer set it (2026-09-25): they EASE
   // through zoomChRef (applyZoomEased), which moves the zoom only — no pitch or heading-lag snap.
-  const zoomSnapRef = useRef(false);
+  const zoomSnapRef = useRef<boolean | CamWriteSeed>(false);
   // Was the crew-overview hold active on the previous frame? (expiry-edge detector)
   const camHoldWasActiveRef = useRef(false);
   // 🔒 NAV-LOCK begin car-zoom-apply-now — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
@@ -1615,31 +1615,38 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // if a direct camera write appears anywhere else in this file. true = written now.
   const applyZoomNow = (kind: 'gesture' | 'system' = 'gesture'): boolean => {
     if (takeOverNativeCam(Date.now(), kind)) return false;
-    zoomSnapRef.current = true;
+    const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
+    // The SAME destination getCam returns (carZoomDest), so the two still "can never disagree" with a +/- framing on.
+    // Pinch, recenter, compass and the AA re-assert clear the framing first, so for them this is exactly the old
+    // followZoom + bias, clamped. Still instant.
+    const zoom = carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX);
+    // The RECORD of this write (review of 1f2faada): the lockstep's next push re-seeds from what was written, however late
+    // it comes — a bare `true` made it snap to whatever the targets had become by then (a stopped car: minutes later).
+    zoomSnapRef.current = { zoom };
     try {
-      const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
-      cameraRef.current?.setCamera({
-        // The SAME destination getCam returns (carZoomDest), so the two still "can never disagree" with a +/- framing
-        // on. Pinch, recenter, compass and the AA re-assert clear the framing first, so for them this is exactly the old
-        // followZoom + bias, clamped. Still instant.
-        zoomLevel: carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX),
-        animationDuration: 0,
-        animationMode: 'none',
-      });
+      cameraRef.current?.setCamera({ zoomLevel: zoom, animationDuration: 0, animationMode: 'none' });
     } catch {}
     return true;
   };
-  /** The owner's instant FULL-pose write (cold-start snap, pending re-centre, style-load seed, AppState re-assert,
-   *  compass heading): the same reconciliation first; the zoom is the owner's framing. zoomSnapRef makes the next push
-   *  re-seed pushCam from the targets, as applyZoomNow does. */
+  /** The owner's instant FULL-pose write (the cold-start snap, the AppState re-assert, compass; the pending re-centre,
+   *  unreachable today): the same reconciliation first; the zoom is the owner's framing; the HEADING follows the north-up
+   *  rule every lockstep push follows (camHdgOverrideRef wins — the re-assert used to write heading-up under a latched
+   *  compass and cut 90° on pull-away; review of 1f2faada); zoomSnapRef records what was written (the chase heading
+   *  given, not the override, seeds the lag). */
   const ownerSetPose = (kind: 'gesture' | 'system', pose: { centerCoordinate?: number[]; heading?: number; pitch?: number; padding?: any }): boolean => {
     if (takeOverNativeCam(Date.now(), kind)) return false;
-    zoomSnapRef.current = true;
+    const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
+    const zoom = carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX);
+    const ov = camHdgOverrideRef.current;
+    const heading = typeof ov === 'number' ? ov : pose.heading;
+    zoomSnapRef.current = { zoom, pitch: pose.pitch, heading: pose.heading };
     try {
-      const { followZoom: fz, previewMulti: pv } = camInputsRef.current;
       cameraRef.current?.setCamera({
-        ...pose,
-        zoomLevel: carZoomDest(manualZoomRef.current, fz, userZoomRef.current, pv ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN, CAR_ZOOM_MAX),
+        ...(pose.centerCoordinate ? { centerCoordinate: pose.centerCoordinate } : {}),
+        ...(typeof heading === 'number' ? { heading } : {}),
+        ...(typeof pose.pitch === 'number' ? { pitch: pose.pitch } : {}),
+        ...(pose.padding ? { padding: pose.padding } : {}),
+        zoomLevel: zoom,
         animationDuration: 0,
         animationMode: 'none',
       } as any);
@@ -1669,7 +1676,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // zoom (carLiveZoomRef), and the step is taken from the chase framing — the overview's wide zoom is not where the
     // driver is zooming from (a '+' mid-fly used to aim OUTWARD from it and cut up to 4 levels at touchdown).
     const overview = camHoldWasActiveRef.current;
-    const flying = returnFlyInFlight(returnFlyRef.current, now);
+    const flying = returnFlyInFlight(returnFlyRef.current, now, RETURN_FLY_GRACE_MS);
     const rest = carZoomRest(now, zc.pushAt, camZoomRef.current, carLiveZoomRef.current, prevDest, !(overview || flying));
     const r = carZoomPress(zc, now, delta, { manual: manualZoomRef.current, followZoom: fz, bias: userZoomRef.current, lo, hi: CAR_ZOOM_MAX, rest, fromChase: overview || flying }, clampBias);
     if (flying) {
@@ -1677,7 +1684,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       // IS to the chase frame at r.to over the fly's remaining time (returnFlyReaim) — no ease that the fly's pushes
       // would never apply, no 60 Hz no-op pushes, no touchdown cut. Presses during it re-aim again and accumulate.
       zc.ease = null;
-      returnFlyRef.current = returnFlyReaim(returnFlyRef.current, now, CAR_ZOOM_STEP_MS);
+      returnFlyRef.current = returnFlyReaim(returnFlyRef.current, now, CAR_ZOOM_STEP_MS, RETURN_FLY_GRACE_MS);
     }
     manualZoomRef.current = r.to;
     userZoomRef.current = 0;                     // the framing is absolute now; a later pinch starts from it (zoomBegin)
@@ -1701,9 +1708,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // A fly that has finished but whose landing is still pending is RETIRED first (belt and braces — carCamJob lands it
     // at its deadline): the caller's instant write sets zoomSnapRef, so the next push re-seeds from the current targets
     // and no old landing seed can override the framing this gesture sets.
-    if (returnFlyRef.current > 0 && now >= returnFlyRef.current) returnFlyRef.current = 0;
-    if (returnFlyInFlight(returnFlyRef.current, now)) {
-      returnFlyRef.current = returnFlyReaim(returnFlyRef.current, now, CAR_ZOOM_STEP_MS);
+    // "Finished" = past its deadline AND the native end's grace (RETURN_FLY_GRACE_MS): inside the grace the native fly
+    // may still be drawing on iOS and would overwrite an instant write, so the fly is re-aimed instead (review of 1f2faada).
+    if (returnFlyRef.current > 0 && now >= returnFlyRef.current + RETURN_FLY_GRACE_MS) returnFlyRef.current = 0;
+    if (returnFlyInFlight(returnFlyRef.current, now, RETURN_FLY_GRACE_MS)) {
+      returnFlyRef.current = returnFlyReaim(returnFlyRef.current, now, CAR_ZOOM_STEP_MS, RETURN_FLY_GRACE_MS);
       zoomChRef.current.ease = null;             // the fly carries the zoom
       selfRefreshRef.current?.();                // a parked car's pump flies it on the next frame
       return true;
@@ -1755,7 +1764,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             const loB = pvB ? CAR_PREVIEW_ZOOM_MIN : CAR_ZOOM_MIN;
             const zcB = zoomChRef.current;
             const destB = carZoomDest(manualZoomRef.current, fzB, userZoomRef.current, loB, CAR_ZOOM_MAX);
-            const applied = carZoomNow(zcB, nowB, destB, carZoomRest(nowB, zcB.pushAt, camZoomRef.current, carLiveZoomRef.current, destB, !camHoldWasActiveRef.current && !returnFlyInFlight(returnFlyRef.current, nowB)));
+            const applied = carZoomNow(zcB, nowB, destB, carZoomRest(nowB, zcB.pushAt, camZoomRef.current, carLiveZoomRef.current, destB, !camHoldWasActiveRef.current && !returnFlyInFlight(returnFlyRef.current, nowB, RETURN_FLY_GRACE_MS)));
             userZoomRef.current = clampBias(applied - fzB);
             manualZoomRef.current = null;
             zcB.ease = null;
@@ -1842,7 +1851,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           camHoldUntilRef.current = 0;
           // Mid-fly / inside crewFit's easeTo the camera owner flies it home (the fly takes the north-up override as
           // its heading); an instant 'none' write would lose to the fly on iOS or strand its landing on Android.
-          ownerSetPose('gesture', { heading: nextNorthUp ? 0 : drawHdgRef.current });
+          // The chase heading; the north-up override (set just above) wins the written heading inside ownerSetPose.
+          ownerSetPose('gesture', { heading: drawHdgRef.current });
           setCarNorthUp(nextNorthUp);
           break;
         }
@@ -1927,7 +1937,11 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
             const cLng = (minLng + maxLng) / 2, cLat = (minLat + maxLat) / 2;
             const lngSpan = Math.max(0.002, maxLng - minLng);
             const latSpan = Math.max(0.002, maxLat - minLat);
-            const w = mapW > 0 ? mapW : 400, h = mapH > 0 ? mapH : 240;
+            // The MEASURED canvas (camInputsRef, refreshed every render). This handler is subscribed once, so a bare
+            // mapW/mapH here was render #1's 0 → the 400×240 fallback on every head unit (since 0f092762, 2026-07-23; an
+            // 800-pt canvas framed the crew a whole level too wide). Fallback only before the first layout.
+            const { mapW: mwC, mapH: mhC } = camInputsRef.current;
+            const w = mwC > 0 ? mwC : 400, h = mhC > 0 ? mhC : 240;
             const zx = Math.log2((w * 0.75 * 360) / (512 * lngSpan));
             const zy = Math.log2((h * 0.65 * 180) / (512 * latSpan));
             // Floor 3 -> 8. Zoom 8 is a ~city-region frame — the widest a convoy
@@ -2072,6 +2086,10 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // ⚠ UNREACHABLE TODAY (2026-09-25, review of 1f2faada): CarMapView mounts only with a fix (ConvoyCarPlay showLive needs
+  // hasFix) and carStore never sets selfLat back to null (its writers: the initial null, setCarSelfPosition(lat: number),
+  // carPlayBootstrap's p.coords.latitude), so hasFix stays true for a mount's life and the `!live.hasFix` arm above never
+  // fires. Kept as a defensive path (through the owner), not counted as a tested behaviour.
   // One-shot recentre for the "armed while no fix existed" branch above. Same
   // shape as COLD-START SNAP (:1248, `[painted, hasFix]`) on purpose: a fresh
   // effect closure per hasFix/painted change reads THAT render's live lng/lat/
@@ -2608,12 +2626,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         markPainted();
         // Re-apply the StyleImport config now that the style (and its basemap
         // import) actually exists — kills the flat/unlit first paint (see the
-        // styleGen comment above) — and guarantee the first visible frame is
-        // pitched at the driver if nothing has painted yet.
+        // styleGen comment above).
         setStyleGen((g) => g + 1);
-        if (!paintedRef.current && hasFix) {
-          ownerSetPose('system', { centerCoordinate: [lng, lat], pitch: followPitch, heading: followHeadingDeg });   // through the owner (zoom = its framing)
-        }
+        // (2026-09-25) A "seed the pitched camera if nothing has painted yet" write used to follow here. It could never
+        // run: markPainted() above sets paintedRef synchronously, so `!paintedRef.current` was always false (review of
+        // 1f2faada; the same order since c97a1580). Removed rather than kept as dead wiring: the first visible frame is
+        // put on the driver by the cold-start snap, which fires on the paint this handler just marked.
         // 🔒 NAV-LOCK end car-cam-style-load-seed
       }}
     >

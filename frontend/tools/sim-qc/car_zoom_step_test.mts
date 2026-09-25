@@ -27,7 +27,7 @@ import { CREW_RETURN_MS, crewReturnEdge } from "../../src/crewReturn.ts";
 import { RETURN_FLY_MS, returnFlyStep, returnFlyReaim, returnFlyInFlight } from "../../src/returnFly.ts";
 import { glideStep, type GlideParams } from "../../src/camGlide.ts";
 import { chaseZoomForSpeed } from "../../src/chaseZoom.ts";
-import { loadSrc, cameraWriteSites, cameraJsxProps } from "./headunit_cam_harness.mts";
+import { loadSrc, cameraWriteSites, cameraJsxProps, cameraMethodRefs, refEscapes, cameraJsxSpreads } from "./headunit_cam_harness.mts";
 import { runScenarios } from "./headunit_cam_scenarios.mts";
 
 let fails = 0;
@@ -161,7 +161,7 @@ console.log("S — static: the wiring the harness exercises");
   ok("S3 a real pinch still calls the INSTANT path (1:1 with the fingers) — through the owner", /applyZoomNow\('gesture'\)/.test(pinch));
   const eased = code(between(cmv, "const applyZoomEased = (", "\n  };"));
   ok("S4 the eased entry sets no zoomSnapRef and calls no setCamera (pushCam is the one writer)", eased.length > 0 && !/zoomSnapRef/.test(eased) && !/setCamera/.test(eased));
-  ok("S5 …during a return fly it re-aims the fly (through pushCam) and seeds from the visible zoom", /returnFlyRef\.current = returnFlyReaim\(returnFlyRef\.current, now, CAR_ZOOM_STEP_MS\)/.test(eased) && /carZoomRest\([^)]*!\(overview \|\| flying\)\)/.test(eased));
+  ok("S5 …during a return fly it re-aims the fly (through pushCam) and seeds from the visible zoom", /returnFlyRef\.current = returnFlyReaim\(returnFlyRef\.current, now, CAR_ZOOM_STEP_MS, RETURN_FLY_GRACE_MS\)/.test(eased) && /carZoomRest\([^)]*!\(overview \|\| flying\)\)/.test(eased));
   const blk = code(between(mbx, "const zoomCh = c.zoomCh;", "// Publish the zoom the camera is ACTUALLY at."));
   ok("S6 pushCam's ease block moves ZOOM only (no camPitch, no camHdgLag)", /carZoomApply\(zoomCh, now, c\.zoomLevel\)/.test(blk) && !/camPitch|camHdgLag/.test(blk));
   const fly = code(between(mbx, "if (st.action === 'fly') {", "return;   // lastCamAt"));
@@ -170,7 +170,7 @@ console.log("S — static: the wiring the harness exercises");
   ok("S8 the parked pump asks camJob BEFORE the automatic-glide ship switch", gp.indexOf("camJob()") >= 0 && gp.indexOf("camJob()") < gp.indexOf("CAM_GLIDE_PUMP_ENABLED"));
   ok("S9 CarMapView wires it: camJob={carCamJob}, getCam returns zoomCh, the crew edge is crewReturnEdge", /camJob=\{carCamJob\}/.test(cmv) && /zoomCh: zoomChRef\.current/.test(cmv) && /crewReturnEdge\(camHoldWasActiveRef\.current, crewOverviewRef\.current/.test(cmv));
   const job = code(between(cmv, "const carCamJob = useRef(", "}).current;"));
-  ok("S10 carCamJob: nothing while a fly is in flight; lands a fly the moment its time is up (a seed never outlives its fly); re-arms the lockstep for a due crew hold or an armed fly; never yes when it cannot push", /if \(returnFlyRef\.current > 0 && now < returnFlyRef\.current\) return false;/.test(job) && /const landingDue = returnFlyRef\.current > 0 && now >= returnFlyRef\.current;/.test(job) && /crewDue \|\| flyArmed \|\| landingDue \|\|/.test(job) && /const flyArmed = returnFlyRef\.current < 0;/.test(job) && /\(crewDue \|\| flyArmed\) && !lockReadyRef\.current/.test(job) && /if \(!lockReadyRef\.current\) return false;/.test(job));
+  ok("S10 carCamJob: nothing while a fly is in flight; lands a fly the moment its time is up (a seed never outlives its fly); re-arms the lockstep for a due crew hold or an armed fly; never yes when it cannot push", /if \(returnFlyRef\.current > 0 && now < returnFlyRef\.current \+ RETURN_FLY_GRACE_MS\) return false;/.test(job) && /const landingDue = returnFlyRef\.current > 0 && now >= returnFlyRef\.current \+ RETURN_FLY_GRACE_MS;/.test(job) && /crewDue \|\| flyArmed \|\| landingDue \|\|/.test(job) && /const flyArmed = returnFlyRef\.current < 0;/.test(job) && /\(crewDue \|\| flyArmed\) && !lockReadyRef\.current/.test(job) && /if \(!lockReadyRef\.current\) return false;/.test(job));
   const gc = code(between(cmv, "const edge = crewReturnEdge(", "crewOverviewRef.current = edge.overview;"));
   ok("S11 getCam: the fly carries the zoom (drops the ease); inside crewFit's easeTo the return is a short fly", /if \(edge\.fly\) \{ returnFlyRef\.current = -1; zoomChRef\.current\.ease = null; \}/.test(gc) && /nowC < crewEaseUntilRef\.current\) \{ returnFlyRef\.current = -CAR_ZOOM_STEP_MS; zoomChRef\.current\.ease = null; \}/.test(gc));
   const zb = code(between(cmv, "case 'zoomBegin':", "case 'zoomEnd':"));
@@ -179,17 +179,17 @@ console.log("S — static: the wiring the harness exercises");
   ok("S13 recenter, compass, Crew and the AA re-assert clear the framing and the ease", clears("case 'recenter':", "case 'compass':") && clears("case 'compass': {", "case 'crewFit': {") && clears("case 'crewFit': {", "setCarState({ crewViewUntil") && clears("const reassertAaFollow = (", "const now = Date.now();"));
   ok("S14 src/carZoomStep.ts is pure (no imports at all)", !/^\s*import\s/m.test(czs));
   const tk = code(between(cmv, "const takeOverNativeCam = (", "\n  };"));
-  ok("S16 an instant gesture goes through the camera owner: takeOverNativeCam retires a finished-but-unlanded fly first, re-aims a fly in flight, ends a Crew overview (the edge flies home); never writes the camera itself", /if \(returnFlyRef\.current > 0 && now >= returnFlyRef\.current\) returnFlyRef\.current = 0;/.test(tk) && /returnFlyRef\.current = returnFlyReaim\(returnFlyRef\.current, now, CAR_ZOOM_STEP_MS\)/.test(tk) && /if \(camHoldWasActiveRef\.current\) \{/.test(tk) && tk.indexOf("returnFlyRef.current = 0;") < tk.indexOf("returnFlyInFlight(") && !/setCamera/.test(tk));
-  ok("S19 a head-unit landing starts the glide's goals at the landed frame (a parked landing cannot make the first moving push jump); the phone's landing is unchanged", /const carLand = !!landSeed && !!c\.zoomCh;/.test(mbx) && /camZoomGoal\.current = carLand \? landSeed!\.zoom : c\.zoomLevel;/.test(mbx) && /camPitchGoal\.current = carLand \? landSeed!\.pitch : c\.pitch;/.test(mbx));
+  ok("S16 an instant gesture goes through the camera owner: takeOverNativeCam retires a finished-but-unlanded fly first, re-aims a fly in flight, ends a Crew overview (the edge flies home); never writes the camera itself", /if \(returnFlyRef\.current > 0 && now >= returnFlyRef\.current \+ RETURN_FLY_GRACE_MS\) returnFlyRef\.current = 0;/.test(tk) && /returnFlyRef\.current = returnFlyReaim\(returnFlyRef\.current, now, CAR_ZOOM_STEP_MS, RETURN_FLY_GRACE_MS\)/.test(tk) && /if \(camHoldWasActiveRef\.current\) \{/.test(tk) && tk.indexOf("returnFlyRef.current = 0;") < tk.indexOf("returnFlyInFlight(") && !/setCamera/.test(tk));
+  ok("S19 a head-unit landing starts the glide's goals at the landed frame (a parked landing cannot make the first moving push jump); the phone's landing is unchanged", /const carLand = !!landSeed && !!c\.zoomCh;/.test(mbx) && /camZoomGoal\.current = carLand \? landSeed!\.zoom : ws \? camZoom\.current : c\.zoomLevel;/.test(mbx) && /camPitchGoal\.current = carLand \? landSeed!\.pitch : ws \? camPitch\.current : c\.pitch;/.test(mbx));
   const pinchUpd = code(between(cmv, "const delta = Math.log2(", "case 'zoomStep':"));
   const effBody = (marker: string) => { const k = cmv.indexOf(marker); return k < 0 ? "" : code(cmv.slice(k, cmv.indexOf("}, [", k))); };
-  ok("S17 every instant write names its kind: gestures (pinch update, recenter, compass, re-assert, pending re-centre) and system corrections (layout, cold-start snap, style-load seed); pinch begin asks the owner; crewFit retires any fly",
+  ok("S17 every instant write names its kind: gestures (pinch update, recenter, compass, re-assert; the pending re-centre — unreachable today, defensive) and system corrections (layout, the cold-start snap at first paint); pinch begin asks the owner; crewFit retires any fly; the dead style-load seed is gone",
     /takeOverNativeCam\(nowB\)/.test(zb) && /applyZoomNow\('gesture'\)/.test(pinchUpd) && /applyZoomNow\('gesture'\)/.test(code(between(cmv, "case 'recenter':", "case 'compass':")))
-    && /ownerSetPose\('gesture', \{ heading:/.test(code(between(cmv, "case 'compass': {", "case 'crewFit': {")))
+    && /ownerSetPose\('gesture', \{ heading: drawHdgRef\.current \}\)/.test(code(between(cmv, "case 'compass': {", "case 'crewFit': {")))
     && /ownerSetPose\('gesture', \{ centerCoordinate: \[live\.lng, live\.lat\]/.test(code(between(cmv, "const reassertAaFollow = (", "const now = Date.now();")))
     && /ownerSetPose\('gesture', \{ centerCoordinate: \[lng, lat\]/.test(effBody("if (!aaPendingRecenterRef.current || !painted"))
     && /applyZoomNow\('system'\)/.test(effBody("if (!painted || mapW <= 0) return;")) && /ownerSetPose\('system'/.test(effBody("if (!painted || !hasFix || !cameraRef.current) return;"))
-    && /ownerSetPose\('system', \{ centerCoordinate: \[lng, lat\], pitch: followPitch, heading: followHeadingDeg \}\)/.test(cmv)
+    && !/ownerSetPose\('system', \{ centerCoordinate: \[lng, lat\], pitch: followPitch, heading: followHeadingDeg \}\)/.test(cmv) && /markPainted\(\);\s*\n(?:\s*\/\/[^\n]*\n)*\s*setStyleGen\(\(g\) => g \+ 1\);\s*\n(?:\s*\/\/[^\n]*\n)*\s*\/\/ 🔒 NAV-LOCK end car-cam-style-load-seed/.test(cmv)
     && /returnFlyRef\.current = 0;/.test(code(between(cmv, "case 'crewFit': {", "setCarState({ crewViewUntil"))));
   const pure = ["carZoomStep", "crewReturn", "returnFly"].map((m) => readFileSync(new URL(`../../src/${m}.ts`, import.meta.url), "utf8"));
   ok("S18 disconnect / remount starts clean: the pure modules hold no module-level state (all state is per-mount refs)", pure.every((t) => !/^(let|var)\s/m.test(t)));
@@ -198,20 +198,52 @@ console.log("S — static: the wiring the harness exercises");
   // reconciles itself: it retires any fly and clears the zoom state); SelfCarModel only in pushCam (the per-frame
   // lockstep and the return fly). Any other site — a new effect, a gesture, a callback — fails here.
   const ALLOWED_CMV = new Set(["applyZoomNow", "ownerSetPose", "case 'crewFit'"]);
+  // Hardened (round 6): the WHOLE file is scanned for camera-method mentions (module-level helpers, bracket access,
+  // .call, destructuring), and the camera REF is followed — passing it or its .current to any helper (local or imported),
+  // aliasing or storing it outside the owner fails too. <Camera> may carry no spread.
+  const violations = (cmvSrc: string, mbxSrc: string): string[] => {
+    const v: string[] = [];
+    for (const x of cameraMethodRefs(cmvSrc)) if (!ALLOWED_CMV.has(x.owner)) v.push(`CarMapView ${x.shape} in ${x.owner}:${x.line}`);
+    for (const x of refEscapes(cmvSrc, "CarMapView", "cameraRef", ALLOWED_CMV)) v.push(`CarMapView cameraRef escapes in ${x.owner}:${x.line} (${x.text})`);
+    if (cameraJsxSpreads(cmvSrc, "CarMapView") > 0) v.push("CarMapView <Camera {...spread}>");
+    for (const x of cameraMethodRefs(mbxSrc, "SelfCarModel")) if (x.owner !== "pushCam") v.push(`SelfCarModel ${x.shape} in ${x.owner}:${x.line}`);
+    for (const x of refEscapes(mbxSrc, "SelfCarModel", "cameraRef", new Set(["pushCam"]))) v.push(`SelfCarModel cameraRef escapes in ${x.owner}:${x.line} (${x.text})`);
+    return v;
+  };
   const cmvSites = cameraWriteSites(cmv, "CarMapView");
-  const bad = cmvSites.filter((x) => !ALLOWED_CMV.has(x.owner));
-  ok("S20 CarMapView writes the camera only through the owner (applyZoomNow · ownerSetPose) and crewFit's easeTo", bad.length === 0 && cmvSites.length === 3, `(${cmvSites.map((x) => `${x.owner}:${x.line}`).join(", ")}${bad.length ? ` — UNOWNED: ${bad.map((x) => `${x.call} in ${x.owner} line ${x.line}`).join("; ")}` : ""})`);
+  const real = violations(cmv, mbx);
+  ok("S20 the head unit's camera is written only by the owner: CarMapView applyZoomNow · ownerSetPose · crewFit's easeTo, SelfCarModel pushCam — whole-file scan, ref followed", real.length === 0 && cmvSites.length === 3, `(${real.length ? real.join("; ") : cmvSites.map((x) => `${x.owner}:${x.line}`).join(", ")})`);
   const selfSites = cameraWriteSites(mbx, "SelfCarModel");
   ok("S21 SelfCarModel writes the camera only in pushCam (the lockstep push and the return fly)", selfSites.length === 2 && selfSites.every((x) => x.owner === "pushCam"), `(${selfSites.map((x) => `${x.owner}:${x.line}`).join(", ")})`);
   const camProps = cameraJsxProps(cmv, "CarMapView");
   const cp = camProps[0] ?? {};
-  ok("S22 the head unit's <Camera> animates nothing (a seed only: no centre / zoom / bounds / follow props)", camProps.length === 1 && Object.keys(cp).sort().join(",") === "animationDuration,animationMode,defaultSettings,followUserLocation,ref" && cp.followUserLocation === "{false}" && cp.animationMode === '"none"' && cp.animationDuration === "{0}", `(${JSON.stringify(cp)})`);
+  ok("S22 the head unit's <Camera> animates nothing (a seed only: no centre / zoom / bounds / follow props, no spread)", camProps.length === 1 && cameraJsxSpreads(cmv, "CarMapView") === 0 && Object.keys(cp).sort().join(",") === "animationDuration,animationMode,defaultSettings,followUserLocation,ref" && cp.followUserLocation === "{false}" && cp.animationMode === '"none"' && cp.animationDuration === "{0}", `(${JSON.stringify(cp)})`);
   const firstLine = (name: string) => code(between(cmv, `const ${name} = (`, "\n  };")).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//"))[1] ?? "";
   ok("S23 both instant writers ask the owner before anything else", /^if \(takeOverNativeCam\(Date\.now\(\), kind\)\) return false;$/.test(firstLine("applyZoomNow")) && /^if \(takeOverNativeCam\(Date\.now\(\), kind\)\) return false;$/.test(firstLine("ownerSetPose")), `(${firstLine("applyZoomNow")} | ${firstLine("ownerSetPose")})`);
-  // The gate bites: plant the round-5 bug (the layout correction writing the camera directly) in a copy of the source.
-  const planted = cmv.replace("applyZoomNow('system');", "cameraRef.current?.setCamera({ zoomLevel: followZoom, animationDuration: 0, animationMode: 'none' });");
-  const plantedBad = cameraWriteSites(planted, "CarMapView").filter((x) => !ALLOWED_CMV.has(x.owner));
-  ok("S24 negative control: a planted direct write in the layout effect is caught by S20", planted !== cmv && plantedBad.length === 1, `(${plantedBad.map((x) => `${x.call} in ${x.owner} line ${x.line}`).join("; ")})`);
+  // S24 — the gate bites: plant each realistic writer shape in a copy of the sources; every one must be caught.
+  const LAYOUT = "applyZoomNow('system');";
+  const plantC = (body: string, extra = "", importLine = "") => {
+    let t = cmv.replace(LAYOUT, body) + extra;
+    if (importLine) t = t.replace("import React, {", importLine + "\nimport React, {");
+    return t;
+  };
+  const plants: [string, string, string][] = [
+    ["P1 a direct write in the layout effect", plantC("cameraRef.current?.setCamera({ zoomLevel: followZoom, animationDuration: 0, animationMode: 'none' });"), mbx],
+    ["P2 a module-level helper in CarMapView.tsx", plantC("snapCarCamera(cameraRef, followZoom);", "\nfunction snapCarCamera(ref: any, z: number) { ref.current?.setCamera({ zoomLevel: z, animationDuration: 0, animationMode: 'none' }); }\n"), mbx],
+    ["P3 an IMPORTED helper handed the ref", plantC("snapCam(cameraRef, followZoom);", "", "import { snapCam } from '../camHelper';"), mbx],
+    ["P4 bracket access", plantC("cameraRef.current?.['setCamera']({ zoomLevel: followZoom });"), mbx],
+    ["P5 .setCamera.call", plantC("cameraRef.current?.setCamera.call(cameraRef.current, { zoomLevel: followZoom });"), mbx],
+    ["P6 an alias of cameraRef.current", plantC("const cam = cameraRef.current; cam?.setCamera({ zoomLevel: followZoom });"), mbx],
+    ["P7 a destructured method", plantC("const { setCamera } = cameraRef.current as any; setCamera({ zoomLevel: followZoom });"), mbx],
+    ["P8 a JSX spread on <Camera>", cmv.replace("<Camera\n        ref={cameraRef}", "<Camera\n        {...{ zoomLevel: followZoom }}\n        ref={cameraRef}"), mbx],
+    ["P9 a ConvoyMapbox helper called from SelfCarModel.bgTick", cmv, mbx.replace("    lastBgTickAt.current = now;\n", "    lastBgTickAt.current = now; camHelper(cameraRef, 16);\n") + "\nfunction camHelper(ref: any, z: number) { ref.current?.setCamera({ zoomLevel: z }); }\n"],
+    ["P10 a direct write in SelfCarModel.bgTick", cmv, mbx.replace("    lastBgTickAt.current = now;\n", "    lastBgTickAt.current = now; cameraRef?.current?.setCamera({ zoomLevel: 16 });\n")],
+  ];
+  for (const [name, c2, m2] of plants) {
+    const planted = c2 !== cmv || m2 !== mbx;
+    const vv = violations(c2, m2);
+    ok(`S24 negative control: ${name} is caught`, planted && vv.length > 0, `(${planted ? vv.slice(0, 2).join("; ") : "PLANT DID NOT APPLY"})`);
+  }
   ok("S15 pushCam re-arms a due crew hold before its readiness bail (a moving car comes home on the first frame)", /if \(camJob && !\(readyRef\?\.current\)\) camJob\(\);\s*\n\s*if \(!cameraRef\?\.current \|\| !getCam \|\| !\(readyRef\?\.current\)\) return;/.test(mbx));
 }
 

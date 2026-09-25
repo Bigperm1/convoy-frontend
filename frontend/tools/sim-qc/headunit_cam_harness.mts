@@ -97,11 +97,11 @@ function scopeProxy(s: Record<string, any>, unresolved: Set<string>) {
 }
 const ref = <T,>(v: T) => ({ current: v });
 
-export type Opts = { android?: boolean; rafAlive?: boolean; carFramePump?: boolean; followZoom?: number; followPitch?: number;
+export type Opts = { android?: boolean; rafAlive?: boolean; carFramePump?: boolean; followZoom?: number; followPitch?: number; animSameMs?: boolean;
   /** CarMapView render cadence (store ticks; 83 ms while navigating — the trim ticker). followZoom is a render value. */
   renderMs?: number };
 /** animStep: this vsync's camera came from a native animation's update (fly / ease motion, not a cut). */
-export type Frame = { t: number; zoom: number; pitch: number; sizeZoom: number | null; animating: boolean; animStep: boolean };
+export type Frame = { t: number; zoom: number; pitch: number; heading: number; sizeZoom: number | null; animating: boolean; animStep: boolean };
 
 export function makeHeadUnit(src: Src, o: Opts = {}) {
   const T0 = 1_000_000_000;
@@ -131,7 +131,10 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     if (Array.isArray(opt.centerCoordinate)) { target.lng = opt.centerCoordinate[0]; target.lat = opt.centerCoordinate[1]; }
     if ((mode === "flyTo" || mode === "easeTo" || mode === "linearTo") && dur > 0) {
       if (mode === "flyTo") counts.setFly++; else counts.setEase++;
-      anim = { t0: now, dur, from: { ...cam }, to: target, kind: mode };
+      // A native animation starts on the NEXT display frame after the call (the bridge delivers it, the animator's first
+      // tick is a vsync), so it ends up to one frame after the JS clock thinks — the gap a JS deadline cannot see.
+      const t0 = o.animSameMs ? now : Math.floor((now - T0) / (1000 / 60) + 1) * (1000 / 60) + T0;
+      anim = { t0, dur, from: { ...cam }, to: target, kind: mode };
       return;
     }
     counts.setNone++;
@@ -172,7 +175,10 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   const layoutEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| mapW <= 0\) return;/.test(t)), CP);        // 🔒 car-zoom-apply-now
   const coldStartEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| !hasFix \|\| !cameraRef\.current\) return;/.test(t)), CP);   // 🔒 car-cam-coldstart-snap
   const pendingEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!aaPendingRecenterRef\.current \|\| !painted/.test(t)), CP);  // 🔒 car-aa-follow-reassert
-  const gesture = bind(liftCallArg(csf, "CarMapView", "subscribeCarGesture", () => true), CP);
+  // The gesture handler is subscribed ONCE (useEffect [] deps): it closes over render #1's plain values — mapW/mapH are
+  // still 0 there (they come from onLayout later). Everything else it reads is a ref, i.e. live (the shared scope).
+  const render1 = new Proxy({ mapW: 0, mapH: 0 } as Record<string, any>, { has: (t, k) => typeof k === "string" && (k in t || CP[k] !== undefined || true), get: (t, k) => (typeof k === "string" && k in t ? t[k] : CP[k as any]), set: (_t, k, v) => { CP[k as any] = v; return true; } });
+  const gesture = bind(liftCallArg(csf, "CarMapView", "subscribeCarGesture", () => true), render1);
   const onCameraChanged = bind(liftJsxAttr(csf, "CarMapView", "onCameraChanged"), CP);
   const lockLine = /^\s*(lockReadyRef\.current = [^\n]+;)\s*$/m.exec(region(src.carMapView, "car-cam-northup-lockready"))![1];
   const carRender = bind(`() => { ${lockLine} }`, CP);
@@ -245,7 +251,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
         lastVsync = vs;
         // native animation → camera, then onCameraChanged
         let animStep = false;
-        if (anim) {
+        if (anim && now >= anim.t0) {
           animStep = true;
           const s = Math.min(1, (now - anim.t0) / anim.dur), e = s * s * (3 - 2 * s);
           for (const k of ["zoom", "pitch", "heading", "lat", "lng"] as const) (cam as any)[k] = (anim.from as any)[k] + ((anim.to as any)[k] - (anim.from as any)[k]) * e;
@@ -253,7 +259,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
           if (s >= 1) anim = null;
         }
         if (camMoved) { camMoved = false; turn(() => onCameraChanged({ properties: { zoom: cam.zoom } })); }
-        frames.push({ t: now - T0, zoom: cam.zoom, pitch: cam.pitch, sizeZoom, animating: !!anim, animStep });
+        frames.push({ t: now - T0, zoom: cam.zoom, pitch: cam.pitch, heading: cam.heading, sizeZoom, animating: !!anim, animStep });
         // rAF callbacks due at this vsync
         const due = timers.filter((x) => x.raf && x.at <= now); for (const t of due) { timers.splice(timers.indexOf(t), 1); turn(t.fn); }
         if (o.carFramePump !== false && !o.android) turn(S.bgTick);   // iOS onCarFrame → bgTick
@@ -288,6 +294,11 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     reassert() { turn(() => C.reassertAaFollow("appstate")); },
     /** largest vsync-to-vsync zoom change in [a, b] ms (harness time) */
     maxStep(a: number, b: number) { let m = 0, at = 0; for (let i = 1; i < frames.length; i++) if (frames[i].t >= a && frames[i].t <= b) { const d = Math.abs(frames[i].zoom - frames[i - 1].zoom); if (d > m) { m = d; at = frames[i].t; } } return { m, at }; },
+    /** largest vsync-to-vsync PITCH / HEADING change in [a, b] that no native animation produced (degrees) */
+    maxPitchCut(a: number, b: number) { let m = 0, at = 0; for (let i = 1; i < frames.length; i++) if (frames[i].t >= a && frames[i].t <= b && !frames[i].animStep) { const d = Math.abs(frames[i].pitch - frames[i - 1].pitch); if (d > m) { m = d; at = frames[i].t; } } return { m, at }; },
+    maxHeadingCut(a: number, b: number) { let m = 0, at = 0; for (let i = 1; i < frames.length; i++) if (frames[i].t >= a && frames[i].t <= b && !frames[i].animStep) { const d = Math.abs(((((frames[i].heading - frames[i - 1].heading) % 360) + 540) % 360) - 180); if (d > m) { m = d; at = frames[i].t; } } return { m, at }; },
+    /** the head unit's 2D/3D toggle / nav start move the pitch TARGET (followPitch is a render value) */
+    setFollowPitch(p: number) { C.followPitch = p; C.camInputsRef.current = { ...C.camInputsRef.current, followPitch: p }; C.aaLiveRef.current = { ...C.aaLiveRef.current, followPitch: p }; },
     /** largest vsync-to-vsync zoom change in [a, b] that NO native animation produced — a cut (fly motion excepted) */
     maxCut(a: number, b: number) { let m = 0, at = 0; for (let i = 1; i < frames.length; i++) if (frames[i].t >= a && frames[i].t <= b && !frames[i].animStep) { const d = Math.abs(frames[i].zoom - frames[i - 1].zoom); if (d > m) { m = d; at = frames[i].t; } } return { m, at }; },
     /** largest |self-car size zoom − visible zoom| at vsync in [a, b] (a size pop is the car drawn for the wrong zoom) */
@@ -332,4 +343,78 @@ export function cameraJsxProps(src: string, fnName: string): Record<string, stri
     }
   });
   return out;
+}
+
+// ── static, hardened (2026-09-25 round 6: a module-level helper, bracket access, .call, destructuring and a JSX spread
+// all got past S20–S22). The rules no longer look only inside the component, and they follow the ref, not the method.
+function ownerOf(n: any, sf: any): string {
+  let p = n.parent;
+  while (p) {
+    if (ts.isCaseClause(p)) return `case ${p.expression.getText(sf)}`;
+    if (ts.isVariableDeclaration(p) && p.initializer && (ts.isArrowFunction(p.initializer) || ts.isFunctionExpression(p.initializer))) return p.name.getText(sf);
+    if (ts.isFunctionDeclaration(p)) return `function ${p.name?.text}`;
+    if (ts.isMethodDeclaration(p)) return `method ${p.name.getText(sf)}`;
+    p = p.parent;
+  }
+  return "(module)";
+}
+/** Every mention of a camera METHOD anywhere in the file — `.setCamera`, `?.['setCamera']`, `.setCamera.call`, a
+ *  destructured `{ setCamera }` — with its owner. Scope: the whole file (module-level helpers included) or one function. */
+export function cameraMethodRefs(src: string, fnName?: string): { line: number; owner: string; shape: string }[] {
+  const sf = sfOf(src);
+  const out: { line: number; owner: string; shape: string }[] = [];
+  const visit = (n: any) => {
+    let hit: string | null = null;
+    if (ts.isPropertyAccessExpression(n) && CAMERA_METHODS.test(n.name.text)) hit = `.${n.name.text}`;
+    else if (ts.isElementAccessExpression(n) && n.argumentExpression && ts.isStringLiteralLike(n.argumentExpression) && CAMERA_METHODS.test(n.argumentExpression.text)) hit = `['${n.argumentExpression.text}']`;
+    else if (ts.isBindingElement(n) && CAMERA_METHODS.test((n.propertyName ?? n.name).getText(sf))) hit = `{ ${n.getText(sf)} }`;
+    if (hit) out.push({ line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, owner: ownerOf(n, sf), shape: hit });
+  };
+  if (fnName) inFn(sf, fnName, visit); else { const walk = (n: any) => { visit(n); ts.forEachChild(n, walk); }; walk(sf); }
+  return out;
+}
+/** Every use of the camera ref `refName` inside fnName that is NOT (a) its declaration / a destructured parameter,
+ *  (b) inside an allowed owner, (c) the JSX `ref={…}` on <Camera> or `cameraRef={…}` on <SelfCarModel>, or (d) a pure
+ *  presence test (`!ref`, `!ref.current`, `a && ref.current` as an if / ternary condition). Anything else — passing it
+ *  (or its .current) to a helper, aliasing it, storing it — lets a write escape the owner. */
+export function refEscapes(src: string, fnName: string, refName: string, allowedOwners: Set<string>): { line: number; owner: string; text: string }[] {
+  const sf = sfOf(src);
+  const out: { line: number; owner: string; text: string }[] = [];
+  inFn(sf, fnName, (n) => {
+    if (!(ts.isIdentifier(n) && n.text === refName)) return;
+    const par = n.parent;
+    if ((ts.isVariableDeclaration(par) || ts.isBindingElement(par) || ts.isParameter(par)) && par.name === n) return;   // (a)
+    if (ts.isPropertyAccessExpression(par) && par.name === n) return;          // `x.cameraRef` — a different name
+    if (ts.isPropertyAssignment(par) && par.name === n) return;
+    if ((ts.isJsxAttribute(par) || ts.isPropertySignature(par)) && par.name === n) return;   // an attribute / type-member NAME
+    if (ts.isShorthandPropertyAssignment(par)) { /* `{ cameraRef }` passes it on */ }
+    const owner = ownerOf(n, sf);
+    if (allowedOwners.has(owner)) return;                                       // (b)
+    if (ts.isJsxExpression(par) && ts.isJsxAttribute(par.parent)) {             // (c)
+      const attr = par.parent.name.getText(sf), tag = par.parent.parent.parent.tagName?.getText(sf);
+      if ((attr === "ref" && tag === "Camera") || (attr === "cameraRef" && tag === "SelfCarModel")) return;
+    }
+    // (d) climb `.current` / `?.current`, then !, &&, ||, parens; OK if it ends in a `!` or an if / ternary condition
+    let e: any = n;
+    while (ts.isPropertyAccessExpression(e.parent) && e.parent.expression === e && e.parent.name.text === "current") e = e.parent;
+    let boolCtx = false;
+    for (let p = e; p.parent; p = p.parent) {
+      const q = p.parent;
+      if (ts.isPrefixUnaryExpression(q) && q.operator === ts.SyntaxKind.ExclamationToken) { boolCtx = true; break; }
+      if (ts.isParenthesizedExpression(q)) continue;
+      if (ts.isBinaryExpression(q) && (q.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken || q.operatorToken.kind === ts.SyntaxKind.BarBarToken)) continue;
+      if ((ts.isIfStatement(q) && q.expression === p) || (ts.isConditionalExpression(q) && q.condition === p)) { boolCtx = true; }
+      break;
+    }
+    if (boolCtx) return;
+    out.push({ line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, owner, text: e.parent ? e.parent.getText(sf).slice(0, 80) : n.getText(sf) });
+  });
+  return out;
+}
+/** <Camera {...spread}> anywhere in fnName (a spread could carry animated camera props past S22). */
+export function cameraJsxSpreads(src: string, fnName: string): number {
+  const sf = sfOf(src);
+  let n0 = 0;
+  inFn(sf, fnName, (n) => { if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(sf) === "Camera") n0 += n.attributes.properties.filter((a: any) => ts.isJsxSpreadAttribute(a)).length; });
+  return n0;
 }

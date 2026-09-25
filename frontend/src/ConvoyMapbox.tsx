@@ -33,8 +33,8 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useCallback, useRef, useState } from "react";
 import { overviewSizePt, isOverviewZoom } from "./overviewSize";
-import { predictAhead, returnFlyStep } from "./returnFly";
-import { carZoomApply, type CarZoomChannel } from "./carZoomStep";
+import { predictAhead, returnFlyStep, RETURN_FLY_GRACE_MS } from "./returnFly";
+import { carZoomApply, type CarZoomChannel, type CamWriteSeed } from "./carZoomStep";
 import { reportDraw, reportPoseFix, resetPoseFixBudget, reportCamApply } from "./drawTelemetry";
 import { noteFrame, noteCam, noteTick, retireInstance, noteFixAccepted, noteEaseIdle } from "./heatProbe";
 import { createFramePacer, frameDue, msUntilDue, navMapFps } from "./framePacer";
@@ -1268,7 +1268,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // badly wrong for a button press, which would crawl for ~4 s while applyZoomNow's
   // direct setCamera rubber-banded against it. Automatic framing drifts; the driver's
   // own input lands. Cleared by pushCam once consumed.
-  zoomSnapRef?: React.MutableRefObject<boolean>;
+  // true = snap to the current targets (the crew edge, inside a push). A CamWriteSeed (head unit, 2026-09-25) = an owner
+  // INSTANT write already put the camera there: re-seed from what was WRITTEN, however late the next push comes.
+  zoomSnapRef?: React.MutableRefObject<boolean | CamWriteSeed>;
   // Return-from-overview fly (src/returnFly.ts): -1 armed → the next push is ONE flyTo to the chase frame, > 0 = flying
   // until then (pushes stand down), 0 idle. Armed by the car's crew-hold expiry and the phone's recenter after a crew fit.
   returnFlyRef?: React.MutableRefObject<number>;
@@ -1604,7 +1606,9 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     // when it lands; pushes stand down while it runs; the push that follows lands on that frame. See src/returnFly.ts.
     let landedSnap = false;
     if (returnFlyRef) {
-      const st = returnFlyStep(returnFlyRef.current as any, now);
+      // Head unit (zoomCh): the fly owns the camera for RETURN_FLY_GRACE_MS past its JS deadline — the native fly ends a
+      // little later; the phone passes no zoomCh, so no grace (unchanged).
+      const st = returnFlyStep(returnFlyRef.current as any, now, c.zoomCh ? RETURN_FLY_GRACE_MS : 0);
       landedSnap = st.landed;   // the push after the fly snaps zoom/pitch/heading lag itself — the phone passes no zoomSnapRef
       // While the fly runs: no pushes, and lastCamAt is NOT refreshed, so lockstep freshness lapses within 500 ms and
       // the marker's per-tick size follows the map's LIVE zoom through the animation (Codex, 2026-09-24: publishing
@@ -1643,23 +1647,29 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     lastCamAt.current = now;
     // A driver-initiated zoom lands NOW (see zoomSnapRef). One-shot: cleared here so the
     // very next frame resumes the slow automatic glide.
-    const userZoomed = !!zoomSnapRef?.current;
+    const zs = zoomSnapRef?.current;
+    const userZoomed = !!zs;
     if (userZoomed && zoomSnapRef) zoomSnapRef.current = false;
+    // An owner instant write's record (head unit): the camera is ALREADY where it was written. Seed from that, never from
+    // today's targets — on a stopped car this push can come minutes later, after the targets moved (2D/3D, nav start), and
+    // snapping to them was a one-frame cut (a +/- press snapped the pitch 45°). The glide then walks from there. A hard
+    // snap (first fix / resume) still goes to the targets. The phone passes no zoomSnapRef: unchanged.
+    const ws: CamWriteSeed | null = zs && typeof zs === 'object' && !snap ? zs : null;
     // A landing seeds zoom/pitch from the frame the fly ended on (not today's target, which may have moved during the
     // fly) and lets the glide carry the camera to the live target from there.
     const landSeed = landedSnap ? flyDestRef.current : null;
     if (landedSnap) flyDestRef.current = null;
     if (snap || userZoomed || landedSnap || camZoom.current == null || camPitch.current == null) {
-      camZoom.current = landSeed ? landSeed.zoom : c.zoomLevel;
-      camPitch.current = landSeed ? landSeed.pitch : c.pitch;
+      camZoom.current = landSeed ? landSeed.zoom : ws ? ws.zoom : c.zoomLevel;
+      camPitch.current = landSeed ? landSeed.pitch : ws ? (typeof ws.pitch === 'number' ? ws.pitch : (camPitch.current ?? c.pitch)) : c.pitch;
       // HEAD UNIT (zoomCh): a landing can now be pushed by the PARKED pump the moment the fly's time is up (2026-09-25 —
       // a seed must never outlive its fly), long before the next moving push. Start the glide's goals AT the landed frame
       // so a target that moved during the fly (nav start, a speed change) is walked to at the glide's own slew rate once
       // the car moves — a goal left at the target made that first moving push (dt clamped to 200 ms) jump 13 % of the gap
       // (0.29 of a level for a nav start). The phone passes no zoomCh: its landing is unchanged.
       const carLand = !!landSeed && !!c.zoomCh;
-      camZoomGoal.current = carLand ? landSeed!.zoom : c.zoomLevel;
-      camPitchGoal.current = carLand ? landSeed!.pitch : c.pitch;
+      camZoomGoal.current = carLand ? landSeed!.zoom : ws ? camZoom.current : c.zoomLevel;
+      camPitchGoal.current = carLand ? landSeed!.pitch : ws ? camPitch.current : c.pitch;
     } else {
       // 1) The GOAL walks toward the raw target at a bounded rate, ignoring twitches
       //    smaller than the dead-band. 2) The applied value low-passes toward the goal.
@@ -1700,7 +1710,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
     const carHdg = typeof hdg === 'number' ? hdg : c.heading;
     let camHeading = carHdg;
     if (NOSE_LEAD_IN_ENABLED && typeof carHdg === 'number') {
-      if (snap || userZoomed || landedSnap || camHdgLag.current == null) camHdgLag.current = (landSeed && typeof landSeed.heading === 'number') ? landSeed.heading : carHdg;
+      if (snap || userZoomed || landedSnap || camHdgLag.current == null) camHdgLag.current = (landSeed && typeof landSeed.heading === 'number') ? landSeed.heading
+        : ws ? (typeof ws.heading === 'number' ? ws.heading : (camHdgLag.current ?? carHdg)) : carHdg;   // a write's record: its chase heading
       else {
         const k = 1 - Math.exp(-dt / CAM_HEADING_LAG_MS);
         let h = camHdgLag.current + angDelta(camHdgLag.current, carHdg) * k;

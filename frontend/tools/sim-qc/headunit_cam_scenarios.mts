@@ -421,9 +421,87 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
     sysCase("L4", "relayout during the 1.2 s release → the release follows the corrected zoom (no cut)", android, (h) => { const t0 = h.now + 100; at(h, t0); h.press(-0.5); at(h, t0 + lapse + 400); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: 5000 }; });
     sysCase("L5", "relayout during a still Crew overview → the overview is kept; its way home lands on the corrected zoom", android, (h) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 3000); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: 4000 + 1800 + 1000 }; });
     sysCase("L6", "relayout inside crewFit's 600 ms easeTo → kept; the way home lands on the corrected zoom", android, (h) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 200); h.relayout(17.8); return { t: h.now, instant: false, want: 17.8, settle: 6800 + 1800 + 1000 }; });
-    sysCase("L7", "fix lost and regained during the return fly (cold-start snap + pending re-centre) → re-aimed, no cut", android, (h) => { const f = flyStart(h); at(h, f + 300); h.fixRegained(); return { t: h.now, instant: false, want: 16.8, settle: 3000 }; });
-    sysCase("L8", "fix lost and regained during a +/- ease → the ease keeps the zoom (held framing)", android, (h) => { const t0 = h.now + 100; at(h, t0); h.press(-0.5); at(h, t0 + 100); h.fixRegained(); return { t: h.now, instant: false, want: 16.3, settle: 3000 }; });
-    sysCase("L9", "fix lost and regained during a still Crew overview → kept; home at 7 s", android, (h) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 3000); h.fixRegained(); return { t: h.now, instant: false, want: 16.8, settle: 4000 + 1800 + 1000 }; });
+    // L7–L9 are DEFENSIVE, not production paths: CarMapView mounts only with a fix and carStore never sets selfLat back
+    // to null, so hasFix cannot go true → false → true within a mount (review of 1f2faada); the harness also does not
+    // unmount SelfCarModel as `{hasFix && <SelfCarModel/>}` would. They only prove the effects route through the owner.
+    sysCase("L7", "DEFENSIVE (unreachable today): the cold-start + pending re-centre effects re-run during the return fly → re-aimed", android, (h) => { const f = flyStart(h); at(h, f + 300); h.fixRegained(); return { t: h.now, instant: false, want: 16.8, settle: 3000 }; });
+    sysCase("L8", "DEFENSIVE (unreachable today): those effects re-run during a +/- ease → the ease keeps the zoom", android, (h) => { const t0 = h.now + 100; at(h, t0); h.press(-0.5); at(h, t0 + 100); h.fixRegained(); return { t: h.now, instant: false, want: 16.3, settle: 3000 }; });
+    sysCase("L9", "DEFENSIVE (unreachable today): those effects re-run during a still Crew overview → kept; home at 7 s", android, (h) => { const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 3000); h.fixRegained(); return { t: h.now, instant: false, want: 16.8, settle: 4000 + 1800 + 1000 }; });
+  }
+
+  // ── T: a STALE ONE-SHOT (review of 1f2faada, major) ────────────────────────────────────────────────────────────────
+  // An instant owner write on a STOPPED car (compass on/off, the AppState re-assert, a layout correction, a pinch's last
+  // update) used to leave zoomSnapRef = true with nothing to consume it; minutes later the next push (a +/- press, or
+  // pulling away) snapped to every target that had changed meanwhile — a press snapped the pitch 45°. Now the write
+  // records what it wrote and the lockstep seeds from that. Each prior, then 5 min stopped during which the targets
+  // move (the 2D/3D toggle: pitch 45 → 0; or nav start: zoom 16.8 → 17.0, pitch 45 → 48), then a '−' press or the car
+  // pulls away — iOS and Android. Asserted over the 3 s after: no zoom cut > X_CUT, no pitch or heading cut > 2°.
+  const priors: [string, (h: ReturnType<typeof makeHeadUnit>) => void][] = [
+    ["compass on then off", (h) => { h.gesture({ kind: "compass" }); h.advance(300); h.gesture({ kind: "compass" }); }],
+    ["the AppState re-assert", (h) => h.reassert()],
+    ["a layout correction", (h) => h.relayout(16.8)],
+    ["a pinch's last update", (h) => { h.gesture({ kind: "zoomBegin" }); for (let k = 1; k <= 3; k++) { h.gesture({ kind: "zoom", scale: Math.pow(1.1, k / 3), velocity: 0 }); h.advance(33); } h.gesture({ kind: "zoomEnd" }); }],
+    ["compass north-up (latched)", (h) => h.gesture({ kind: "compass" })],
+  ];
+  const changes: [string, (h: ReturnType<typeof makeHeadUnit>) => void][] = [
+    ["2D/3D (pitch 45 → 0)", (h) => h.setFollowPitch(0)],
+    ["nav start (zoom 17.0, pitch 48)", (h) => { h.setFollowZoom(17.0); h.setFollowPitch(48); }],
+  ];
+  let ti = 0;
+  for (const [pn, prior] of priors) for (const [cn, change] of changes) for (const trig of ["a '−' press", "pulling away"] as const) for (const android of [false, true]) {
+    const h = park(unit({ android }));
+    prior(h);
+    h.advance(10000); change(h); h.advance(290000);   // 5 min stopped; the targets move 10 s in
+    const t0 = h.now;
+    if (trig === "a '−' press") h.press(-0.5); else h.setMoving(true);
+    at(h, t0 + 3000);
+    const z = h.maxCut(t0, h.now), p = h.maxPitchCut(t0, h.now), hd = h.maxHeadingCut(t0, h.now);
+    ok(`T${++ti}`, `${pn}, 5 min stopped with ${cn}, then ${trig} (${android ? "Android" : "iOS"})`, z.m <= X_CUT && p.m <= 2 && hd.m <= 2,
+      `(largest one-vsync zoom ${f3(z.m)} · pitch ${p.m.toFixed(2)}° · heading ${hd.m.toFixed(2)}°)`);
+  }
+
+  // ── NU: the north-up latch is honoured by every owner write (review of 1f2faada) ────────────────────────────────────
+  for (const android of [false, true]) {
+    const h = park(unit({ android }));
+    h.gesture({ kind: "compass" }); h.advance(500);
+    const t1 = h.now; h.reassert(); h.advance(10000);
+    const parkedHdg = Math.max(...h.frames.filter((f) => f.t >= t1).map((f) => Math.abs(((f.heading % 360) + 360) % 360 > 180 ? 360 - (((f.heading % 360) + 360) % 360) : ((f.heading % 360) + 360) % 360)));
+    const tr = h.now; h.setMoving(true); at(h, tr + 3000);
+    const hd = h.maxHeadingCut(tr, h.now);
+    ok(`NU1${android ? "a" : ""}`, `compass north-up latched, then the AppState re-assert while stopped: the map stays north-up, and pulling away does not turn it (${android ? "Android" : "iOS"})`, parkedHdg <= 0.5 && hd.m <= 2, `(largest heading off north while parked ${parkedHdg.toFixed(1)}°; largest one-vsync heading change on pulling away ${hd.m.toFixed(1)}°)`);
+  }
+
+  // ── G: a write landing between the fly's JS deadline and the native fly's last frame (review of 1f2faada, iOS) ─────
+  // The native flyTo starts on the next display frame after the call, so it ends up to a frame after the JS deadline;
+  // an instant write in that gap was overwritten by the fly's last frames on iOS and, parked, never re-applied. The fly
+  // now owns the camera for RETURN_FLY_GRACE_MS past its deadline (a write there re-aims it) and lands after it.
+  let gi = 0;
+  for (const dt of [0, 5, 10, 16, 40, 120]) for (const [kn, act, wantZ, wantH] of [["a layout correction (→ 17.8)", (h: ReturnType<typeof makeHeadUnit>) => h.relayout(17.8), 17.8, null], ["the compass (north-up)", (h: ReturnType<typeof makeHeadUnit>) => h.gesture({ kind: "compass" }), 16.8, 0]] as const) for (const android of [false, true]) {
+    const h = park(unit({ android }));
+    const f0 = flyStart(h);
+    at(h, f0 + RETURN_FLY + dt); (act as any)(h);
+    const tw = h.now;
+    at(h, tw + 3000);
+    const zOk = Math.abs(h.cam.zoom - (wantZ as number)) < 0.02;
+    const hN = ((h.cam.heading % 360) + 360) % 360, hOff = Math.min(hN, 360 - hN);
+    const hOk = wantH == null || hOff < 0.5;
+    const tr = h.now; h.setMoving(true); at(h, tr + 3000);
+    const z = h.maxCut(tr, h.now), hd = h.maxHeadingCut(tr, h.now);
+    ok(`G${++gi}`, `${kn} ${dt} ms after the fly's JS deadline, parked (${android ? "Android" : "iOS"})`, zOk && hOk && z.m <= X_CUT && hd.m <= 2,
+      `(parked zoom ${f3(h.frames.find((f) => f.t >= tr)!.zoom)} want ${f3(wantZ as number)}${wantH == null ? "" : `, heading off north ${hOff.toFixed(1)}°`}; pulling away: zoom cut ${f3(z.m)} · heading ${hd.m.toFixed(1)}°)`);
+  }
+
+  // ── CF: crewFit frames the crew on the MEASURED canvas (review of 1f2faada; pre-existing since 0f092762) ───────────
+  // The gesture handler is subscribed once, so render #1's mapW/mapH (0) → the 400×240 fallback on every head unit.
+  for (const android of [false, true]) {
+    const h = park(unit({ android }));
+    const { mapW: w, mapH: hh } = h.C.camInputsRef.current;
+    const pts = [[h.cam.lng, h.cam.lat], ...(h.C.__peers as any[]).map((p) => [p.lng, p.lat])];
+    const lngSpan = Math.max(0.002, Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])));
+    const latSpan = Math.max(0.002, Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])));
+    const want = Math.max(8, Math.min(15, Math.min(Math.log2((w * 0.75 * 360) / (512 * lngSpan)), Math.log2((hh * 0.65 * 180) / (512 * latSpan)))));
+    const tap = h.now + 100; at(h, tap); h.crew(); at(h, tap + 900);
+    ok(`CF1${android ? "a" : ""}`, `Crew frames the crew for the measured ${w}×${hh} canvas, not render #1's 400×240 fallback (${android ? "Android" : "iOS"})`, Math.abs(h.cam.zoom - want) < 0.02, `(overview zoom ${f3(h.cam.zoom)}, want ${f3(want)})`);
   }
 
   // ── the harness itself: every identifier the lifted production code read resolved ─────────────────────────────

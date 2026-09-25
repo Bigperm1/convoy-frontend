@@ -10,6 +10,13 @@
 // Pure; gate tools/sim-qc/return_fly_test.mts.
 
 export const RETURN_FLY_MS = 1800;
+/** HEAD UNIT ONLY: how long after a fly's JS deadline it still owns the camera. The native flyTo starts when the bridge
+ *  delivers the call and on the next display frame, so it ends a little AFTER the JS deadline; on iOS a 'none' write in
+ *  that gap is overwritten by the fly's last frames (MapboxMap.setCamera does not cancel animations) and, parked, never
+ *  re-applied (review of 1f2faada). Inside the grace a write re-aims the fly instead and the landing waits; after it the
+ *  landing push is a no-op on screen. 100 ms = 6 frames. HYPOTHESIS: the dispatch-to-first-frame latency is under that —
+ *  not measured on a head unit. The phone passes no grace (unchanged). */
+export const RETURN_FLY_GRACE_MS = 100;
 
 /** The camera's return-fly state: -1 = armed (fly on the next push, RETURN_FLY_MS), < -1 = armed as a RE-AIM lasting
  *  −state ms (returnFlyReaim), 0 = idle, > 0 = flying until this epoch ms. */
@@ -27,22 +34,23 @@ export function predictAhead(lat: number, lng: number, headingDeg: number | unde
   return { lat: lat + dLat, lng: lng + dLng };
 }
 
-/** What pushCam should do this tick given the fly state: run the fly (for `ms`), wait for it, or push normally. */
-export function returnFlyStep(state: ReturnFlyState, now: number): { action: "fly" | "wait" | "push"; next: ReturnFlyState; landed: boolean; ms: number } {
+/** What pushCam should do this tick given the fly state: run the fly (for `ms`), wait for it, or push normally.
+ *  graceMs (head unit): keep waiting that long past the deadline so the native fly has really ended. */
+export function returnFlyStep(state: ReturnFlyState, now: number, graceMs = 0): { action: "fly" | "wait" | "push"; next: ReturnFlyState; landed: boolean; ms: number } {
   if (state < 0) {
     const ms = state === -1 ? RETURN_FLY_MS : -state;
     return { action: "fly", next: now + ms, landed: false, ms };
   }
   if (state > 0) {
-    if (now < state) return { action: "wait", next: state, landed: false, ms: 0 };
+    if (now < state + graceMs) return { action: "wait", next: state, landed: false, ms: 0 };
     return { action: "push", next: 0, landed: true, ms: 0 };   // the fly just ended: this push lands the frame
   }
   return { action: "push", next: 0, landed: false, ms: 0 };
 }
 
 /** A fly armed or in flight: the per-tick pushes stand down and the native flyTo owns the camera. */
-export function returnFlyInFlight(state: ReturnFlyState, now: number): boolean {
-  return state < 0 || (state > 0 && now < state);
+export function returnFlyInFlight(state: ReturnFlyState, now: number, graceMs = 0): boolean {
+  return state < 0 || (state > 0 && now < state + graceMs);
 }
 
 /**
@@ -54,7 +62,7 @@ export function returnFlyInFlight(state: ReturnFlyState, now: number): boolean {
  * frame at the new framing, over the fly's remaining time (at least minMs). Armed or idle states are returned unchanged
  * (an armed fly reads the new framing when it starts). Never returns -1 (that means the full RETURN_FLY_MS).
  */
-export function returnFlyReaim(state: ReturnFlyState, now: number, minMs: number): ReturnFlyState {
-  if (state > 0 && now < state) return -Math.max(2, minMs, state - now);
+export function returnFlyReaim(state: ReturnFlyState, now: number, minMs: number, graceMs = 0): ReturnFlyState {
+  if (state > 0 && now < state + graceMs) return -Math.max(2, minMs, state - now);
   return state;
 }

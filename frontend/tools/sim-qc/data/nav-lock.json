@@ -342,6 +342,14 @@
         "src/ribbonAnchor.ts: code 20500d1e2f0d → 29745fc1f744",
         "src/ConvoyMapbox.tsx#mbx-route-project-a region a8e0d4f36bf0 → f706a19f4406"
       ]
+    },
+    {
+      "at": "2026-09-24",
+      "quote": "Jeff, 2026-09-24: On both surfaces let's do this order: Right side Top - mic, Second from top - hazards, Second from bottom - 2D/3D, Bottom - crew. Phone doesn't have mic — CAR_MAP_BUTTON_CONFIG and AA_MAP_BUTTONS reordered (hazards second on CarPlay, hazards above crew on AA), nothing else",
+      "changes": [
+        "src/carplay/carActions.ts:CAR_MAP_BUTTON_CONFIG { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, ], } → { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, ], }",
+        "src/carplay/carActions.ts:AA_MAP_BUTTONS [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, ] → [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, ]"
+      ]
     }
   ],
   "files": {
@@ -872,11 +880,11 @@
         "AA_NAV_ID": "'convoy-aa-nav'",
         "AA_SEARCH_MAX_ROWS": "6",
         "WHERE_TO_MAX": "30",
-        "CAR_MAP_BUTTON_CONFIG": "{ mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, ], }",
+        "CAR_MAP_BUTTON_CONFIG": "{ mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, ], }",
         "AA_PERSISTENT": "'persistent' as const",
         "AA_ACTION_STRIP": "[ { id: 'car-end', title: 'End', visibility: AA_PERSISTENT }, { id: 'car-search', title: 'Search', visibility: AA_PERSISTENT }, { id: 'car-view', icon: CAR_ICON_VIEW_2D, visibility: AA_PERSISTENT }, { id: 'car-comms', icon: CAR_ICON_MIC, visibility: AA_PERSISTENT }, ]",
         "AA_ALLOW_LOCATION_ID": "'car-allow-location'",
-        "AA_MAP_BUTTONS": "[ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, ]",
+        "AA_MAP_BUTTONS": "[ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, ]",
         "TAP_LABEL": "{ 'car-crew': 'Crew', 'car-compass': 'Compass', 'car-comms': 'Comms', 'car-view': 'View', 'car-mic': 'Scout', 'car-search': 'Search', 'car-end': 'End', 'car-zoom-in': 'Zoom in', 'car-zoom-out': 'Zoom out', [AA_ALLOW_LOCATION_ID]: CAR_ALLOW_LOCATION_TITLE, }",
         "TAP_DEDUPE_MS": "50"
       },

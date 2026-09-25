@@ -542,6 +542,9 @@ export default function MapScreen() {
   const [hazards, setHazards] = useState<Hazard[]>([]);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [showReport, setShowReport] = useState(false);
+  // Measured height of the right-hand FAB stack (onLayout): the Report panel anchors ABOVE it, so it never covers
+  // a button, the weather HUD or the speedo (Jeff, 2026-09-24, off his screenshot of the first cut).
+  const [fabStackH, setFabStackH] = useState(0);
   const [selected, setSelected] = useState<Hazard | null>(null);
   const [destination, setDestination] = useState<{ lat: number; lng: number; label: string } | null>(null);
   // When a crew member shares a route, the recipient gets this metadata so the
@@ -6093,14 +6096,64 @@ export default function MapScreen() {
           reorganization) — map layers/mode live in Settings
           (settings/map-layers.tsx, settings/map-mode.tsx). */}
 
-      <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]}>
-        {/* ORDER: Crew on TOP, compass BELOW — this stack is deliberately ordered to
-            match the CarPlay map buttons, whose array is [car-crew, car-compass]
-            (carActions.ts CAR_MAP_BUTTON_CONFIG). The phone used to be compass-first,
-            so the two surfaces read as swapped on a head unit (Jeff, 2026-07-26).
-            NOTE this is the ONE place the usual "CarPlay matches the phone" rule runs
-            the other way — CarPlay's order is fixed by the template, so the phone moved.
-            If you reorder either surface, reorder BOTH. */}
+      <View pointerEvents="box-none" style={[styles.fabStack, { bottom: controlsBottom }]} onLayout={(e) => setFabStackH(e.nativeEvent.layout.height)}>
+        {/* ORDER (Jeff, 2026-09-24: "On both surfaces let's do this order: Right side Top - mic, Second from top -
+            hazards, Second from bottom - 2D/3D, Bottom - crew. Phone doesn't have mic"): compass takes the mic's slot
+            (the phone has no mic), then Hazards, then 2D/3D (routing only), Crew at the BOTTOM — the head unit's
+            column [car-comms, car-hazards, car-view, car-crew] (carActions.ts CAR_MAP_BUTTON_CONFIG / AA_MAP_BUTTONS).
+            If you reorder either surface, reorder BOTH. The Report panel anchors ABOVE this stack (fabStackH,
+            measured) so it never covers a button, the weather HUD or the speedo. */}
+        {/* Compass — TOP of the stack: the head unit's top slot is the comms mic and the phone has no mic, so the
+            compass takes it (Jeff, 2026-09-24 order: mic · hazards · 2D/3D · crew). The needle rotates opposite the live map
+            bearing so North always points north as the map turns; tapping it
+            snaps back to the car (recenter) AND faces the map north (heading 0). */}
+        <PressableScale
+          testID="compass-fab"
+          hitSlop={0}
+          style={styles.fab}
+          onPress={() => {
+            // The same snap as its two FAB neighbours — it was the only silent one of the three
+            // (Jeff, 2026-09-23: Apple-feel batch 1). Outside the lock region below, on purpose.
+            haptics.snap();
+            // TOGGLE, like the CarPlay compass (CarMapView 'compass': "holding north-up until
+            // tapped again"). This was ONE-WAY: every tap armed the hold, and only a manual pan
+            // or a NEW route released it — so a recenter tap mid-drive left the map north-up for
+            // the rest of the drive, needle pinned north while the car turned (Rodrigo,
+            // 2026-09-03: "compass shows north but it's going right/left"; CarPlay, which
+            // toggles, "was fine"). Receipt: phone-tap:compass hold=0|1.
+            // 🔒 NAV-LOCK begin map-compass-northup-toggle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
+            const hold = !northUpHold;
+            setNorthUpHold(hold);
+            if (hold) setNorthSignal((n) => n + 1);
+            recenterNow();
+            // 🔒 NAV-LOCK end map-compass-northup-toggle
+            try { logEvent(`phone-tap:compass hold=${hold ? 1 : 0}`); } catch {}
+          }}
+        >
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
+          <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
+            <CompassNeedle size={54} />
+          </View>
+        </PressableScale>
+        {/* HAZARDS (Jeff, 2026-09-24: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?") — the head unit's fourth map
+            button, on the phone: opens the Report sheet (src/components/HazardSheet.tsx, the same four tiles in
+            the driver's metal). Second from the top like the head unit's column [comms, hazards, view, crew] (Jeff,
+            2026-09-24); the compass keeps its own FAB here because the phone has the room (on the head unit it
+            rides inside the panel). The panel opens ABOVE this stack, never over it. */}
+        <PressableScale
+          testID="hazards-fab"
+          hitSlop={0}
+          style={[styles.fab, styles.fabPolice]}
+          onPress={() => {
+            haptics.snap();
+            setShowReport(true);
+            try { logEvent('phone-tap:hazards'); } catch {}
+          }}
+        >
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
+          <SkinFade render={(t) => <Image source={HAZARD_FAB_ART[t]} style={{ width: 26, height: 26 }} resizeMode="contain" />} />
+          <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Hazards</Text>
+        </PressableScale>
         {/* 2D / 3D VIEW TOGGLE (Jeff, 2026-08-14) — sits directly ABOVE Crew, exactly
             where he asked for it. Pure VIEW switch: the route line stays drawn and
             guidance keeps running; only the camera pitch and the marker art change.
@@ -6175,55 +6228,6 @@ export default function MapScreen() {
           <SkinFade render={(t) => <Image source={CREW_ART[t]} style={{ width: 26, height: 26 }} resizeMode="contain" />} />
           <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Crew</Text>
         </PressableScale>
-        {/* HAZARDS (Jeff, 2026-09-24: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?") — the head unit's fourth map
-            button, on the phone: opens the Report sheet (src/components/HazardSheet.tsx, the same four tiles in
-            the driver's metal). Below Crew like the CarPlay column [comms, view, crew, hazards]; the compass keeps
-            its own FAB here because the phone has the room (on the head unit it rides inside the panel). */}
-        <PressableScale
-          testID="hazards-fab"
-          hitSlop={0}
-          style={[styles.fab, styles.fabPolice]}
-          onPress={() => {
-            haptics.snap();
-            setShowReport(true);
-            try { logEvent('phone-tap:hazards'); } catch {}
-          }}
-        >
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <SkinFade render={(t) => <Image source={HAZARD_FAB_ART[t]} style={{ width: 26, height: 26 }} resizeMode="contain" />} />
-          <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Hazards</Text>
-        </PressableScale>
-        {/* Compass — bottom of stack. The needle rotates opposite the live map
-            bearing so North always points north as the map turns; tapping it
-            snaps back to the car (recenter) AND faces the map north (heading 0). */}
-        <PressableScale
-          testID="compass-fab"
-          hitSlop={0}
-          style={styles.fab}
-          onPress={() => {
-            // The same snap as its two FAB neighbours — it was the only silent one of the three
-            // (Jeff, 2026-09-23: Apple-feel batch 1). Outside the lock region below, on purpose.
-            haptics.snap();
-            // TOGGLE, like the CarPlay compass (CarMapView 'compass': "holding north-up until
-            // tapped again"). This was ONE-WAY: every tap armed the hold, and only a manual pan
-            // or a NEW route released it — so a recenter tap mid-drive left the map north-up for
-            // the rest of the drive, needle pinned north while the car turned (Rodrigo,
-            // 2026-09-03: "compass shows north but it's going right/left"; CarPlay, which
-            // toggles, "was fine"). Receipt: phone-tap:compass hold=0|1.
-            // 🔒 NAV-LOCK begin map-compass-northup-toggle — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
-            const hold = !northUpHold;
-            setNorthUpHold(hold);
-            if (hold) setNorthSignal((n) => n + 1);
-            recenterNow();
-            // 🔒 NAV-LOCK end map-compass-northup-toggle
-            try { logEvent(`phone-tap:compass hold=${hold ? 1 : 0}`); } catch {}
-          }}
-        >
-          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
-          <View style={{ transform: [{ rotate: `${-mapHeading}deg` }] }}>
-            <CompassNeedle size={54} />
-          </View>
-        </PressableScale>
         {/* Recenter FAB removed — recentering now lives in the compass tap
             (which both recenters on the car and faces north). */}
         {/* Bottom search/arrow FAB removed entirely — the destination search
@@ -6235,10 +6239,12 @@ export default function MapScreen() {
           Brief glassy pill at the bottom-center that confirms a Police or
           Hazard report was sent. Auto-dismisses after 2.5s (set by reportAlert). */}
       <ReportToast kind={alertConfirm as any} />
-      {/* The Report sheet (the head unit's grid, on the phone). Closes on the tap; the toast confirms. */}
+      {/* The Report panel (the head unit's grid, on the phone): a card anchored ABOVE the FAB stack, right-aligned with
+          it, closed by a tap anywhere else. Closes on a tile tap; the toast confirms. */}
       <HazardSheet
         visible={showReport}
         dismiss={navMode === "turn-by-turn"}
+        anchorBottom={controlsBottom + fabStackH}
         onClose={() => setShowReport(false)}
         onReport={(kind) => { setShowReport(false); try { logEvent(`hazard-panel pick surf=phone id=hz-${kind} kind=${kind}`); } catch {} return reportHazard(kind); }}
       />

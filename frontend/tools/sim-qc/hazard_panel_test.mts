@@ -49,8 +49,23 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
   ok("D2 the phone sheet has art for every report glyph in all four metals", ["hz_police", "hz_crash", "hz_hazard", "hz_traffic"].every((g) => new RegExp(`${g}:\\s*\\{ brand: require\\(.*premium: require\\(.*ultra: require\\(.*diamond: require\\(`).test(sheet)));
   ok("D3 map.tsx mounts the Hazards FAB and the sheet, and the tap reports through reportHazard", mapTsx.includes('testID="hazards-fab"') && mapTsx.includes("<HazardSheet") && mapTsx.includes("return reportHazard(kind)"));
   ok("D5 the sheet dismisses when turn-by-turn starts and holds off a second tap while a report is in flight", mapTsx.includes('dismiss={navMode === "turn-by-turn"}') && sheet.includes("if (visible && dismiss && !was) onClose();") && sheet.includes("const prevDismiss = useRef(!!dismiss);") && sheet.includes("if (_reportBusy) return;") && sheet.includes("finally(() => { _reportBusy = false; })"));
-  ok("D6 the panel is a GlassFill card, not Glass (Glass collapsed to 0 height inside the Modal on the sim)", sheet.includes("<GlassFill intensity={70}") && !sheet.includes("<Glass radius"));
-  ok("D4 the phone FAB sits between Crew and the compass (CarPlay order: crew then hazards)", mapTsx.indexOf('testID="crew-fit-fab"') < mapTsx.indexOf('testID="hazards-fab"') && mapTsx.indexOf('testID="hazards-fab"') < mapTsx.indexOf('testID="compass-fab"'));
+  ok("D6 the panel wears the weather forecast card's floor + tinted GlassFill and is no longer a Modal sheet (Jeff, 2026-09-24: same opacity as the weather panel)", sheet.includes('backgroundColor: "rgba(24,24,28,0.66)"') && sheet.includes("<GlassFill tintColor={hudTint()}") && !sheet.includes("<Modal") && sheet.includes('style={[StyleSheet.absoluteFill, { zIndex: Z_CARD - 1 }]} onPress={onClose}'));
+  ok("D7 the panel anchors ABOVE the measured FAB stack, right-aligned with it (never over a button)", mapTsx.includes("anchorBottom={controlsBottom + fabStackH}") && mapTsx.includes("onLayout={(e) => setFabStackH(e.nativeEvent.layout.height)}") && sheet.includes("Math.min(anchorBottom + GAP_ABOVE_STACK, Math.max(0, winH - TOP_CLEAR - cardH))") && sheet.includes("const RIGHT_INSET = 12;") && mapTsx.includes("    right: 12,\n    bottom: 90,"));
+  ok("D8 the backdrop and card sit above the top bar / H button (zIndex 100) so a tap on them closes the panel instead of reaching them (sim, 2026-09-24: a search-bar tap went THROUGH the first cut)", sheet.includes("const Z_CARD = 301;") && sheet.includes("{ zIndex: Z_CARD - 1 }") && sheet.includes("zIndex: Z_CARD,") && mapTsx.includes("zIndex: 100,") && !/zIndex:\s*[3-9]\d\d,/.test(mapTsx.replace(/zIndex:\s*9{3,}/g, "")));
+  ok("D4 phone FAB order top→bottom = compass (the mic's slot) · Hazards · 2D/3D · Crew (Jeff, 2026-09-24)", ['testID="compass-fab"', 'testID="hazards-fab"', 'testID="view-2d-3d-fab"', 'testID="crew-fit-fab"'].map((t) => mapTsx.indexOf(t)).every((v, k, arr) => v >= 0 && (k === 0 || arr[k - 1] < v)));
+}
+
+// E · the head-unit column (Jeff, 2026-09-24: "Top - mic, Second from top - hazards, Second from bottom - 2D/3D, Bottom - crew")
+{
+  const acts = readFileSync(new URL("../../src/carplay/carActions.ts", import.meta.url), "utf8");
+  const ids = (block: string) => [...block.matchAll(/\{ id: ('[a-z-]+'|HAZARD_BUTTON_ID),/g)].map((m) => m[1]);
+  const slice = (from: string) => { const k = acts.indexOf(from); return acts.slice(k, acts.indexOf("]", k)); };
+  const cp = ["'car-comms'", "HAZARD_BUTTON_ID", "'car-view'", "'car-crew'"];
+  ok("E1 CAR_MAP_BUTTON_CONFIG is mic · hazards · 2D/3D · crew", JSON.stringify(ids(slice("export const CAR_MAP_BUTTON_CONFIG"))) === JSON.stringify(cp));
+  ok("E2 carMapButtonConfig() (the skinned build) keeps that order", JSON.stringify(ids(slice("export function carMapButtonConfig()"))) === JSON.stringify(cp));
+  const aa = ["'car-zoom-in'", "'car-zoom-out'", "HAZARD_BUTTON_ID", "'car-crew'"];
+  ok("E3 AA_MAP_BUTTONS puts hazards above crew", JSON.stringify(ids(slice("export const AA_MAP_BUTTONS"))) === JSON.stringify(aa));
+  ok("E4 aaMapButtons() (the skinned build) keeps that order", JSON.stringify(ids(slice("export function aaMapButtons()"))) === JSON.stringify(aa));
 }
 
 console.log(fails === 0 ? "\nPASS hazard_panel" : `\nFAIL hazard_panel (${fails})`);

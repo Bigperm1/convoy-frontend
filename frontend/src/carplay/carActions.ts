@@ -1350,6 +1350,10 @@ export const CAR_BAR_BUTTON_CONFIG = {
 // here: it takes precedence over `image` in RCTConvert+RNCarPlay.m, so leaving it
 // in would mask our art. See carButtonIcons.ts for why a data URI is bridge-free
 // and OTA-able.
+// ORDER (Jeff, 2026-09-24): "On both surfaces let's do this order: Right side Top - mic, Second from top - hazards,
+// Second from bottom - 2D/3D, Bottom - crew." CarPlay's panning mode hides map buttons from the END of the array, so
+// 2D/3D and crew are the pair that vanishes while panning and the mic + hazards always survive. The phone's FAB stack
+// (map.tsx) mirrors this column with the compass in the mic's slot. Same order in carMapButtonConfig() below.
 export const CAR_MAP_BUTTON_CONFIG = {
   // SPACERS REMOVED FOR GOOD (2026-07-23, second head-unit confirmation): iOS 26
   // draws its glass circle behind ANY CPMapButton — transparent image AND
@@ -1373,9 +1377,9 @@ export const CAR_MAP_BUTTON_CONFIG = {
   // fourth slot opens the Report grid (src/carplay/hazardPanel.ts) and the compass rides inside it as a tile.
   mapButtons: [
     { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
+    { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS },
     { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D },
     { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW },
-    { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS },
   ],
 };
 
@@ -1420,9 +1424,9 @@ export function carMapButtonConfig() {
     ...CAR_MAP_BUTTON_CONFIG,
     mapButtons: [
       { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC },
+      { id: HAZARD_BUTTON_ID, image: carIcon(HAZARD_BUTTON_GLYPH, s), focusedImage: carIcon(HAZARD_BUTTON_GLYPH, s) },
       { id: 'car-view', image: carIcon(viewGlyph, s), focusedImage: carIcon(viewGlyph, s) },
       { id: 'car-crew', image: carIcon('crew', s), focusedImage: carIcon('crew', s) },
-      { id: HAZARD_BUTTON_ID, image: carIcon(HAZARD_BUTTON_GLYPH, s), focusedImage: carIcon(HAZARD_BUTTON_GLYPH, s) },
     ],
   };
 }
@@ -1519,8 +1523,8 @@ export function aaActionStrip(): (typeof AA_ACTION_STRIP)[number][] {
 export const AA_MAP_BUTTONS = [
   { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT },
   { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT },
-  { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT },
   { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT },
+  { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT },
 ];
 
 // The AA twin. ⚠ Currently a NO-OP visually: androidx tints MapActionStrip icons to a
@@ -1532,8 +1536,8 @@ export function aaMapButtons() {
   return [
     { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT },
     { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT },
-    { id: 'car-crew', icon: carIcon('crew', s), visibility: AA_PERSISTENT },
     { id: HAZARD_BUTTON_ID, icon: carIcon(HAZARD_BUTTON_GLYPH, s), visibility: AA_PERSISTENT },
+    { id: 'car-crew', icon: carIcon('crew', s), visibility: AA_PERSISTENT },
   ];
 }
 

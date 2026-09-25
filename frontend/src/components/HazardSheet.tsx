@@ -1,4 +1,4 @@
-// HazardSheet.tsx — the phone's Report sheet: the head unit's Report grid, on the phone (Jeff, 2026-09-24:
+// HazardSheet.tsx — the phone's Report panel: the head unit's Report grid, on the phone (Jeff, 2026-09-24:
 // "WHERE IS THE HAZARDS BUTTON ON THE PHONE?" — the panel had shipped for CarPlay / Android Auto only, and the
 // phone's own Police/Hazard drawer had been dormant since the police FAB became Crew on 07-23: reporting was voice-only).
 //
@@ -6,10 +6,21 @@
 // the phone keeps its compass FAB, so no compass tile here), the art is the same direction-B Apple-symbol glyph
 // set in the driver's metal (assets/carplay-glyphs/report), the shape is the Hairpin square (DESIGN.md § Shape:
 // radius ≈ 28 % of height). A tile reports at the car's position from 5 s ago through map.tsx's reportHazard —
-// the same POST /hazards the voice intents use — and closes the sheet; the confirmation is the ReportToast pill.
-import React, { useEffect, useRef } from "react";
-import { Animated, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { GlassFill } from "../Glass";
+// the same POST /hazards the voice intents use — and closes the panel; the confirmation is the ReportToast pill.
+//
+// WHERE IT SITS (Jeff, 2026-09-24, off his screenshot of the first cut: "Make sure the hazard panel does not collide
+// with anything else … Make sure on the phone the hazard panel is above the hazard button"): NOT a bottom sheet any
+// more — that one lay across the weather HUD, the speedo, the FAB column and the tab bar. It is a floating card
+// anchored ABOVE the right-hand FAB stack (map.tsx measures the stack and passes anchorBottom), right-aligned with
+// the buttons, in the map area where nothing else lives. Tap anywhere outside it to close (a transparent full-screen
+// backdrop — no dimming, the map stays readable, like the weather forecast card).
+//
+// LOOK = the weather forecast card (Jeff: "Make the panel have the same background opacity as the weather panel"):
+// the same translucent floor rgba(24,24,28,0.66), the same hairline, the same GlassFill tinted by hudTint(), the same
+// pop (opacity + 12 pt rise + 0.94 scale). WeatherHUD.tsx styles.forecastCard is the reference — change both or neither.
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { GlassFill, hudTint } from "../Glass";
 import { PressableScale } from "../ui/PressableScale";
 import { useAppSkin } from "../appSkin";
 import { haptics } from "../haptics";
@@ -29,22 +40,43 @@ export const HAZARD_FAB_ART = HAZARD_ART.hz_hazard;
 const REPORT_TILES = HAZARD_TILES.filter((t): t is typeof t & { kind: HazardKind; glyph: keyof typeof HAZARD_ART } => t.kind != null && t.glyph in HAZARD_ART);
 const TILE = 76;                      // pt; the Hairpin square radius is 28 % of it
 const TILE_RADIUS = Math.round(TILE * 0.28);
-// One report at a time (Codex review 2026-09-24): the sheet closes on the tap, so React state cannot dedupe a second
+const TILE_GAP = 8;
+const PAD_H = 12;
+/** Four faces + gaps + padding: the card's natural width; capped to the window on a small phone. */
+const CARD_W = TILE * 4 + TILE_GAP * 3 + PAD_H * 2;
+/** Same right inset as map.tsx styles.fabStack, so the card's right edge lines up with the buttons. */
+const RIGHT_INSET = 12;
+/** Air between the top button and the card. */
+const GAP_ABOVE_STACK = 10;
+/** The card's top edge never rises closer than this to the top of the window: the search bar / H button end ~104 pt
+ *  down on an iPhone 16 Pro. Only bites on a short phone with the Drive drawer up (the FAB stack rides high then). */
+const TOP_CLEAR = 120;
+/** Until onLayout reports the real height (title + faces + labels + hint). */
+const CARD_H_GUESS = 190;
+// Above every map overlay that a stray tap must not reach while the panel is up (topBar / H button zIndex 100, the
+// weather HUD 70, the pitstop card 200) and below the toasts (999+). The backdrop sits one under the card.
+const Z_CARD = 301;
+// One report at a time (Codex review 2026-09-24): the panel closes on the tap, so React state cannot dedupe a second
 // tap or a re-open during a slow POST — the CarPlay path has _reportInFlight for the same reason. Module-level so it
-// survives the sheet unmounting; released when the caller's promise settles.
+// survives the panel unmounting; released when the caller's promise settles.
 let _reportBusy = false;
 
-export default function HazardSheet({ visible, onClose, onReport, dismiss }: {
+export default function HazardSheet({ visible, onClose, onReport, dismiss, anchorBottom }: {
   visible: boolean;
   onClose: () => void;
-  /** Returns the report's promise so the sheet can hold off a second tap until it settles. */
+  /** Returns the report's promise so the panel can hold off a second tap until it settles. */
   onReport: (kind: HazardKind) => Promise<unknown> | void;
-  /** True while turn-by-turn is active: a sheet left open at drive start (the speed auto-start, a car-session
+  /** True while turn-by-turn is active: a panel left open at drive start (the speed auto-start, a car-session
    *  adoption) must not sit over guidance (Codex review 2026-09-24). */
   dismiss?: boolean;
+  /** Distance from the map's bottom edge to the TOP of the FAB stack (map.tsx: controlsBottom + the measured stack
+   *  height). The card's bottom edge sits GAP_ABOVE_STACK above it, so it never covers a button. */
+  anchorBottom: number;
 }) {
   const metal = useAppSkin();
-  // Close on the TRANSITION into turn-by-turn only (Codex review r2, 2026-09-24): a sheet opened DURING a drive —
+  const { width: winW, height: winH } = useWindowDimensions();
+  const [cardH, setCardH] = useState(CARD_H_GUESS);
+  // Close on the TRANSITION into turn-by-turn only (Codex review r2, 2026-09-24): a panel opened DURING a drive —
   // the whole point of a hazard report — must stay up; one left open when the drive auto-starts must not sit
   // over guidance. The previous value rides a ref, so the component stays mounted across visible=false.
   const prevDismiss = useRef(!!dismiss);
@@ -53,64 +85,93 @@ export default function HazardSheet({ visible, onClose, onReport, dismiss }: {
     prevDismiss.current = !!dismiss;
     if (visible && dismiss && !was) onClose();
   }, [visible, dismiss, onClose]);
-  const y = useRef(new Animated.Value(40)).current;
+  // The weather forecast card's pop, exactly (WeatherHUD.tsx cardAnim): no bounce, nothing was thrown.
+  const a = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!visible) { y.setValue(40); return; }
-    // Enter: a short critically-damped settle from just below (DESIGN.md §11.2 — no bounce, nothing was thrown).
-    Animated.spring(y, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 260, mass: 1 }).start();
-  }, [visible, y]);
+    if (!visible) { a.setValue(0); return; }
+    Animated.spring(a, { toValue: 1, useNativeDriver: true, tension: 150, friction: 13 }).start();
+  }, [visible, a]);
   if (!visible) return null;
+  const cardW = Math.min(CARD_W, winW - RIGHT_INSET * 2);
+  // Above the stack — unless that would push the card into the top bar (short phone, Drive drawer up): then it stops
+  // TOP_CLEAR from the top and may touch the compass FAB, never the Hazards button below it.
+  const bottom = Math.min(anchorBottom + GAP_ABOVE_STACK, Math.max(0, winH - TOP_CLEAR - cardH));
   return (
-    <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable testID="hazard-sheet-backdrop" style={styles.backdrop} onPress={onClose} accessibilityLabel="Close">
-        <Animated.View style={[styles.sheetWrap, { transform: [{ translateY: y }] }]}>
-          {/* Stop backdrop taps inside the panel */}
-          <Pressable onPress={() => {}} testID="hazard-sheet">
-            <View style={styles.card}>
-              <GlassFill intensity={70} style={styles.cardFill} />
-              <View style={styles.inner}>
-                <Text maxFontSizeMultiplier={1.2} style={styles.title}>Report</Text>
-                <View style={styles.row}>
-                  {REPORT_TILES.map((t) => (
-                    <PressableScale
-                      key={t.id}
-                      testID={`report-${t.kind}`}
-                      hitSlop={0}   // the faces are 76 pt with 8 pt gaps; the default 12 pt slop let an edge tap report the neighbour (Codex r3)
-                      style={styles.tile}
-                      accessibilityLabel={`Report ${t.title}`}
-                      onPress={() => {
-                        if (_reportBusy) return;
-                        haptics.snap();
-                        _reportBusy = true;
-                        Promise.resolve(onReport(t.kind)).catch(() => {}).finally(() => { _reportBusy = false; });
-                      }}
-                    >
-                      <View style={styles.tileFace}>
-                        <Image source={HAZARD_ART[t.glyph][metal]} style={styles.glyph} resizeMode="contain" />
-                      </View>
-                      <Text maxFontSizeMultiplier={1.2} style={styles.label}>{t.title}</Text>
-                    </PressableScale>
-                  ))}
-                </View>
-                <Text maxFontSizeMultiplier={1.2} style={styles.hint}>Pinned where you were 5 seconds ago. The crew sees it right away.</Text>
+    <>
+      {/* Tap anywhere outside the card to close. Transparent on purpose: the map stays readable, the way the weather
+          forecast card leaves it. Covers the FAB stack too, so a stray tap on Crew while the panel is up just closes it. */}
+      <Pressable testID="hazard-sheet-backdrop" style={[StyleSheet.absoluteFill, { zIndex: Z_CARD - 1 }]} onPress={onClose} accessibilityLabel="Close" />
+      <Animated.View
+        testID="hazard-sheet"
+        onLayout={(e) => { const h = Math.round(e.nativeEvent.layout.height); if (h > 0 && h !== cardH) setCardH(h); }}
+        style={[
+          styles.card,
+          {
+            width: cardW,
+            right: RIGHT_INSET,
+            bottom,
+            opacity: a,
+            transform: [
+              { translateY: a.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
+              { scale: a.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
+            ],
+          },
+        ]}
+      >
+        <GlassFill tintColor={hudTint()} style={StyleSheet.absoluteFill} />
+        <Text maxFontSizeMultiplier={1.2} style={styles.title}>Report</Text>
+        <View style={styles.row}>
+          {REPORT_TILES.map((t) => (
+            <PressableScale
+              key={t.id}
+              testID={`report-${t.kind}`}
+              hitSlop={0}   // the faces are 76 pt with 8 pt gaps; the default 12 pt slop let an edge tap report the neighbour (Codex r3)
+              style={styles.tile}
+              accessibilityLabel={`Report ${t.title}`}
+              onPress={() => {
+                if (_reportBusy) return;
+                haptics.snap();
+                _reportBusy = true;
+                Promise.resolve(onReport(t.kind)).catch(() => {}).finally(() => { _reportBusy = false; });
+              }}
+            >
+              <View style={styles.tileFace}>
+                <Image source={HAZARD_ART[t.glyph][metal]} style={styles.glyph} resizeMode="contain" />
               </View>
-            </View>
-          </Pressable>
-        </Animated.View>
-      </Pressable>
-    </Modal>
+              <Text maxFontSizeMultiplier={1.2} style={styles.label}>{t.title}</Text>
+            </PressableScale>
+          ))}
+        </View>
+        <Text maxFontSizeMultiplier={1.2} style={styles.hint}>Pinned where you were 5 seconds ago. The crew sees it right away.</Text>
+      </Animated.View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.42)" },
-  sheetWrap: { paddingHorizontal: 12, paddingBottom: 28, width: "100%" },
-  card: { borderRadius: 26, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.14)", backgroundColor: "rgba(28,28,30,0.55)" },
-  cardFill: { borderRadius: 26, overflow: "hidden" },
-  inner: { paddingTop: 16, paddingBottom: 14, paddingHorizontal: 14 },
-  title: { color: "#F4F4F4", fontSize: 20, fontWeight: "700", letterSpacing: -0.2, textAlign: "center", marginBottom: 14 },
-  row: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
-  tile: { flex: 1, alignItems: "center", gap: 8 },
+  // = WeatherHUD.tsx styles.forecastCard (floor, hairline, radius, shadow), plus the absolute anchor.
+  card: {
+    position: "absolute",
+    paddingHorizontal: PAD_H,
+    paddingTop: 12,
+    paddingBottom: 12,
+    borderRadius: 16,
+    overflow: "hidden",
+    // Translucent frosted floor. The card pops inside an animated (transform + opacity) view, where the iOS-26
+    // GlassView won't composite — so this View bg is what actually renders the frosted panel (readable), with the
+    // GlassFill adding real glass on top wherever it does paint. SAME VALUE as the weather forecast card.
+    backgroundColor: "rgba(24,24,28,0.66)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.14)",
+    zIndex: Z_CARD,
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+      android: { elevation: 10 },
+    }),
+  },
+  title: { color: "#F4F4F4", fontSize: 17, fontWeight: "700", letterSpacing: -0.2, textAlign: "center", marginBottom: 10 },
+  row: { flexDirection: "row", justifyContent: "space-between", gap: TILE_GAP },
+  tile: { flex: 1, alignItems: "center", gap: 6 },
   tileFace: {
     width: TILE, height: TILE, borderRadius: TILE_RADIUS,
     backgroundColor: "rgba(255,255,255,0.07)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.16)",
@@ -118,5 +179,5 @@ const styles = StyleSheet.create({
   },
   glyph: { width: 46, height: 46 },
   label: { color: "#E5E5EA", fontSize: 13, fontWeight: "600" },
-  hint: { color: "#8E8E93", fontSize: 12, textAlign: "center", marginTop: 14 },
+  hint: { color: "#8E8E93", fontSize: 11.5, textAlign: "center", marginTop: 10 },
 });

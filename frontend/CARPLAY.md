@@ -46,9 +46,9 @@ Files: `src/carplay/ConvoyCarPlay.tsx` (surface + templates), `src/carplay/CarMa
 │  │ km/h   │                        (on the    │ turn banner│ │    THIS gap line
 │  └────────┘                         gap line) └────────────┘ │
 │                                                     (mic) ● │  map buttons
-│                                                   (2D/3D) ● │  (system, right edge:
-│                                                    (crew) ● │   mic, view, crew,
-│                                                 (hazards) ● │   hazards — top→bottom)
+│                                                 (hazards) ● │  (system, right edge:
+│                                                   (2D/3D) ● │   mic, hazards, view,
+│                                                    (crew) ● │   crew — top→bottom)
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,9 +57,10 @@ used to sit here moved to the map-button column). Centre: crew pill. Trailing: S
 then End (End at the far corner). *The trailing array is REVERSED vs visual order* —
 `[car-end, car-search]` renders as "Search End". Head-unit verified; do not "fix" it.
 
-**Right edge (map buttons, top→bottom)** — comms mic, 2D/3D view, crew, hazards (the
-compass slot until 2026-09-24; the compass is now a tile inside the Report grid)
-(4-button array; CarPlay's panning mode hides from the END, so crew/hazards are the
+**Right edge (map buttons, top→bottom)** — comms mic, hazards, 2D/3D view, crew (Jeff,
+2026-09-24: "Top - mic, Second from top - hazards, Second from bottom - 2D/3D, Bottom -
+crew"; the compass is a tile inside the Report grid)
+(4-button array; CarPlay's panning mode hides from the END, so 2D/3D and crew are the
 sacrificial pair and zoom always survives in the nav bar). The 2D/3D toggle only became
 functional with this move — as a bar button its id had no handler branch.
 
@@ -152,7 +153,7 @@ Flow: `onMapButtonPressed`/`onBarButtonPressed` → `handleCarMapButton`/`handle
 Android Auto mirrors the same ids (`aaMapButtons`); its Report grid is `createTemplate('grid')` + `pushTemplate`, the
 press arrives as `gridButtonPressed` with our template id, and `backButtonPressed` pops it (androidx tints the tile
 art white until a native tinted-icon path ships).
-The phone has the same panel (2026-09-24, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"): a Hazards FAB below Crew
+The phone has the same panel (2026-09-24, Jeff: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"): a Hazards FAB second from the top (compass · Hazards · 2D/3D · Crew, the head unit's column with the compass in the mic's slot); the Report panel floats ABOVE that stack, right-aligned, styled like the weather forecast card
 opens `src/components/HazardSheet.tsx` — the same four report tiles from `hazardPanel.ts` in the driver's metal; the phone
 keeps its compass FAB, so no compass tile there. A tile reports through `map.tsx reportHazard` (the voice intents' path).
 

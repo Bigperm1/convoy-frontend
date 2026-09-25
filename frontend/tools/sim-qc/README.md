@@ -327,3 +327,21 @@ per frame; the old single-source ribbon drifted with the ground and snapped back
 Measured 2026-09-18 (old → near/far split): 54 km/h frames moving >2 px **206 → 0**, max 5.8 → 1.1 px; 97 km/h
 **107 → 5**, max 4.2 → 2.1 px. `ribbon_gap.py` (a threshold edge) is noisier — the glow's fade steps flip it by a
 whole fade piece — use it for the gap's LEVEL, not its jitter. Numeric gate: `ribbon_near_test.mts`.
+
+## Head-unit search query gate (pure) — 2026-09-24
+
+```bash
+node --experimental-strip-types tools/sim-qc/car_search_test.mts
+```
+
+Exercises `src/carSearchQuery.ts`, the rules both car search boxes (CarPlay `CPSearchTemplate`, Android Auto's native
+`SearchTemplate`) apply before Google Places sees a query. Say Phin (AA, 2026-09-24): the host's voice input typed
+"navigate home" into the box verbatim and the rows were "Navigate Homes, Coralville IA" and friends — the 50 km
+`locationBias` is soft, and saved places were listed only for an EMPTY query. Pins: the leading command words
+("navigate to", "take me to", "go to", "drive to", "directions to", "get me to", …) are stripped as whole words only
+("Navigation Ave", "Golden Ears", "Drive Thru Cafe" survive), a bare verb leaves an EMPTY query (→ the saved list),
+the normalised text names a saved place by label or spoken alias ("my house" → Home, "the office" → Work, "the gym" →
+Gym, a 2+ letter prefix while typing) with Home/Work/custom-newest precedence, the `locationRestriction` is a ±150 km
+RECTANGLE (Google caps a circle at 50 km) that holds Whistler and Hope and drops Kamloops and Seattle from Vancouver
+(those come back through the biased fallback request), and the crumb text is one quote-free line. Field receipts:
+`car-search text= norm= n= saved= ms=` (one per typed query) and `car-search-pick idx= label= src=saved|places`.

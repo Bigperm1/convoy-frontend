@@ -26,6 +26,7 @@
 
 import { api, GOOGLE_MAPS_KEY } from '../api';
 import { newPlacesSession, type PlacesSession } from '../places';
+import { CAR_SEARCH_CRUMB_QUIET_MS, CAR_SEARCH_REGIONS, carSearchRestriction, crumbText, matchSavedPlace, normalizeCarQuery, pickCarSearchScope, type CarSearchScope } from '../carSearchQuery';
 import { getSettings } from '../settings';
 import { getGarage } from '../garageStore';
 import { fetchRoutes, type NavRoute } from '../nav';
@@ -222,29 +223,69 @@ let _lastResults: CarSearchResult[] = [];
 // by the placeDetails() of the pick, never reused after (src/places.ts has the rules).
 let _searchSession: PlacesSession | null = null;
 
-async function placesAutocomplete(input: string): Promise<CarSearchResult[]> {
+// ── car-search crumbs (2026-09-24) ─────────────────────────────────────────────
+// No row carried the search text or the result count, so Say Phin's "voice search failed" was
+// diagnosed from a photo of his head unit. One `car-search` row per typed query — written
+// CAR_SEARCH_CRUMB_QUIET_MS after the last keystroke that produced a list, or at once when a row
+// is picked, so it lands BEFORE that pick's `car-search-pick` row (below). Bounded by the
+// driver's own typing; Places is still called per keystroke, the crumb is not.
+type CarSearchMeta = { text: string; norm: string; n: number; saved: 0 | 1; ms: number; scope: CarSearchScope | 'nofix' };
+let _searchCrumbPending: CarSearchMeta | null = null;
+let _searchCrumbTimer: ReturnType<typeof setTimeout> | null = null;
+function flushSearchCrumb(): void {
+  if (_searchCrumbTimer) { clearTimeout(_searchCrumbTimer); _searchCrumbTimer = null; }
+  const m = _searchCrumbPending;
+  _searchCrumbPending = null;
+  if (!m) return;
+  try { logEvent(`car-search text="${crumbText(m.text)}" norm="${crumbText(m.norm)}" n=${m.n} saved=${m.saved} ms=${m.ms} scope=${m.scope}`); } catch {}
+}
+function scheduleSearchCrumb(m: CarSearchMeta): void {
+  _searchCrumbPending = m;
+  if (_searchCrumbTimer) clearTimeout(_searchCrumbTimer);
+  _searchCrumbTimer = setTimeout(flushSearchCrumb, CAR_SEARCH_CRUMB_QUIET_MS);
+}
+
+// TWO SCOPES IN PARALLEL (Say Phin, 2026-09-24 — "navigate home" drew Coralville IA and
+// Bentonville AR): a request RESTRICTED to a rectangle CAR_SEARCH_RESTRICT_KM around the car
+// (`carSearchRestriction`; Google caps a restriction CIRCLE at 50 km and allows bias OR
+// restriction, never both) and the old 50 km-BIASED request, both Canada/US only, both on the
+// same session token. `pickCarSearchScope` shows the restricted rows only when Google's own
+// first biased row is local too (then the far tail is junk); otherwise the biased list — MEASURED
+// live: restricted "Kamloops" is five local streets while the biased list has the city first, so
+// a restriction alone would hide a 250 km club destination. Rules + receipts: src/carSearchQuery.ts.
+// The Essentials mask and the token rules in src/places.ts are unchanged. No fix → the biased
+// request alone, as before. Two autocompletes per keystroke instead of one, in parallel (same
+// latency); at the head unit's search volume that is cents a month against the 10k free tier.
+async function placesAutocomplete(input: string): Promise<{ rows: CarSearchResult[]; scope: CarSearchScope | 'nofix' }> {
   const s = getCarState();
-  const body: any = { input };
-  if (typeof s.selfLat === 'number' && typeof s.selfLng === 'number') {
-    body.locationBias = { circle: { center: { latitude: s.selfLat, longitude: s.selfLng }, radius: 50000.0 } };
-  }
+  const here = typeof s.selfLat === 'number' && typeof s.selfLng === 'number' ? { lat: s.selfLat, lng: s.selfLng } : null;
   _searchSession ??= newPlacesSession();
-  body.sessionToken = _searchSession.token;
-  const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_MAPS_KEY },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  return (data.suggestions || [])
-    .filter((x: any) => x.placePrediction)
-    .slice(0, 8)
-    .map((x: any) => ({
-      placeId: x.placePrediction.placeId,
-      description: x.placePrediction.text?.text ?? '',
-      main: x.placePrediction.structuredFormat?.mainText?.text || undefined,
-    }))
-    .filter((x: CarSearchResult) => x.placeId && x.description);
+  const sessionToken = _searchSession.token;
+  const ask = async (scope: Record<string, unknown>): Promise<CarSearchResult[]> => {
+    const body: any = { input, sessionToken, includedRegionCodes: CAR_SEARCH_REGIONS, ...scope };
+    const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_MAPS_KEY },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    return (data.suggestions || [])
+      .filter((x: any) => x.placePrediction)
+      .slice(0, 8)
+      .map((x: any) => ({
+        placeId: x.placePrediction.placeId,
+        description: x.placePrediction.text?.text ?? '',
+        main: x.placePrediction.structuredFormat?.mainText?.text || undefined,
+      }))
+      .filter((x: CarSearchResult) => x.placeId && x.description);
+  };
+  if (!here) return { rows: await ask({}), scope: 'nofix' };
+  const [near, wide] = await Promise.allSettled([
+    ask({ locationRestriction: carSearchRestriction(here.lat, here.lng) }),
+    ask({ locationBias: { circle: { center: { latitude: here.lat, longitude: here.lng }, radius: 50000.0 } } }),
+  ]);
+  if (near.status === 'rejected' && wide.status === 'rejected') throw wide.reason;
+  return pickCarSearchScope(near.status === 'fulfilled' ? near.value : [], wide.status === 'fulfilled' ? wide.value : []);
 }
 
 // `labelHint` is the picked prediction's main line — the label, so the mask stays
@@ -484,7 +525,7 @@ const AA_SEARCH_MAX_ROWS = 6;
 type AaRow = { id: string; text: string; detailText?: string; browsable: boolean };
 // rows + the EXACT lists those rows were built from. Committed together, so the list a
 // tap indexes into can never be a different generation from the list on screen.
-type AaList = { rows: AaRow[]; saved: SavedPlace[]; results: CarSearchResult[] };
+type AaList = { rows: AaRow[]; saved: SavedPlace[]; results: CarSearchResult[]; meta?: CarSearchMeta };
 
 let _aaSaved: SavedPlace[] = [];
 let _aaResults: CarSearchResult[] = [];
@@ -553,21 +594,37 @@ function aaSavedList(): AaList {
 // to commit. Publishing here is how an index-addressed list ends up describing a
 // different generation than the rows on screen — i.e. the wrong destination.
 async function aaListFor(query: string): Promise<AaList> {
-  const q = (query || '').trim();
+  const text = (query || '').trim();
+  // VOICE-TYPED COMMANDS (Say Phin, 2026-09-24): the AA host types the spoken phrase verbatim,
+  // so "navigate home" is stripped to "home" before anything else reads it, and a bare verb
+  // leaves nothing — the saved list. The saved place the text names goes FIRST (row s:0), the
+  // Places rows follow — src/carSearchQuery.ts holds the rules, car_search_test.mts pins them.
+  const q = normalizeCarQuery(text);
   if (q.length < 2) {
     try { await ensureSavedPlacesLoaded(); } catch {}
     return aaSavedList();
   }
+  const t0 = Date.now();
+  try { await ensureSavedPlacesLoaded(); } catch {}
+  const match = matchSavedPlace(q, getSavedPlaces());
+  const saved = match ? [match] : [];
   let results: CarSearchResult[] = [];
+  let scope: CarSearchMeta['scope'] = 'none';
   try {
-    results = (await placesAutocomplete(q)).slice(0, AA_SEARCH_MAX_ROWS);
+    const found = await placesAutocomplete(q);
+    results = found.rows.slice(0, AA_SEARCH_MAX_ROWS - saved.length);
+    scope = found.scope;
   } catch {
     results = [];
   }
   return {
-    saved: [],
+    saved,
     results,
-    rows: results.map((r, i) => ({ id: `r:${i}`, text: r.description, browsable: true })),
+    rows: [
+      ...saved.map((p, i) => ({ id: `s:${i}`, text: p.label, ...(p.address ? { detailText: p.address } : {}), browsable: true })),
+      ...results.map((r, i) => ({ id: `r:${i}`, text: r.description, browsable: true })),
+    ],
+    meta: { text, norm: q, n: saved.length + results.length, saved: match ? 1 : 0, ms: Date.now() - t0, scope },
   };
 }
 
@@ -684,6 +741,7 @@ async function aaSelect(rowId: string): Promise<void> {
   if (!Number.isFinite(idx)) return;
   if (kind === 's') {
     const p = _aaSaved[idx];
+    flushSearchCrumb();   // the query row lands before its pick, whatever the quiet timer was doing
     try { logEvent(`car-search-pick surf=aa idx=${idx} src=saved label="${crumbLabel(p?.label)}"`); } catch {}
     if (!p) return;
     const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
@@ -694,6 +752,7 @@ async function aaSelect(rowId: string): Promise<void> {
     return;
   }
   const picked = _aaResults[idx];
+  flushSearchCrumb();
   try { logEvent(`car-search-pick surf=aa idx=${idx} src=places label="${crumbLabel(picked?.description)}"`); } catch {}
   if (!picked) return;
   const dest = await placeDetails(picked.placeId, picked.main || picked.description).catch(() => null);
@@ -720,6 +779,7 @@ function armAaSearchBridge(lib: any): void {
       if (!_searchPushed) return;         // never update a template we no longer own
       aaCommit(list);                     // commit and draw the SAME generation
       aaPushRows(list.rows);
+      if (list.meta) scheduleSearchCrumb(list.meta);   // the winner only — a lost keystroke is not a query
     })();
   });
 
@@ -901,7 +961,11 @@ function armSearchAutoDismiss(): void {
 // happened to sit at index 0.
 let _listMode: 'saved' | 'results' = 'saved';
 let _savedShown: SavedPlace[] = [];
+// Results mode, 2026-09-24: the saved place the typed query NAMED, drawn as row 0 above the
+// Places rows (null when it named none) — set together with _lastResults, same generation.
+let _resultsSaved: SavedPlace | null = null;
 
+const savedPlaceIcon = (p: SavedPlace) => (p.kind === 'home' ? CAR_ICON_HOME : p.kind === 'work' ? CAR_ICON_WORK : CAR_ICON_SAVED);
 // Home first, then Work, then custom places newest-first — the phone's own ordering.
 function savedPlaceRows(): { text: string; detailText?: string; image: unknown }[] {
   const rank = (k: SavedPlace['kind']) => (k === 'home' ? 0 : k === 'work' ? 1 : 2);
@@ -911,7 +975,7 @@ function savedPlaceRows(): { text: string; detailText?: string; image: unknown }
   return _savedShown.map((p) => ({
     text: p.label,
     detailText: p.address || undefined,
-    image: p.kind === 'home' ? CAR_ICON_HOME : p.kind === 'work' ? CAR_ICON_WORK : CAR_ICON_SAVED,
+    image: savedPlaceIcon(p),
   }));
 }
 function getSearchTemplate(): any | null {
@@ -928,25 +992,45 @@ function getSearchTemplate(): any | null {
       // same Ionicons the phone's search screen shows (NavSearchScreen.tsx), and
       // savedPlaces is AsyncStorage-backed so this works on a COLD connect too.
       onSearch: async (query: string) => {
-        const q = (query || '').trim();
+        const text = (query || '').trim();
+        // Same rules as Android Auto's aaListFor (2026-09-24): command words stripped, the saved
+        // place the text names drawn FIRST, Places rows after it (src/carSearchQuery.ts).
+        const q = normalizeCarQuery(text);
         if (q.length < 2) {
-          _listMode = 'saved';
           try { await ensureSavedPlacesLoaded(); } catch {}
+          _listMode = 'saved';        // flipped WITH the rows, never before them (see below)
           return savedPlaceRows();
         }
-        _listMode = 'results';
+        const t0 = Date.now();
+        try { await ensureSavedPlacesLoaded(); } catch {}
+        const match = matchSavedPlace(q, getSavedPlaces());
+        let results: CarSearchResult[] = [];
+        let scope: CarSearchMeta['scope'] = 'none';
         try {
-          _lastResults = await placesAutocomplete(q);
+          const found = await placesAutocomplete(q);
+          results = found.rows;
+          scope = found.scope;
         } catch {
-          _lastResults = [];
+          results = [];
         }
-        return _lastResults.map((r) => ({ text: r.description }));
+        // Committed TOGETHER, after the await: the mode, the saved row and the Places rows a tap
+        // indexes into are ONE generation. Flipping _listMode before the await (as this did until
+        // 2026-09-24, Codex) let a tap on the still-drawn saved list be read as a results-mode pick.
+        _listMode = 'results';
+        _lastResults = results;
+        _resultsSaved = match;
+        scheduleSearchCrumb({ text, norm: q, n: results.length + (match ? 1 : 0), saved: match ? 1 : 0, ms: Date.now() - t0, scope });
+        return [
+          ...(match ? [{ text: match.label, detailText: match.address || undefined, image: savedPlaceIcon(match) }] : []),
+          ...results.map((r) => ({ text: r.description })),
+        ];
       },
       onItemSelect: async ({ index }: { index: number }) => {
         // The list is EITHER saved places or Places results — index means different
         // things in each, so route on the mode the last onSearch left behind.
         if (_listMode === 'saved') {
           const p = _savedShown[index];
+          flushSearchCrumb();
           try { logEvent(`car-search-pick surf=carplay idx=${index} src=saved label="${crumbLabel(p?.label)}"`); } catch {}
           if (!p) return;
           const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
@@ -956,7 +1040,18 @@ function getSearchTemplate(): any | null {
           if (ok) popCarSearchDeferred();
           return;
         }
-        const picked = _lastResults[index];
+        // Results mode: row 0 is the saved place the query named, when there was one; the
+        // Places rows sit below it, so their index is shifted by that one row.
+        if (_resultsSaved && index === 0) {
+          const p = _resultsSaved;
+          flushSearchCrumb();
+          try { logEvent(`car-search-pick surf=carplay idx=${index} src=saved label="${crumbLabel(p.label)}"`); } catch {}
+          const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
+          if (ok) popCarSearchDeferred();
+          return;
+        }
+        const picked = _lastResults[_resultsSaved ? index - 1 : index];
+        flushSearchCrumb();
         try { logEvent(`car-search-pick surf=carplay idx=${index} src=places label="${crumbLabel(picked?.description)}"`); } catch {}
         if (!picked) return;
         const dest = await placeDetails(picked.placeId, picked.main || picked.description).catch(() => null);

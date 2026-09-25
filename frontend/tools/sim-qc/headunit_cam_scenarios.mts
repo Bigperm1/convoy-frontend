@@ -19,6 +19,51 @@ export const CUT = 0.2;
 const VS = 1000 / 60;
 
 const f3 = (x: number) => (Number.isFinite(x) ? x.toFixed(3) : String(x));
+type HU = ReturnType<typeof makeHeadUnit>;
+const hAt = (h: HU, t: number) => { if (t > h.now) h.advance(t - h.now); };
+const hPark = (h: HU) => { h.setMoving(false); h.advance(1500); return h; };
+const hFlies = (h: HU, from = 0) => h.rows(/cam-return-fly surf=car/).filter((r) => r.t >= from);
+const angOff = (a: number, b: number) => { const d = (((a - b) % 360) + 540) % 360 - 180; return Math.abs(d); };
+/** The native animations the camera owner starts, whose END a gesture can straddle (TL, DL). */
+type TAnchor = "crewFit's easeTo" | "a fly started inside the easeTo" | "a re-aimed fly" | "the 7 s return";
+const T_ANCHORS: TAnchor[] = ["crewFit's easeTo", "a fly started inside the easeTo", "a re-aimed fly", "the 7 s return"];
+/** Every gesture that writes the camera, with the independent framing it must end on (16.8 · pitch 45 · heading 90). */
+const TG: { key: string; act: (h: HU) => void; z: number; hdg: number }[] = [
+  { key: "recenter", act: (h) => h.gesture({ kind: "recenter" }), z: 16.8, hdg: 90 },
+  { key: "compass", act: (h) => h.gesture({ kind: "compass" }), z: 16.8, hdg: 0 },
+  { key: "pinch (begin · scale 1 · end)", act: (h) => { h.gesture({ kind: "zoomBegin" }); h.gesture({ kind: "zoom", scale: 1, velocity: 0 }); h.gesture({ kind: "zoomEnd" }); }, z: 16.8, hdg: 90 },
+  { key: "+ press", act: (h) => h.press(0.5), z: 16.8, hdg: 90 },
+  { key: "− press", act: (h) => h.press(-0.5), z: 16.8, hdg: 90 },
+  { key: "AppState re-assert", act: (h) => h.reassert(), z: 16.8, hdg: 90 },
+  { key: "relayout (→ 17.8)", act: (h) => h.relayout(17.8), z: 17.8, hdg: 90 },
+];
+/** Crew tapped at now + 100, then the anchor animation set up; returns its JS end (harness ms) — NaN when this crew has
+ *  no such animation — and the tap time. */
+const tlSetup = (h: HU, anchor: TAnchor): number => {
+  const off = h.abs - h.now, C = h.C;
+  const tap = h.now + 100; hAt(h, tap); h.crew();
+  if (anchor === "crewFit's easeTo") return C.crewEaseUntilRef.current - off;
+  if (anchor === "the 7 s return") {
+    hAt(h, tap + 7000 + 40);
+    return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : C.camHoldWasActiveRef.current ? NaN : tap + 7000;
+  }
+  hAt(h, tap + 300); h.gesture({ kind: "recenter" }); hAt(h, tap + 340);
+  if (anchor === "a fly started inside the easeTo") return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : NaN;
+  const f0 = hFlies(h, tap)[0]; if (!f0) return NaN;
+  hAt(h, f0.t + 100); h.press(0.5); hAt(h, h.now + 40);
+  return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : NaN;
+};
+/** Something owns the camera right now (the owner's framing is legitimately not on screen): a fly armed / flying /
+ *  landing, a JS ease, a Crew overview, a pinch, or a native animation still running. */
+const ownerBusy = (h: HU) => { const C = h.C; return !!C.zoomChRef.current.ease || C.returnFlyRef.current !== 0 || C.camHoldWasActiveRef.current || C.pinchActiveRef.current || h.animating; };
+/** Camera vs the owner's framing: zoom = carZoomDest, pitch = followPitch, heading = the north-up override or the car's. */
+const ownerOff = (h: HU, src: Src) => {
+  const C = h.C, fz = C.camInputsRef.current.followZoom, fp = C.camInputsRef.current.followPitch;
+  const wz = src.mods.carZoomDest(C.manualZoomRef.current, fz, C.userZoomRef.current, 10.5, 20);
+  const wh = C.camHdgOverrideRef.current ?? C.drawHdgRef.current;
+  const off = Math.abs(h.cam.zoom - wz) > 0.02 || Math.abs(h.cam.pitch - fp) > 0.5 || angOff(h.cam.heading, wh) > 0.5;
+  return off ? `camera ${f3(h.cam.zoom)}/${h.cam.pitch.toFixed(1)}/${h.cam.heading.toFixed(1)} vs owner ${f3(wz)}/${fp}/${wh}` : "";
+};
 // Field speed zooms (src/chaseZoom.ts chaseZoomForSpeed): 58 km/h 15.78 · 40 km/h 16.43 · 33 km/h 16.65 · 26 km/h 16.84.
 export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => number): Result[] {
   const R: Result[] = [];
@@ -514,35 +559,9 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
   // the camera shows exactly the owner's framing (zoom = carZoomDest, pitch = followPitch, heading = the north-up
   // override or the car's) and is never off it for more than 250 ms; then for 5 s it HOLDS the independent end framing
   // (16.8, or the relayout's 17.8 · pitch 45 · heading 90, north for the compass) with nothing owed and the pump idle.
-  type TAnchor = "crewFit's easeTo" | "a fly started inside the easeTo" | "a re-aimed fly" | "the 7 s return";
-  const TG: { key: string; act: (h: ReturnType<typeof makeHeadUnit>) => void; z: number; hdg: number }[] = [
-    { key: "recenter", act: (h) => h.gesture({ kind: "recenter" }), z: 16.8, hdg: 90 },
-    { key: "compass", act: (h) => h.gesture({ kind: "compass" }), z: 16.8, hdg: 0 },
-    { key: "pinch (begin · scale 1 · end)", act: (h) => { h.gesture({ kind: "zoomBegin" }); h.gesture({ kind: "zoom", scale: 1, velocity: 0 }); h.gesture({ kind: "zoomEnd" }); }, z: 16.8, hdg: 90 },
-    { key: "+ press", act: (h) => h.press(0.5), z: 16.8, hdg: 90 },
-    { key: "− press", act: (h) => h.press(-0.5), z: 16.8, hdg: 90 },
-    { key: "AppState re-assert", act: (h) => h.reassert(), z: 16.8, hdg: 90 },
-    { key: "relayout (→ 17.8)", act: (h) => h.relayout(17.8), z: 17.8, hdg: 90 },
-  ];
   const TL_OFFSETS = [-20, -10, -5, 0, 5, 10, 17, 40, 80, 120];
-  const angOff = (a: number, b: number) => { const d = (((a - b) % 360) + 540) % 360 - 180; return Math.abs(d); };
-  // The anchor's JS end (harness ms), or NaN when this crew has no such animation.
-  const tlSetup = (h: ReturnType<typeof makeHeadUnit>, anchor: TAnchor): number => {
-    const off = h.abs - h.now, C = h.C;
-    const tap = h.now + 100; at(h, tap); h.crew();
-    if (anchor === "crewFit's easeTo") return C.crewEaseUntilRef.current - off;
-    if (anchor === "the 7 s return") {
-      at(h, tap + 7000 + 40);
-      return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : C.camHoldWasActiveRef.current ? NaN : tap + 7000;
-    }
-    at(h, tap + 300); h.gesture({ kind: "recenter" }); at(h, tap + 340);
-    if (anchor === "a fly started inside the easeTo") return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : NaN;
-    const f0 = flies(h, tap)[0]; if (!f0) return NaN;
-    at(h, f0.t + 100); h.press(0.5); at(h, h.now + 40);
-    return C.returnFlyRef.current > 0 ? C.returnFlyRef.current - off : NaN;
-  };
   let tli = 0;
-  for (const anchor of ["crewFit's easeTo", "a fly started inside the easeTo", "a re-aimed fly", "the 7 s return"] as TAnchor[])
+  for (const anchor of T_ANCHORS)
   for (const crewKind of ["nearby", "wide"] as const) for (const g of TG) for (const dt of TL_OFFSETS) for (const android of [false, true]) {
     const h = park(unit({ android }));
     if (crewKind === "nearby") h.C.__peers = [];
@@ -589,5 +608,135 @@ export function runScenarios(src: Src, chaseZoomForSpeed: (kmh: number) => numbe
   // ── the harness itself: every identifier the lifted production code read resolved ─────────────────────────────
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);
   ok("Z1", "the lifted production code resolved every identifier it read", unres.size === 0, unres.size ? `(unresolved: ${[...unres].join(", ")})` : "");
+  return R;
+}
+
+// ════ DL — NATIVE LATENCY the JS side cannot see (Codex on round 7, [high]; 2026-09-25) ═══════════════════════════════
+// Every guard before round 8 dated a native animation's end from the JS side (its deadline + RETURN_FLY_GRACE_MS). Codex
+// injected a 150 ms native START delay: nearby crew, Crew, recenter at +720 ms → the snap lost to crewFit's easeTo on
+// iOS, parked at z 15 / pitch 0 / heading 0 with nothing owed. The closed loop (src/camRepair.ts) compares what the map
+// REPORTS with what the owner last wrote. Swept here: native start delay 0 / 50 / 150 / 300 / 600 ms, every animation
+// stretched by a seeded 0–80 ms end jitter · every TL gesture × every TL animation · nearby and wide crew · parked · iOS
+// and Android · one offset per case from −20 / +10 / +120 / (delay + 40) ms around the animation's JS end (rotated).
+// Asserted: whenever no native animation has run for 1.5 s and nothing owns the camera, it shows EXACTLY the owner's
+// framing (from the gesture to 20 s after); then it holds the independent end framing for 5 s; nothing is owed; then
+// 60 s idle with ZERO camera writes and no loop row; the loop never gives up.
+export const DL_DELAYS = [0, 50, 150, 300, 600];
+export function runDelayScenarios(src: Src): Result[] {
+  const R: Result[] = [];
+  const ok = (id: string, name: string, pass: boolean, detail = "") => { R.push({ id, name, pass, detail }); };
+  const all: HU[] = [];
+  const unit = (o: Parameters<typeof makeHeadUnit>[1] = {}) => { const h = makeHeadUnit(src, { followZoom: 16.8, ...o }); all.push(h); return h; };
+  const writes = (h: HU) => h.counts.noteCam + h.counts.setNone + h.counts.setFly + h.counts.setEase;
+  const repairRows = (h: HU, a: number, b: number) => h.rows(/cam-repair surf=car/).filter((r) => r.t >= a && r.t <= b);
+  const ops = (rows: { row: string }[]) => { const m: Record<string, number> = {}; for (const r of rows) { const op = / op=(\w+)/.exec(r.row)?.[1] ?? "?"; m[op] = (m[op] ?? 0) + 1; } return Object.entries(m).map(([k, v]) => `${k}×${v}`).join(" ") || "-"; };
+  /** From `a` to `b`: every 50 ms, skip while a native animation runs or ran < 1.5 s ago or the owner is busy; else the
+   *  camera must show the owner's framing. Returns the first miss ("" = none) and how many samples were judged. */
+  const judge = (h: HU, a: number, b: number) => {
+    let miss = "", judged = 0;
+    for (let t = a; t <= b; t += 50) {
+      hAt(h, t);
+      const lastEnd = h.animEnds.length ? h.animEnds[h.animEnds.length - 1] : -1e9;
+      if (h.animating || t < lastEnd + 1500 || ownerBusy(h)) continue;
+      judged++;
+      const off = ownerOff(h, src);
+      if (off && !miss) miss = `at +${Math.round(t - a)} ms (${Math.round(t - lastEnd)} ms after the last native end): ${off}`;
+    }
+    return { miss, judged };
+  };
+  /** The end framing held for 5 s, nothing owed, then 60 s idle: zero camera writes and no loop row. */
+  const tail = (h: HU, t: number, z: number, hdg: number) => {
+    let held = "";
+    for (let u = t; u <= t + 5000; u += 250) {
+      hAt(h, u);
+      if (!held && (Math.abs(h.cam.zoom - z) > 0.02 || Math.abs(h.cam.pitch - 45) > 0.5 || angOff(h.cam.heading, hdg) > 0.5)) held = `at +${Math.round(u - t)} ms ${f3(h.cam.zoom)}/${h.cam.pitch.toFixed(1)}/${h.cam.heading.toFixed(1)}`;
+    }
+    const C = h.C;
+    const owed = C.carCamJob() || C.returnFlyRef.current !== 0 || C.camHoldWasActiveRef.current || C.reapplyAfterRef.current !== 0 || (C.camRepairRef?.current?.pending ?? null) != null;
+    const w0 = writes(h), i0 = h.now; hAt(h, h.now + 60000);
+    const idleWrites = writes(h) - w0, idleRows = repairRows(h, i0, h.now).length;
+    return { held, owed, idleWrites, idleRows };
+  };
+
+  // DL0 — Codex's repro, exactly: 150 ms native start delay, a nearby crew, Crew, recenter at +720 ms, 20 s.
+  for (const android of [false, true]) {
+    const h = hPark(unit({ android, animStartDelayMs: 150 }));
+    h.C.__peers = [];
+    const tap = h.now; h.crew(); h.advance(720); h.gesture({ kind: "recenter" }); h.advance(20000);
+    const easeEnd = h.animEnds.find((t) => t > tap) ?? NaN;
+    const late = h.frames.filter((f) => f.t >= easeEnd + 1500);
+    const bad = late.find((f) => Math.abs(f.zoom - 16.8) > 0.02 || Math.abs(f.pitch - 45) > 0.5 || angOff(f.heading, 90) > 0.5);
+    const rr = repairRows(h, tap, h.now);
+    ok(`DL0${android ? "a" : ""}`, `Codex's repro: 150 ms native start delay, nearby crew, Crew, recenter at +720 ms → home within 1.5 s of the easeTo's REAL end and held for 20 s (${android ? "Android" : "iOS"})`,
+      Number.isFinite(easeEnd) && late.length > 0 && !bad,
+      `(easeTo really ended +${Math.round(easeEnd - tap)} ms after the tap; ${bad ? `OFF at +${Math.round(bad.t - tap)} ms: ${f3(bad.zoom)}/${bad.pitch.toFixed(1)}/${bad.heading.toFixed(1)}` : `16.8/45/90 from +${Math.round(easeEnd + 1500 - tap)} ms to +${Math.round(h.now - tap)} ms`}; loop ${ops(rr)})`);
+  }
+
+  // DL — the sweep.
+  let di = 0, rot = 0;
+  for (const D of DL_DELAYS) for (const anchor of T_ANCHORS) for (const crewKind of ["nearby", "wide"] as const) for (const g of TG) {
+    const offs = [-20, 10, 120, D + 40];
+    const dt = offs[rot++ % offs.length];
+    for (const android of [false, true]) {
+      const h = hPark(unit({ android, animStartDelayMs: D, animEndJitterMs: 80, seed: 17 + di }));
+      if (crewKind === "nearby") h.C.__peers = [];
+      const id = `DL${++di}`;
+      const name = `${g.key} ${dt >= 0 ? "+" : "−"}${Math.abs(dt)} ms from the JS end of ${anchor}${anchor === "the 7 s return" && crewKind === "nearby" ? " (a snap)" : ""}, native start delay ${D} ms + end jitter ≤ 80 ms, ${crewKind} crew, parked (${android ? "Android" : "iOS"})`;
+      const A = tlSetup(h, anchor);
+      if (!Number.isFinite(A)) { ok(id, name, false, "(the anchor animation never started)"); continue; }
+      const tg = A + dt; hAt(h, tg); g.act(h);
+      const j = judge(h, tg, tg + 20000);
+      const t = tail(h, tg + 20000, g.z, g.hdg);
+      const rr = repairRows(h, 0, h.now), gaveUp = rr.some((r) => / op=giveup/.test(r.row));
+      const pass = !j.miss && j.judged > 0 && !t.held && !t.owed && t.idleWrites === 0 && t.idleRows === 0 && !gaveUp;
+      ok(id, name, pass, `(${j.judged ? (j.miss ? `OFF the owner's framing ${j.miss}` : `on the owner's framing at all ${j.judged} judged samples`) : "NEVER JUDGED"}; end ${t.held ? `NOT held (${t.held})` : `held ${g.z}/45/${g.hdg}`}; ${t.owed ? "something OWED" : "nothing owed"}; 60 s idle: ${t.idleWrites} writes, ${t.idleRows} loop rows; loop ${ops(rr)})`);
+    }
+  }
+
+  // PF — no fight with a pinch in progress. A 1.2 s pinch (×1.5) that starts just past the JS end + grace of a delayed
+  // native animation, i.e. while it still runs on screen. Asserted: the loop logs nothing and owes nothing while the
+  // fingers are down; once the animation has really ended (+1.5 s) the camera shows the pinch's framing; after the 15 s
+  // hold it is home (16.8/45/90) and held; then 60 s idle with zero writes.
+  let pi = 0;
+  for (const D of [150, 300, 600]) for (const anchor of ["crewFit's easeTo", "a fly started inside the easeTo", "the 7 s return"] as TAnchor[]) for (const android of [false, true]) {
+    const h = hPark(unit({ android, animStartDelayMs: D, animEndJitterMs: 80, seed: 900 + pi }));
+    const id = `PF${++pi}`, name = `a 1.2 s pinch starting inside the delayed tail of ${anchor} (native start delay ${D} ms), wide crew, parked (${android ? "Android" : "iOS"})`;
+    const A = tlSetup(h, anchor);
+    if (!Number.isFinite(A)) { ok(id, name, false, "(the anchor animation never started)"); continue; }
+    const p0 = A + 100 + 20; hAt(h, p0);
+    const nativeRunning = h.animating;
+    let pendingDuring = false;
+    h.gesture({ kind: "zoomBegin" });
+    for (let k = 1; k <= 36; k++) { h.gesture({ kind: "zoom", scale: Math.pow(1.5, k / 36), velocity: 0 }); h.advance(33); if (h.C.camRepairRef?.current?.pending) pendingDuring = true; }
+    h.gesture({ kind: "zoomEnd" });
+    const p1 = h.now;
+    const rowsDuring = repairRows(h, p0, p1);
+    const j = judge(h, p1, p1 + 14000);   // inside the 15 s hold: the pinch's framing
+    const t = tail(h, p1 + 20000, 16.8, 90);
+    const pass = !pendingDuring && rowsDuring.length === 0 && !j.miss && j.judged > 0 && !t.held && !t.owed && t.idleWrites === 0 && t.idleRows === 0;
+    ok(id, name, pass, `(native animation ${nativeRunning ? "still running" : "NOT running"} at the first finger; loop during the pinch: ${rowsDuring.length} rows, ${pendingDuring ? "OWED a push" : "owed nothing"}; after: ${j.judged ? (j.miss ? `OFF ${j.miss}` : `on the pinch framing at all ${j.judged} judged samples`) : "NEVER JUDGED"}; end ${t.held ? `NOT held (${t.held})` : "held 16.8/45/90"}; 60 s idle: ${t.idleWrites} writes; loop ${ops(repairRows(h, 0, h.now))})`);
+  }
+
+  // RB — the budget, through the production code: a device whose map always REPORTS 0.1 of a zoom level off what it
+  // shows can never agree. Parked: ≤ 3 corrective pushes, then ONE giveup row, then silence (60 s: zero camera writes);
+  // a new owner write (recenter) re-arms it for ≤ 3 more and one more giveup; a MOVING car's lockstep never involves it.
+  for (const android of [false, true]) {
+    const h = hPark(unit({ android, reportZoomBias: 0.1 }));
+    h.gesture({ kind: "recenter" }); h.advance(10000);
+    const r1 = repairRows(h, 0, h.now);   // the whole first episode: from the moment it parked (the loop starts there)
+    const w0 = writes(h), i0 = h.now; h.advance(60000);
+    const idle1 = writes(h) - w0, idleRows1 = repairRows(h, i0, h.now).length;
+    const t1 = h.now; h.gesture({ kind: "recenter" }); h.advance(10000);
+    const r2 = repairRows(h, t1, h.now);
+    const tm = h.now; h.setMoving(true); h.advance(10000);
+    const rm = repairRows(h, tm, h.now).length;
+    const pushes = (rr: { row: string }[]) => rr.filter((r) => / op=(push|fly)/.test(r.row)).length, gives = (rr: { row: string }[]) => rr.filter((r) => / op=giveup/.test(r.row)).length;
+    ok(`RB1${android ? "a" : ""}`, `a map that always reports 0.1 off, parked: ≤ ${3} pushes (from parking, through a recenter) then ONE giveup, then 60 s with zero writes; a recenter re-arms it once more; moving: never (${android ? "Android" : "iOS"})`,
+      pushes(r1) <= 3 && pushes(r1) >= 1 && gives(r1) === 1 && idle1 === 0 && idleRows1 === 0 && pushes(r2) <= 3 && gives(r2) === 1 && rm === 0,
+      `(first episode ${ops(r1)}; idle 60 s: ${idle1} writes, ${idleRows1} rows; after a recenter ${ops(r2)}; 10 s moving: ${rm} rows)`);
+  }
+
+  const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);
+  ok("DLZ", "the lifted production code resolved every identifier it read", unres.size === 0, unres.size ? `(unresolved: ${[...unres].join(", ")})` : "");
   return R;
 }

@@ -1235,7 +1235,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, returnFlyRef, camJob, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, returnFlyRef, camJob, camPoseOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1280,6 +1280,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   // camera at the drawn pose, so pushCam stays the ONLY camera writer even for a stopped car. Cheap (ref reads); called
   // per parked tick. Only CarMapView passes it — the phone is unchanged.
   camJob?: () => boolean;
+  // HEAD UNIT: the pose each push WROTE (zoom / pitch / heading + when) — CarMapView's closed loop (src/camRepair.ts).
+  camPoseOutRef?: React.MutableRefObject<{ zoom: number; pitch: number | null; heading: number | null; at: number } | null>;
   // zoomCh (car only): the driver-zoom channel pushCam applies on every push (carZoomApply) — see src/carZoomStep.ts.
   getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any; zoomCh?: CarZoomChannel };
   // Optional CAMERA-heading override (the MODEL keeps its real heading). Read live
@@ -1752,6 +1754,12 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       });
     } catch {}
     // 🔒 NAV-LOCK end mbx-pushcam-setcamera
+    // The pose this push WROTE, for the head unit's closed loop (src/camRepair.ts — CarMapView compares it with what the
+    // map reports once nothing owns the camera). The phone passes no camPoseOutRef: unchanged.
+    if (camPoseOutRef) {
+      const wh = (camHeadingOverrideRef && typeof camHeadingOverrideRef.current === 'number') ? camHeadingOverrideRef.current : camHeading;
+      camPoseOutRef.current = { zoom: camZoom.current, pitch: camPitch.current, heading: typeof wh === 'number' ? wh : null, at: now };
+    }
     // CAM-APPLY RECEIPT (2026-09-03): ask the map where it ACTUALLY is, ≤1 poll / 2 s, async.
     // Jeff's 09:22 roundabout: pushes were issued the whole time (heat-probe cam == tick) yet
     // the map sat still ~12 s while the car walked across it. This row tells a native

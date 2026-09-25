@@ -19,10 +19,11 @@
 // drop back to the static-image fallback (ConvoyCarPlay's showLive/glFailed).
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
-import { overviewSizePt } from '../overviewSize';
+import { overviewSizePt, isOverviewZoom } from '../overviewSize';
 import { CREW_RETURN_MS, CREW_FIT_EASE_MS, crewReturnEdge, crewReturnDue } from '../crewReturn';
 import { carZoomPress, carZoomRelease, carZoomDest, carZoomRest, carZoomNow, carZoomHoldLapsed, carZoomJobOwed, carZoomLogGate, newCarZoomChannel, newCarZoomLog, CAR_ZOOM_MOVING_PUSH_MS, CAR_ZOOM_STEP_MS, type CamWriteSeed } from '../carZoomStep';
 import { returnFlyInFlight, returnFlyReaim, RETURN_FLY_GRACE_MS } from '../returnFly';
+import { camObserve, camWrote, camRepairStep, camRepairRearm, newCamRepair, type CamObs, type CamPose, type CamRepair } from '../camRepair';
 import { reportDraw, reportPoseFix, resetPoseFixBudget } from "../drawTelemetry";
 import { poseStart, posePredict, poseFix, poseRoute, poseOut, poseSeedYawSign, haversineM as poseHaversineM, type PoseState, rfPredict, rfFix, rfPose, type RfState } from "../poseEstimator";
 import { startYawRate, stopYawRate, getYawIntegralDeg, getYawIntegral, getYawSourceDiffDeg, yawRateStats } from "../yawRate";
@@ -1179,6 +1180,12 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   const crewEaseUntilRef = useRef(0);
   // A write that landed inside a native animation's tail is re-applied after it (epoch ms; 0 = none) — see nativeTailUntil.
   const reapplyAfterRef = useRef(0);
+  // THE CLOSED LOOP (src/camRepair.ts, 2026-09-25): what the map REPORTS (onCameraChanged / onMapIdle), what the owner last
+  // WROTE (SelfCarModel.pushCam publishes every push via camPoseOutRef; applyZoomNow / ownerSetPose record theirs), and
+  // the repair budget. carCamJob compares the two once nothing owns the camera — no latency assumption.
+  const camObsRef = useRef<CamObs | null>(null);
+  const camWantRef = useRef<CamPose | null>(null);
+  const camRepairRef = useRef<CamRepair>(newCamRepair());
   // Crew overview → return fly (2026-09-24, src/returnFly.ts): crewFit sets the flag; the hold's expiry edge in getCam
   // arms ONE flyTo that pushCam (SelfCarModel) runs instead of the one-frame snap.
   const crewOverviewRef = useRef(false);
@@ -1425,6 +1432,13 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     const tail = nativeTailUntil();
     if (now < tail) reapplyAfterRef.current = Math.max(reapplyAfterRef.current, tail);
   };
+  // What the map REPORTS (rnmapbox 10.3.1, iOS and Android alike: properties.zoom / pitch / heading / center =
+  // cameraState.zoom / .pitch / .bearing / .center; gestures.isGestureActive). Called first thing by onCameraChanged (every native camera change —
+  // MapboxMap.onCameraChanged "is emitted whenever … the camera is modified by calling camera methods") and by onMapIdle.
+  const noteCamObserved = (state: any) => {
+    const p = state?.properties;
+    camObsRef.current = camObserve(camObsRef.current, p?.zoom, p?.pitch, p?.heading, !!state?.gestures?.isGestureActive, Date.now(), p?.center);
+  };
   // ── ONE CAMERA OWNER, PARKED TOO (2026-09-25) ────────────────────────────────────────────────────────────────
   // SelfCarModel asks this on every PARKED tick (its bgTick — the 33 ms watchdog and, on iOS, the CarPlay screen's own
   // frame pump — its parked rAF branch, and the wake effect after each render): "does the driver's camera still owe
@@ -1453,7 +1467,18 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         now >= camHoldUntilRef.current) lockReadyRef.current = true;
     if (!lockReadyRef.current) return false;   // nothing can push yet (overview still on, no paint, no fix): never spin
     const reapplyDue = reapplyAfterRef.current !== 0 && now >= reapplyAfterRef.current;   // a write lost in a tail
-    return crewDue || flyArmed || landingDue || reapplyDue || carZoomJobOwed(zoomChRef.current, zoomHoldUntilRef.current, now, pinchActiveRef.current);
+    // THE CLOSED LOOP (Codex on round 7, [high]: the grace above is a latency ASSUMPTION — a native animation that starts
+    // 150 ms late still overwrote a write made after it). Once nothing owns the camera — no fly (armed, flying or landing),
+    // no JS ease, no Crew overview, no pinch, no tail — and the map has been still and the owner silent for the settle
+    // time, what the map reports must be what the owner last wrote. If not, a write was lost: ONE corrective push is owed
+    // (a fly from an overview zoom, a plain push otherwise), ≤ CAM_REPAIR_BUDGET per window, then one giveup row. A pinch
+    // or any owner animation makes it stand down and drop what it owed — it never fights them.
+    const repairBusy = pinchActiveRef.current || zoomChRef.current.ease != null || returnFlyRef.current !== 0 || camHoldWasActiveRef.current ||
+      now < camHoldUntilRef.current || reapplyAfterRef.current !== 0 || now < nativeTailUntil();
+    const rv = camRepairStep(camRepairRef.current, now, camObsRef.current, camWantRef.current, repairBusy, isOverviewZoom);
+    if (rv.act !== 'none') { try { logEvent(`cam-repair surf=car op=${rv.act} n=${rv.n} dz=${rv.dz.toFixed(2)} dp=${Math.round(rv.dp)} dh=${Math.round(rv.dh)}`); } catch {} }
+    const repairDue = camRepairRef.current.pending != null;
+    return crewDue || flyArmed || landingDue || reapplyDue || repairDue || carZoomJobOwed(zoomChRef.current, zoomHoldUntilRef.current, now, pinchActiveRef.current);
   }).current;
   const getCam = useRef(() => {
     const { followZoom: fz, followPitch: fp, mapH: h, mapW: w, previewMulti: pv, uiScale: us, mapScale: ms } = camInputsRef.current;
@@ -1490,6 +1515,9 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     // crewReturnEdge (src/crewReturn.ts, moved verbatim 2026-09-25 so the sim gate replays it); it fires once per Crew
     // press — wasActive/overview come back false — whichever path pushed first (a parked tick or a moving frame).
     const nowC = Date.now();
+    // The closed loop's corrective push is THIS push. From an overview zoom it goes home by the fly (crewReturnEdge's rule).
+    const rp = camRepairRef.current.pending;
+    if (rp) { camRepairRef.current.pending = null; if (rp === 'fly' && returnFlyRef.current === 0) { returnFlyRef.current = -1; zoomChRef.current.ease = null; } }
     if (reapplyAfterRef.current !== 0 && nowC >= reapplyAfterRef.current) reapplyAfterRef.current = 0;   // this push re-applies
     noteWriteInTail(nowC);   // this push itself may land in a native animation's tail → re-apply after it
     const edge = crewReturnEdge(camHoldWasActiveRef.current, crewOverviewRef.current, camHoldUntilRef.current, nowC, carLiveZoomRef.current);
@@ -1649,6 +1677,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
     try {
       cameraRef.current?.setCamera({ zoomLevel: zoom, animationDuration: 0, animationMode: 'none' });
     } catch {}
+    camWantRef.current = camWrote(camWantRef.current, zoom, null, null, Date.now());   // the closed loop's reference
+    camRepairRearm(camRepairRef.current);
     return true;
   };
   /** The owner's instant FULL-pose write (the cold-start snap, the AppState re-assert, compass; the pending re-centre,
@@ -1675,6 +1705,8 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
         animationMode: 'none',
       } as any);
     } catch {}
+    camWantRef.current = camWrote(camWantRef.current, zoom, pose.pitch, heading, Date.now());   // the closed loop's reference
+    camRepairRearm(camRepairRef.current);
     return true;
   };
 
@@ -2581,6 +2613,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       logoEnabled={false}
       attributionEnabled={false}
       onCameraChanged={(state: any) => {
+        noteCamObserved(state);   // the closed loop's eyes (src/camRepair.ts) — before anything can return
         // 🔒 NAV-LOCK begin car-selfcar-scale-refresh — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
         noteMapIdle('car', false);   // tiles may be loading again; an absence of roads is unknown until idle
         const z = state?.properties?.zoom;
@@ -2603,7 +2636,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           try { logEvent(`self-scale-refresh surf=car z=${z.toFixed(2)} from=${prev.toFixed(2)}`); } catch {}
         }
       }}
-      onMapIdle={() => { selfRefreshRef.current?.(); noteMapIdle('car', true); }}
+      onMapIdle={(state: any) => { noteCamObserved(state); selfRefreshRef.current?.(); noteMapIdle('car', true); }}
       onLayout={(e: any) => {
         const h = e?.nativeEvent?.layout?.height;
         if (typeof h === 'number' && h > 0 && Math.abs(h - mapH) > 1) setMapH(h);
@@ -2758,6 +2791,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
           returnFlyRef={returnFlyRef}
           // The driver-camera-job question the parked pump asks (carCamJob): +/- ease, eased release, Crew way home.
           camJob={carCamJob}
+          camPoseOutRef={camWantRef}
           cameraRef={cameraRef}
           getCam={getCam}
           readyRef={lockReadyRef}

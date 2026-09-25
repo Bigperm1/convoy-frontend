@@ -15,7 +15,10 @@
 //     MapboxMap.setCamera(to:) — "does not cancel existing animations", MapboxMaps 11.25.0 source); a flyTo/easeTo with
 //     a duration cancels the previous animation (camera.fly(to:) / ease(to:) cancel owner animations) and animates
 //     from the CURRENT camera; android=true makes 'none' cancel too (rnmapbox Android sends it as flyToV11(duration 0));
-//     onCameraChanged fires at vsync when the camera moved;
+//     onCameraChanged fires at vsync when the camera moved, with properties.zoom / pitch / heading (rnmapbox 10.3.1's
+//     payload on both platforms) and onMapIdle 50 ms after it stopped; `animStartDelayMs` starts every native animation
+//     that much later than the next vsync and `animEndJitterMs` stretches each one by a seeded 0…J ms (Codex on round 7:
+//     the grace is an assumption — model the latency it assumes away); `animEnds` records when each one really ended;
 //   • a moving car: the harness plays the fix effect — every 1 s a pose ease (dur 1.1 s) toward a point 15 m ahead.
 // Every identifier the lifted code reads must resolve; an unknown one fails the run (see `unresolved`).
 import { readFileSync } from "node:fs";
@@ -26,11 +29,15 @@ const require = createRequire(new URL("package.json", ROOT));
 const ts = require("typescript");
 
 export type Src = { carMapView: string; convoyMapbox: string; mods: Record<string, any>; lock: any };
+/** Across every unit this process built: how many closed-loop rows (`cam-repair …`) the production code logged. */
+export const harnessStats = { repairRows: 0, repairByOp: {} as Record<string, number> };
 /** The working tree by default; `root` (a directory URL laid out like frontend/) replays another revision. */
 export async function loadSrc(root: URL = ROOT): Promise<Src> {
   const rd = (p: string) => readFileSync(new URL(p, root), "utf8");
   const mods: Record<string, any> = {};
   for (const m of ["carZoomStep", "crewReturn", "returnFly", "camGlide", "framePacer", "overviewSize"]) Object.assign(mods, await import(new URL(`src/${m}.ts`, root).href));
+  // Present since 2026-09-25 round 8 (an older revision replayed as a negative control has no such module).
+  for (const m of ["camRepair"]) { try { Object.assign(mods, await import(new URL(`src/${m}.ts`, root).href)); } catch { /* absent in that revision */ } }
   return { carMapView: rd("src/carplay/CarMapView.tsx"), convoyMapbox: rd("src/ConvoyMapbox.tsx"), mods, lock: JSON.parse(readFileSync(new URL("tools/sim-qc/data/nav-lock.json", ROOT), "utf8")) };
 }
 
@@ -99,7 +106,13 @@ const ref = <T,>(v: T) => ({ current: v });
 
 export type Opts = { android?: boolean; rafAlive?: boolean; carFramePump?: boolean; followZoom?: number; followPitch?: number; animSameMs?: boolean;
   /** CarMapView render cadence (store ticks; 83 ms while navigating — the trim ticker). followZoom is a render value. */
-  renderMs?: number };
+  renderMs?: number;
+  /** Native latency the JS side cannot see: every flyTo/easeTo starts this much after the next vsync… */
+  animStartDelayMs?: number;
+  /** …and runs up to this much longer than asked (seeded, per animation). */
+  animEndJitterMs?: number; seed?: number;
+  /** A device whose map REPORTS a zoom this far off what it shows (the closed loop's worst case: it can never agree). */
+  reportZoomBias?: number };
 /** animStep: this vsync's camera came from a native animation's update (fly / ease motion, not a cut). */
 export type Frame = { t: number; zoom: number; pitch: number; heading: number; sizeZoom: number | null; animating: boolean; animStep: boolean };
 
@@ -121,7 +134,11 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   // ── the native camera ──
   const cam = { zoom: o.followZoom ?? 16.8, pitch: 45, heading: 90, lat: 49.1, lng: -123.1 };
   let anim: null | { t0: number; dur: number; from: typeof cam; to: typeof cam; kind: string } = null;
-  let camMoved = true;
+  let camMoved = true, lastMoveAt = now, idlePending = false;
+  /** harness-time of every native animation's REAL end (finished, cancelled or replaced) */
+  const animEnds: number[] = [];
+  let rnd = (o.seed ?? 1) >>> 0;
+  const rand = () => { rnd = (Math.imul(rnd, 1664525) + 1013904223) >>> 0; return rnd / 4294967296; };
   const setCamera = (opt: any) => {
     const mode = opt.animationMode ?? "none", dur = opt.animationDuration ?? 0;
     const target = { ...cam };
@@ -133,12 +150,13 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
       if (mode === "flyTo") counts.setFly++; else counts.setEase++;
       // A native animation starts on the NEXT display frame after the call (the bridge delivers it, the animator's first
       // tick is a vsync), so it ends up to one frame after the JS clock thinks — the gap a JS deadline cannot see.
-      const t0 = o.animSameMs ? now : Math.floor((now - T0) / (1000 / 60) + 1) * (1000 / 60) + T0;
-      anim = { t0, dur, from: { ...cam }, to: target, kind: mode };
+      const t0 = (o.animSameMs ? now : Math.floor((now - T0) / (1000 / 60) + 1) * (1000 / 60) + T0) + (o.animStartDelayMs ?? 0);
+      if (anim) animEnds.push(now - T0);   // replaced (camera.fly / ease cancel the running one)
+      anim = { t0, dur: dur + (o.animEndJitterMs ? rand() * o.animEndJitterMs : 0), from: { ...cam }, to: target, kind: mode };
       return;
     }
     counts.setNone++;
-    if (o.android) anim = null;                     // Android: 'none' is flyToV11(duration 0) — cancels
+    if (o.android && anim) { anim = null; animEnds.push(now - T0); }   // Android: 'none' is flyToV11(duration 0) — cancels
     Object.assign(cam, target); camMoved = true;    // iOS: instant set; a running animation overrides it at vsync
   };
   const cameraRef = ref({ setCamera });
@@ -146,7 +164,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   const csf = sfOf(src.carMapView);
   const C: Record<string, any> = {
     ...M, Math, Date: { now: () => now },
-    logEvent: (m: string) => { log.push(`${now - T0} ${m}`); },
+    logEvent: (m: string) => { log.push(`${now - T0} ${m}`); if (m.startsWith("cam-repair")) { harnessStats.repairRows++; const op = / op=(\w+)/.exec(m)?.[1] ?? "?"; harnessStats.repairByOp[op] = (harnessStats.repairByOp[op] ?? 0) + 1; } },
     noteMapIdle: () => {}, setCarNorthUp: () => {}, setCarState: () => {},
     getCarState: () => ({ selfLat: cam.lat, selfLng: cam.lng, peers: C.__peers }),
     __peers: [{ lat: 49.25, lng: -123.4 }],          // a spread crew: fit zoom < 14 → the return FLIES
@@ -159,6 +177,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, followHeadingDeg: 90, markPainted: () => {}, setStyleGen: () => {},
     camInputsRef: ref({ followZoom: o.followZoom ?? 16.8, followPitch: o.followPitch ?? 45, mapH: 480, mapW: 800, previewMulti: false, uiScale: 1, mapScale: 1 }),
     paintedRef: ref(true), lockReadyRef: ref(true), aaLiveRef: ref({ hasFix: true, lat: cam.lat, lng: cam.lng, followZoom: o.followZoom ?? 16.8, followPitch: 45 }),
+    camObsRef: ref(null), camWantRef: ref(null), camRepairRef: ref(M.newCamRepair ? M.newCamRepair() : null),
     camHoldUntilRef: ref(0), crewEaseUntilRef: ref(0), reapplyAfterRef: ref(0), camHoldWasActiveRef: ref(false), crewOverviewRef: ref(false), returnFlyRef: ref(0), zoomSnapRef: ref(false),
     zoomHoldUntilRef: ref(0), userZoomRef: ref(0), zoomBaseRef: ref(0), pinchActiveRef: ref(false),
     manualZoomRef: ref(null), zoomChRef: ref(M.newCarZoomChannel()), zoomLogRef: ref(M.newCarZoomLog()),
@@ -170,7 +189,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   const CP = scopeProxy(C, unresolved);
   for (const n of ["clampBias", "zoomLog", "zoomHoldRelease", "carCamJob", "getCam", "applyZoomNow", "applyZoomEased", "reassertAaFollow"]) C[n] = bind(liftVar(csf, "CarMapView", n), CP);
   // Present since 2026-09-25 round 3 (an older revision replayed as a negative control has no such closure).
-  for (const n of ["takeOverNativeCam", "ownerSetPose", "nativeTailUntil", "noteWriteInTail"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
+  for (const n of ["takeOverNativeCam", "ownerSetPose", "nativeTailUntil", "noteWriteInTail", "noteCamObserved"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
   // The render-time EFFECTS that write the camera (they run after a render whose deps changed):
   const layoutEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| mapW <= 0\) return;/.test(t)), CP);        // 🔒 car-zoom-apply-now
   const coldStartEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| !hasFix \|\| !cameraRef\.current\) return;/.test(t)), CP);   // 🔒 car-cam-coldstart-snap
@@ -180,6 +199,8 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   const render1 = new Proxy({ mapW: 0, mapH: 0 } as Record<string, any>, { has: (t, k) => typeof k === "string" && (k in t || CP[k] !== undefined || true), get: (t, k) => (typeof k === "string" && k in t ? t[k] : CP[k as any]), set: (_t, k, v) => { CP[k as any] = v; return true; } });
   const gesture = bind(liftCallArg(csf, "CarMapView", "subscribeCarGesture", () => true), render1);
   const onCameraChanged = bind(liftJsxAttr(csf, "CarMapView", "onCameraChanged"), CP);
+  const onMapIdle = bind(liftJsxAttr(csf, "CarMapView", "onMapIdle"), CP);
+  const camState = () => ({ properties: { zoom: cam.zoom + (o.reportZoomBias ?? 0), pitch: cam.pitch, heading: ((cam.heading % 360) + 360) % 360, center: [cam.lng, cam.lat] }, gestures: { isGestureActive: false }, timestamp: now });
   const lockLine = /^\s*(lockReadyRef\.current = [^\n]+;)\s*$/m.exec(region(src.carMapView, "car-cam-northup-lockready"))![1];
   const carRender = bind(`() => { ${lockLine} }`, CP);
   // ── SelfCarModel refs + lifted code (props wired like CarMapView's JSX) ──
@@ -193,7 +214,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     NOSE_LEAD_IN_ENABLED: val(MB, "NOSE_LEAD_IN_ENABLED"), CAM_HEADING_LAG_MS: val(MB, "CAM_HEADING_LAG_MS"), CAM_HEADING_MAX_LEAD_DEG: val(MB, "CAM_HEADING_MAX_LEAD_DEG"),
     // props (CarMapView JSX)
     cameraRef, getCam: C.getCam, readyRef: C.lockReadyRef, camHeadingOverrideRef: C.camHdgOverrideRef, camZoomOutRef: C.camZoomRef,
-    camPitchOutRef: C.camPitchRef, returnFlyRef: C.returnFlyRef, camJob: C.carCamJob, zoomSnapRef: C.zoomSnapRef, liveZoomRef: C.carLiveZoomRef,
+    camPitchOutRef: C.camPitchRef, returnFlyRef: C.returnFlyRef, camJob: C.carCamJob, camPoseOutRef: C.camWantRef, zoomSnapRef: C.zoomSnapRef, liveZoomRef: C.carLiveZoomRef,
     drawPosOutRef: ref(null), drawSinkRef: ref(null), onFirstCam: () => {}, mapRef: ref(null), speedMs: 0, probeRole: "car", sizePt: 50, lenUnits: 4.5,
     // internals
     render: ref({ lat: cam.lat, lng: cam.lng, heading: 90 }), anim: ref(null), raf: ref(null), rafIsTimer: ref(false), lastArmAt: ref(0), fastPumpRun: ref(0),
@@ -256,9 +277,10 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
           const s = Math.min(1, (now - anim.t0) / anim.dur), e = s * s * (3 - 2 * s);
           for (const k of ["zoom", "pitch", "heading", "lat", "lng"] as const) (cam as any)[k] = (anim.from as any)[k] + ((anim.to as any)[k] - (anim.from as any)[k]) * e;
           camMoved = true;
-          if (s >= 1) anim = null;
+          if (s >= 1) { anim = null; animEnds.push(now - T0); }
         }
-        if (camMoved) { camMoved = false; turn(() => onCameraChanged({ properties: { zoom: cam.zoom } })); }
+        if (camMoved) { camMoved = false; lastMoveAt = now; idlePending = true; turn(() => onCameraChanged(camState())); }
+        else if (idlePending && !anim && now - lastMoveAt >= 50) { idlePending = false; turn(() => onMapIdle(camState())); }
         frames.push({ t: now - T0, zoom: cam.zoom, pitch: cam.pitch, heading: cam.heading, sizeZoom, animating: !!anim, animStep });
         // rAF callbacks due at this vsync
         const due = timers.filter((x) => x.raf && x.at <= now); for (const t of due) { timers.splice(timers.indexOf(t), 1); turn(t.fn); }
@@ -273,7 +295,8 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     }
   };
   const api = {
-    get now() { return now - T0; }, get abs() { return now; }, cam, C, S, log, counts, frames, unresolved,
+    get now() { return now - T0; }, get abs() { return now; }, cam, C, S, log, counts, frames, unresolved, animEnds,
+    get animating() { return !!anim; },
     setFollowZoom(z: number) { C.followZoom = z; C.camInputsRef.current = { ...C.camInputsRef.current, followZoom: z }; C.aaLiveRef.current = { ...C.aaLiveRef.current, followZoom: z }; },
     /** A head-unit RELAYOUT: onLayout delivers a new mapW, followZoom changes with it (aaZoomOutFor), the render runs
      *  the [painted, mapW] layout-correction effect — the production effect body. */

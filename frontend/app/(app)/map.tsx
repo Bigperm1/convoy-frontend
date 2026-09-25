@@ -3297,6 +3297,36 @@ export default function MapScreen() {
   }, [navMode, activeRoute]);
   // 🔒 NAV-LOCK end map-car-nav-adopt
 
+  // dest-adopt receipt (2026-09-24). John (Ni GR), 09-23: a second car-search pick 19 s into
+  // the first route came out as a different destination, the phone logged no depart-rank for
+  // it, and "halfway on highway 1 it changed to an address in North Vancouver". Nothing
+  // recorded what the phone was HANDED or whether adopt() above took it. This is that receipt:
+  // the same bus the locked adopt() subscribes to and the same CAR_NAV_KEY it reads, with
+  // navActive exactly as adopt() sees it (adopt returns early on 1; navActiveRef only moves in
+  // its navMode effect, so a sibling listener reads the identical value). Outside the locked
+  // region on purpose: a receipt, no nav state written. logEventReliable, because a missing
+  // row here WILL be read as "the phone never got it" (RULES.md §3).
+  useEffect(() => {
+    const crumb = (path: "live" | "cold", dest: { lat?: unknown; lng?: unknown; label?: unknown }, ageS?: number) => {
+      try {
+        const f = (v: unknown) => (typeof v === "number" ? v.toFixed(5) : "?");
+        const label = String(dest.label ?? "").replace(/["\n\r]/g, "'").slice(0, 60);
+        logEventReliable(`dest-adopt src=car path=${path} label="${label}" lat=${f(dest.lat)} lng=${f(dest.lng)} navActive=${navActiveRef.current ? 1 : 0}${ageS != null ? ` age=${ageS}s` : ""}`);
+      } catch {}
+    };
+    const un = onCarNavStarted(({ dest }) => crumb("live", dest));
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(CAR_NAV_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (typeof saved?.dest?.lat !== "number" || typeof saved?.dest?.lng !== "number") return;
+        crumb("cold", saved.dest, Math.round((Date.now() - (saved.startedAt || 0)) / 1000));
+      } catch {}
+    })();
+    return un;
+  }, []);
+
   // The route as PLANNED, for the trip receipt (2026-09-22). `trip-record … routeKm=` was
   // read off the CURRENT route at bank time, so after a reroute near arrival Jeff's 31 km
   // drive printed `km=31.21 src=odo routeKm=1.63` — the 1.6 km remnant, not the route he

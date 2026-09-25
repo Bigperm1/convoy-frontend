@@ -664,12 +664,27 @@ function dismissCarSearch(): void {
   try { getLib()?.CarPlay?.popToRootTemplate?.(true); } catch {}
 }
 
+// ── car-search-pick (2026-09-24) ──────────────────────────────────────────────────────
+// John (Ni GR), 09-23: `carplay-tap:car-search` → `depart-rank src=car` → a second
+// `carplay-tap:car-search` 2 s later → 19 s on, `depart-rank src=car` to a DIFFERENT
+// destination, and "halfway on highway 1 it changed to an address in North Vancouver".
+// Nothing recorded which row he tapped or what the row said, so the chain from tap to
+// destination could not be read. One row per pick, on every head-unit list (CarPlay
+// keyboard template, CarPlay Where-to list, Android Auto search screen), logged BEFORE
+// startCarNav so a pick that fails to start still leaves its receipt; a miss (`label="?"`,
+// index past the list) is the generation-mismatch signature by itself.
+function crumbLabel(s: unknown): string {
+  // Quotes and newlines out so the row stays one greppable line; Places descriptions run long.
+  return String(s ?? '?').replace(/["\n\r]/g, "'").slice(0, 60);
+}
+
 async function aaSelect(rowId: string): Promise<void> {
   const kind = rowId.slice(0, 1);
   const idx = Number(rowId.slice(2));
   if (!Number.isFinite(idx)) return;
   if (kind === 's') {
     const p = _aaSaved[idx];
+    try { logEvent(`car-search-pick surf=aa idx=${idx} src=saved label="${crumbLabel(p?.label)}"`); } catch {}
     if (!p) return;
     const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
     // SAME OWNERSHIP RULE AS iOS: release only when we actually pop. Releasing on a
@@ -679,6 +694,7 @@ async function aaSelect(rowId: string): Promise<void> {
     return;
   }
   const picked = _aaResults[idx];
+  try { logEvent(`car-search-pick surf=aa idx=${idx} src=places label="${crumbLabel(picked?.description)}"`); } catch {}
   if (!picked) return;
   const dest = await placeDetails(picked.placeId, picked.main || picked.description).catch(() => null);
   if (!dest) { toast('Could not load that place'); return; }
@@ -931,6 +947,7 @@ function getSearchTemplate(): any | null {
         // things in each, so route on the mode the last onSearch left behind.
         if (_listMode === 'saved') {
           const p = _savedShown[index];
+          try { logEvent(`car-search-pick surf=carplay idx=${index} src=saved label="${crumbLabel(p?.label)}"`); } catch {}
           if (!p) return;
           const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
           // Release ownership ONLY when we actually pop. Releasing on a FAILED start would
@@ -940,6 +957,7 @@ function getSearchTemplate(): any | null {
           return;
         }
         const picked = _lastResults[index];
+        try { logEvent(`car-search-pick surf=carplay idx=${index} src=places label="${crumbLabel(picked?.description)}"`); } catch {}
         if (!picked) return;
         const dest = await placeDetails(picked.placeId, picked.main || picked.description).catch(() => null);
         if (!dest) { toast('Could not load that place'); return; }
@@ -1046,6 +1064,7 @@ function getWhereToTemplate(): any | null {
           return;
         }
         const p = _whereToShown[index - 1]; // row 0 is the keyboard row
+        try { logEvent(`car-search-pick surf=carplay idx=${index - 1} src=saved label="${crumbLabel(p?.label)}"`); } catch {}
         if (!p) return;
         const ok = await startCarNav({ lat: p.lat, lng: p.lng, label: p.label });
         if (ok) popCarSearchDeferred();     // release + pop to root only when the pop really happens

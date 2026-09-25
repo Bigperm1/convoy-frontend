@@ -1066,8 +1066,8 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
-- **⏳ COMMITTED, NOT PUBLISHED — `e739f9e8` + `a66fde22` (2026-09-25 00:15–01:05 PDT), ships on Jeff's "ship":** the Report panel
-  round two. (1) Buttons reordered on every surface on his words ("Top - mic, Second from top - hazards, Second from bottom - 2D/3D,
+- **✅ PUBLISHED in OTA-CA `0c747ae8` (code `727cb141`, 2026-09-25 01:33 PDT, Jeff: "SHIP IT"; KEY_PRESENT=1 iOS + Android) — the Report panel
+  round two (`e739f9e8` → `727cb141`, 2026-09-25 00:15–01:25).** (1) Buttons reordered on every surface on his words ("Top - mic, Second from top - hazards, Second from bottom - 2D/3D,
   Bottom - crew. Phone doesn't have mic"): CarPlay comms · hazards · view · crew, AA map strip hazards above crew, phone compass
   (the mic's slot) · Hazards · 2D/3D · Crew — two value locks relocked, 43 approvals. (2) The phone panel is no longer a bottom
   sheet: a card CENTRED on the screen, anchored above the measured FAB stack (`fabStackH`), weather-forecast-card look, transparent

@@ -26,6 +26,7 @@ import { PressableScale } from "../../src/ui/PressableScale";
 import { haptics } from "../../src/haptics";
 import { ReportToast, MusicToast, HailToast, InfoToast } from "../../src/components/AlertToast";
 import { HazardDrawer, ReportPeekTab } from "../../src/components/FloatingButtons";
+import HazardSheet, { HAZARD_FAB_ART } from "../../src/components/HazardSheet";
 import StepDrawer, { StepDrawerHandle, DRAWER_HEIGHT } from "../../src/components/StepDrawer";
 import { hailBus } from "../../src/hailBus";
 import { subscribeAvatarHold } from "../../src/avatarHoldBus";
@@ -4306,6 +4307,9 @@ export default function MapScreen() {
         setHazards((prev) => (prev.some((x) => x.id === data.id) ? prev : [data, ...prev]));
       }
       setShowReport(false);
+      // The confirmation pill (ReportToast) for every kind — a tap from the Report sheet had none (2026-09-24).
+      setAlertConfirm(kind);
+      setTimeout(() => setAlertConfirm(null), 2500);
       // Voice-driven reports get a spoken acknowledgement so the driver can keep eyes on the road
       if (opts?.fromVoice && !navMuted) {
         const label = kind === "police" ? "Police" : kind === "accident" ? "Accident" : kind === "traffic" ? "Traffic" : "Hazard";
@@ -6171,6 +6175,24 @@ export default function MapScreen() {
           <SkinFade render={(t) => <Image source={CREW_ART[t]} style={{ width: 26, height: 26 }} resizeMode="contain" />} />
           <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Crew</Text>
         </PressableScale>
+        {/* HAZARDS (Jeff, 2026-09-24: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?") — the head unit's fourth map
+            button, on the phone: opens the Report sheet (src/components/HazardSheet.tsx, the same four tiles in
+            the driver's metal). Below Crew like the CarPlay column [comms, view, crew, hazards]; the compass keeps
+            its own FAB here because the phone has the room (on the head unit it rides inside the panel). */}
+        <PressableScale
+          testID="hazards-fab"
+          hitSlop={0}
+          style={[styles.fab, styles.fabPolice]}
+          onPress={() => {
+            haptics.snap();
+            setShowReport(true);
+            try { logEvent('phone-tap:hazards'); } catch {}
+          }}
+        >
+          <GlassFill tintColor={hudTint()} style={{ borderRadius: 30, overflow: "hidden" }} />
+          <SkinFade render={(t) => <Image source={HAZARD_FAB_ART[t]} style={{ width: 26, height: 26 }} resizeMode="contain" />} />
+          <Text maxFontSizeMultiplier={1} style={styles.fabCrewLabel}>Hazards</Text>
+        </PressableScale>
         {/* Compass — bottom of stack. The needle rotates opposite the live map
             bearing so North always points north as the map turns; tapping it
             snaps back to the car (recenter) AND faces the map north (heading 0). */}
@@ -6213,6 +6235,12 @@ export default function MapScreen() {
           Brief glassy pill at the bottom-center that confirms a Police or
           Hazard report was sent. Auto-dismisses after 2.5s (set by reportAlert). */}
       <ReportToast kind={alertConfirm as any} />
+      {/* The Report sheet (the head unit's grid, on the phone). Closes on the tap; the toast confirms. */}
+      <HazardSheet
+        visible={showReport}
+        onClose={() => setShowReport(false)}
+        onReport={(kind) => { setShowReport(false); try { logEvent(`hazard-panel pick surf=phone id=hz-${kind} kind=${kind}`); } catch {} void reportHazard(kind); }}
+      />
       {/* Music broadcast toast — shows up when the convoy admin pushes a
           track from the Music screen. Sits slightly higher than the report
           toast so they don't overlap if both fire close together. */}

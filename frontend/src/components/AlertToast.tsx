@@ -9,12 +9,14 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 
-export function ReportToast({ kind }: { kind: "police" | "road" | null }) {
+export function ReportToast({ kind }: { kind: string | null }) {
   if (!kind) return null;
+  // All four kinds POST /hazards accepts (2026-09-24: the Report sheet reports crash + traffic too).
+  const label = kind === "police" ? "🛡 Police reported" : kind === "accident" ? "🚗 Crash reported" : kind === "traffic" ? "🚦 Traffic reported" : "⚠️ Hazard reported";
   return (
     <View pointerEvents="none" style={styles.toast}>
       <Text style={styles.toastText}>
-        {kind === "police" ? "🛡 Police reported" : "⚠️ Hazard reported"}
+        {label}
       </Text>
     </View>
   );

@@ -41,5 +41,15 @@ ok("C car-hazards uses CAR_ICON_HAZARDS in the static config and carIcon(HAZARD_
   return a.includes("{ id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }") && a.includes("carIcon(HAZARD_BUTTON_GLYPH, s)") && !/id: 'car-compass', image/.test(a) && a.includes("if (id === 'car-compass') { emitCarGesture({ kind: 'compass' }); return; }");
 })());
 
+// D · the phone (Jeff, 2026-09-24: "WHERE IS THE HAZARDS BUTTON ON THE PHONE?"): the same tiles, one source of truth
+{
+  const sheet = readFileSync(new URL("../../src/components/HazardSheet.tsx", import.meta.url), "utf8");
+  const mapTsx = readFileSync(new URL("../../app/(app)/map.tsx", import.meta.url), "utf8");
+  ok("D1 the phone sheet builds its tiles from HAZARD_TILES (no second list)", sheet.includes("HAZARD_TILES.filter(") && !/\{ id: 'hz-/.test(sheet));
+  ok("D2 the phone sheet has art for every report glyph in all four metals", ["hz_police", "hz_crash", "hz_hazard", "hz_traffic"].every((g) => new RegExp(`${g}:\\s*\\{ brand: require\\(.*premium: require\\(.*ultra: require\\(.*diamond: require\\(`).test(sheet)));
+  ok("D3 map.tsx mounts the Hazards FAB and the sheet, and the tap reports through reportHazard", mapTsx.includes('testID="hazards-fab"') && mapTsx.includes("<HazardSheet") && mapTsx.includes("void reportHazard(kind)"));
+  ok("D4 the phone FAB sits between Crew and the compass (CarPlay order: crew then hazards)", mapTsx.indexOf('testID="crew-fit-fab"') < mapTsx.indexOf('testID="hazards-fab"') && mapTsx.indexOf('testID="hazards-fab"') < mapTsx.indexOf('testID="compass-fab"'));
+}
+
 console.log(fails === 0 ? "\nPASS hazard_panel" : `\nFAIL hazard_panel (${fails})`);
 if (fails) process.exit(1);

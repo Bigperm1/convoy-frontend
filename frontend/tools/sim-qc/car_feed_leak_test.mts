@@ -36,7 +36,9 @@
 //      witnessed by nobody, the walk shared live); a session destroyed before JS started (AA7, AA7-0 = round 4's root:
 //      an acquire with no release); the init receipt before or after the mount (AA8); a binary with no receipts (AA9).
 //   M  map.tsx's phone-watcher effect, extracted from the source and run: a cleanup before, soon after and long after
-//      the watch resolves, deliveries to a dead effect, and the background gate.
+//      the watch resolves, deliveries to a dead effect, and the background gate; M6 a LOST Android Auto disconnect —
+//      the watch stops itself on the first delivery after the TTL-bound head unit lapses, restarts in the foreground
+//      (M6-0 = 90dd1484's effect running on).
 //      What M cannot see: whether React re-runs the effect at the right moments (F checks the deps text), hook order,
 //      the real expo-location, and the ingest body on the live path.
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -778,28 +780,34 @@ if (!process.env.CAR_FEED_ROOT) {
   {
     const ts = (await import("typescript")).default;
     const vm = await import("node:vm");
-    const raw = read("app/(app)/map.tsx"); const bl = blank(raw);
-    const wAt = bl.indexOf("Location.watchPositionAsync(");
-    const eAt = bl.lastIndexOf("useEffect(", wAt);
-    const open = bl.indexOf("() => {", eAt) + "() => ".length;
-    const close = closeOf(bl, open);
-    const code = ts.transpileModule(`var __effect = () => ${raw.slice(open, close + 1)};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+    const extract = (raw: string) => {
+      const bl = blank(raw);
+      const wAt = bl.indexOf("Location.watchPositionAsync(");
+      const eAt = bl.lastIndexOf("useEffect(", wAt);
+      const open = bl.indexOf("() => {", eAt) + "() => ".length;
+      const close = closeOf(bl, open);
+      return ts.transpileModule(`var __effect = () => ${raw.slice(open, close + 1)};`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+    };
+    const code = extract(read("app/(app)/map.tsx"));
+    let huNow = true; const mrows: string[] = [];   // headUnitAttachedNow() and the rows the effect logs (M6)
     let mclock = 5_000_000; let mtimers: { at: number; fn: () => void }[] = [];
     const mlater = (fn: () => void, ms: number) => { mtimers.push({ at: mclock + ms, fn }); };
     const madvance = (ms: number) => { const end = mclock + ms; for (;;) { mtimers.sort((a, b) => a.at - b.at); const x = mtimers[0]; if (!x || x.at > end) break; mtimers.shift(); mclock = x.at; x.fn(); } mclock = end; };
-    const run = (o: { appActive: boolean; nav: boolean; keepPrev: boolean; keep: boolean }) => {
+    const run = (o: { appActive: boolean; nav: boolean; keepPrev: boolean; keep: boolean }, src = code) => {
       const native = new FakeNative(); let ingest = 0;
       const ctx: any = {
+        headUnitAttachedNow: () => huNow, logEventReliable: (r: string) => { mrows.push(r); }, fgwatchSelfStopRows: 0,
         ensureLocationPermission: async () => true, appActive: o.appActive, navActiveRef: { current: o.nav },
         fgWatchKeepRef: { current: o.keepPrev }, fgWatchKeep: o.keep, settings: { liteGps: false },
         Location: { Accuracy: { High: 4, BestForNavigation: 6 }, watchPositionAsync: (_o: unknown, cb2: (l: any) => void) => native.watch(cb2) },
         removeWhenSettled: (s2: WatchSub, bornAt: number) => removeWhenSettled(s2, bornAt, () => mclock, mlater),
         Date: { now: () => mclock },
-        rawCourseHere: () => { ingest++; return null; },   // the first call of the fix-ingest body
+        // The first call of the fix-ingest body: count it, then stop the body (the rest needs map.tsx's scope).
+        rawCourseHere: () => { ingest++; throw new Error("ingest-sentinel"); },
       };
-      vm.runInNewContext(code, ctx);
+      vm.runInNewContext(src, ctx);
       const cleanup = ctx.__effect();
-      return { native, cleanup, ingested: () => ingest };
+      return { native, cleanup, ingested: () => ingest, navRef: ctx.navActiveRef as { current: boolean } };
     };
     const active = { appActive: true, nav: false, keepPrev: true, keep: true };
     {
@@ -841,6 +849,48 @@ if (!process.env.CAR_FEED_ROOT) {
       const fg = await mk(active);
       ok("M5 the gate: background + no route → no watch; a background start after a run that had none → no watch; a continuing background route → watch; foreground → watch",
         bgIdle === 0 && bgNavNoPrev === 0 && bgNavPrev === 1 && fg === 1, JSON.stringify({ bgIdle, bgNavNoPrev, bgNavPrev, fg }));
+    }
+    {
+      // M6 A LOST ANDROID AUTO DISCONNECT: a phone route running in the background behind Android Auto (the watcher is
+      // up), the route ENDS — and because the raw head-unit flag is still true (its disconnect will never be heard),
+      // fgWatchKeep does not change and the effect does not re-run: the watcher runs on with no route. While the
+      // TTL-bound headUnitAttachedNow() is true it keeps ingesting; the first delivery after that lapses removes the
+      // watch and drops the fix. The app coming back (the effect re-runs with appActive) starts a new one.
+      // M6-0 = 90dd1484's effect: the watch runs on after the lapse.
+      // A real-shaped fix into every registered callback; the ingest sentinel (above) is swallowed here.
+      const deliverFix = (r: { native: FakeNative }) => { for (const s2 of r.native.created) if (!s2.removed) { try { (s2.cb as any)({ coords: { heading: 0, speed: 0, latitude: 49.1, longitude: -122.6 }, timestamp: mclock }); } catch {} } };
+      const lostDisconnect = async (src: string) => {
+        huNow = true; mrows.length = 0;
+        const r = run({ appActive: false, nav: true, keepPrev: true, keep: true }, src);
+        await flush(); await flush(); r.native.resolveAll(); await flush(); await flush();
+        deliverFix(r);
+        r.navRef.current = false;                        // the route ended; fgWatchKeep stayed true (raw flag): no re-run
+        deliverFix(r); const ingestedWhileAttached = r.ingested();
+        huNow = false;                                   // the TTL lapsed; no disconnect was ever heard
+        madvance(5_000); deliverFix(r); await flush();
+        const out = { ingestedWhileAttached, ingestedAfter: r.ingested() - ingestedWhileAttached, liveAfter: r.native.live(), rows: [...mrows] };
+        r.cleanup();
+        return out;
+      };
+      let old: string | null = null;
+      try { old = execFileSync("git", ["show", "90dd1484:frontend/app/(app)/map.tsx"], { cwd: fileURLToPath(ROOT), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+      if (old) {
+        const r0 = await lostDisconnect(extract(old));
+        ok("M6-0 NEGATIVE CONTROL (90dd1484's effect): after the TTL lapses with the disconnect lost, the background watch keeps running and ingesting", r0.liveAfter === 1 && r0.ingestedAfter === 1 && r0.ingestedWhileAttached === 2, JSON.stringify(r0));
+      } else console.log("  skip M6-0 negative control: 90dd1484 unavailable");
+      const r = await lostDisconnect(code);
+      ok("M6 lost disconnect: the watch runs while the TTL-bound head unit holds, and the first delivery after it lapses removes it, drops the fix and logs `fgwatch op=self-stop why=no-car`",
+        r.ingestedWhileAttached === 2 && r.ingestedAfter === 0 && r.liveAfter === 0 && r.rows.includes("fgwatch op=self-stop why=no-car"), JSON.stringify(r));
+      huNow = false;
+      const fgR = run({ appActive: true, nav: false, keepPrev: true, keep: true }); await flush(); await flush(); fgR.native.resolveAll(); await flush(); await flush();
+      deliverFix(fgR);
+      ok("M6b …the app returns to the foreground (the effect re-runs): a new watch starts and ingests, head unit or not", fgR.native.created.length === 1 && fgR.native.live() === 1 && fgR.ingested() === 1, JSON.stringify({ made: fgR.native.created.length, live: fgR.native.live(), ingested: fgR.ingested() }));
+      fgR.cleanup();
+      const navR = run({ appActive: false, nav: true, keepPrev: true, keep: true }); await flush(); await flush(); navR.native.resolveAll(); await flush(); await flush();
+      deliverFix(navR);
+      ok("M6c a phone route in the background keeps the watch with no head unit (the belt needs no car AND no route)", navR.native.live() === 1 && navR.ingested() === 1, JSON.stringify({ live: navR.native.live(), ingested: navR.ingested() }));
+      navR.cleanup();
+      huNow = true;
     }
   }
   Date.now = realNow;

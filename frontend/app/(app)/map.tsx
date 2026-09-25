@@ -51,7 +51,7 @@ import {
   useRouteTrafficRefresh, fetchRouteViaStops, arriveNow, countRouteUturns, fmtUturnAt,
 } from "../../src/nav";
 import { getDepartureBearing, departureBearingSource, noteCourse, orderRoutesForward, routeInitialBearing, UTURN_ONLY_TOLERANCE_DEG } from "../../src/departureBearing";
-import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, carSpot, subscribeHeadUnit } from "../../src/locationPrivacy";
+import { shareablePosition, shareablePositionAsync, noteCarConnected, noteFix, hydrateLocationPrivacy, parkEndedByHeadUnit, headUnitAttachedRaw, headUnitAttachedNow, carSpot, subscribeHeadUnit } from "../../src/locationPrivacy";
 import CarDriveList from "../../src/CarDriveList";
 import { subscribeBgFix } from "../../src/navNotification";
 import { removeWhenSettled } from "../../src/carFeedOwner";
@@ -217,6 +217,8 @@ const LAST_LOC_KEY = "convoy:lastLoc";
 // Once-per-app-session guard for the CarPlay "Always location" CTA below —
 // module-level so a map remount (tab switches) can't re-nag mid-drive.
 let _carAlwaysCtaShownThisSession = false;
+// `fgwatch op=self-stop why=no-car` rows this process (bounded) — the phone watcher's no-car belt, see its delivery path.
+let fgwatchSelfStopRows = 0;
 
 // Format a Date as a 12-hour clock like "10:42 AM" without relying on Intl
 // (Hermes' Intl is limited on device, so we build the string by hand).
@@ -3852,6 +3854,26 @@ export default function MapScreen() {
             // This effect instance is gone (cleanup ran): the fix is not ours to use. A delivery proves the native
             // stream is up, so removing it here cannot strand it (src/carFeedOwner.ts header).
             if (cancelled) { try { sub?.remove?.(); } catch {} return; }
+            // ── THE WATCHER STOPS ITSELF WITH NO CAR (privacy, 2026-09-25) ───────────────────────────────────────────
+            // Jeff: "it should not follow me when i discconect from car play". fgWatchKeep reads the RAW head-unit flag
+            // (headUnitAttachedRaw — no TTL, by design for the UI), so a head unit whose disconnect is never heard
+            // (Android Auto: didDisconnect AND `op=hold on=0` both lost) would keep this watcher running in the
+            // background for the life of the process. Belt, independent of that flag: a delivery while the app is not
+            // active, with no phone route and no head unit by the privacy gate's own TTL-bound answer
+            // (headUnitAttachedNow), ends this subscription and drops the fix. The effect starts a new one when it runs
+            // again with the app active (appActive is a dep); a route started in the background is fed by the
+            // navigation task, as it always was (the gate below never starts a background watcher).
+            // Cost, by design: on Android that TTL lapses 90 s after a session's one assertion, so a backgrounded
+            // Android Auto session with no phone route loses this watcher then — the car map, the odometer and the
+            // privacy gate keep their car feed; what stops is this watcher's /location fan-out (only matters with no
+            // active community — presence covers the rest). On iOS the answer has no TTL: the belt is the flag itself.
+            // Gate: tools/sim-qc/car_feed_leak_test.mts M6.
+            if (!appActive && !navActiveRef.current && !headUnitAttachedNow()) {
+              cancelled = true;
+              if (sub) removeWhenSettled(sub, subAt);   // (not resolved yet: its `.then` below removes it — `cancelled`)
+              if (fgwatchSelfStopRows < 5) { fgwatchSelfStopRows += 1; try { logEventReliable("fgwatch op=self-stop why=no-car"); } catch {} }
+              return;
+            }
             // 🔒 NAV-LOCK begin map-fgwatch-fix-ingest — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
             const h = pos.coords.heading;
             const heading = typeof h === "number" && h > 0 ? h : undefined;

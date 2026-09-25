@@ -61,7 +61,11 @@
 //      it; HF7b isolates shareablePosition's hydration check, HF7b-0 = without it); HF8 a caller awaiting a HUNG attempt is released when a retry succeeds, and within 10 s when none does
 //      (HF8-0 = 47db1aca never releasing it), and carDataService joins presence after the await, hydrated or not;
 //      HF9 / HF9b the share decision is self-sufficient: a latch whose last driving fix is 100 s old shares nothing,
-//      whether or not a fix ran since, through the async path too (HF9-0 / HF9b-0 = 7da32366 sharing the walk).
+//      whether or not a fix ran since, through the async path too (HF9-0 / HF9b-0 = 7da32366 sharing the walk);
+//      HF9c / HF9d / HF9e clock jumps: back an hour with walking fixes through noteFix, forward and back, and a lost
+//      Android Auto disconnect whose TTL a backward jump would revive (HF9c-0 / HF9e-0 = 90dd1484); V8 the re-arm
+//      rule across clock jumps (V8b-0 = without its restart); HF9f a stale latch is expired before noteFix reads it —
+//      the first fast fix after it is not recorded as the car spot (HF9f-0 = 90dd1484).
 //   W  the drive's latch still inside its 90 s window at the disconnect: a 12 km/h and a 26 km/h fix share the car
 //      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
@@ -295,6 +299,21 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
     const noBase = await variant("nobase", "if (base >= 0 && covers(runBase)) credit"), noRun = await variant("norun", "if (base >= 0 && covers(base)) credit");
     ok("V6c NEGATIVE CONTROL (this rule without the 10 s baseline check): the zig-zag jog proves", src.includes(anchor) && firstProof(noBase, zig) >= 0, `proved at fix ${firstProof(noBase, zig)}`);
     ok("V7c NEGATIVE CONTROL (this rule without the run check): the straight jog proves", src.includes(anchor) && firstProof(noRun, runs) >= 0, `proved at fix ${firstProof(noRun, runs)}`);
+    // V8 CLOCK JUMPS (Codex delta review 3): 25 s at 10 m/s (15 s credited, 250 m — not yet a proof), then the clock
+    // moves BACK an hour and the car drives on. (a) 10 more fixes (350 m in all) do not prove: nothing from before the
+    // jump counts. (b) 40 more s after the jump prove on their own evidence (the rule restarted rather than
+    // freezing). (c) the same after a FORWARD jump of an hour: no proof from 10 fixes. V8b-0: this rule without the
+    // restart on a large backward jump never proves again.
+    const drive = (after: number, jumpS: number) => Array.from({ length: 25 + after }, (_, i) => ({ t: T + i * S + (i >= 25 ? jumpS * S : 0), p: north(SPOT, 30 + 10 * i), v: 10 }));
+    const v8a = firstProof(RR, drive(10, -3600)), v8b = firstProof(RR, drive(40, -3600)), v8c = firstProof(RR, drive(10, 3600));
+    ok("V8 a backward clock jump: pre-jump evidence never counts (a) and the rule restarts (b, proves after the jump); a forward jump counts nothing old (c)",
+      v8a === -1 && v8b >= 25 + 15 && v8c === -1, JSON.stringify({ v8a, v8b, v8c }));
+    {
+      const reset = "if (prev.t - now > PARK_REARM_FIX_CREDIT_MS) { seg = []; prev = null; bridging = false; }";
+      const f2 = join(d, "parkRearm.noreset2.ts"); writeFileSync(f2, src.replace(reset, "if (prev.t - now > PARK_REARM_FIX_CREDIT_MS) { /* no restart */ }"));
+      const NR: any = await import(pathToFileURL(f2).href);
+      ok("V8b-0 NEGATIVE CONTROL (this rule without the restart on a large backward jump): the drive after the jump never proves", src.includes(reset) && firstProof(NR, drive(40, -3600)) === -1, `proved at fix ${firstProof(NR, drive(40, -3600))}`);
+    }
     rmSync(d, { recursive: true, force: true });
   }
 }
@@ -1051,13 +1070,78 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
     ok("HF9b the same without any storage fault: a phone-only drive's latch 100 s old does not share a walk (the drive itself did)",
       !!rb && rb.drivingLive && !rb.live && rb.parked, JSON.stringify(rb));
     {
-      // HF9c a clock that moved BACKWARDS after a latched drive: the latch's age is negative — expired, not eternal.
-      const lp = await fresh(); clock = utc(21, 40, 0);
-      let p = north(SPOT, -1500);
-      for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
-      clock -= 3600 * S;
-      const w = north(p, 40); const sh: any = lp.shareablePosition({ ...w, speed: 3.3, heading: 0 });
-      ok("HF9c after the clock moves back an hour, a walking position is not shared live on the drive's latch", !(sh.share && sh.lat === w.lat && sh.lng === w.lng), JSON.stringify(sh));
+      // HF9c a clock that moved BACKWARDS after a latched drive (Codex delta review 3, its reproduction): the latch's
+      // age is negative — expired, not eternal. A direct share, then 30 s of 3.3 m/s walking fixes THROUGH noteFix:
+      // nothing shared live and the car spot never moves (it used to renew the latch and write the spot).
+      // HF9d a clock that jumps FORWARD an hour after the drive, walking fixes, then back to 10 s after the drive,
+      // walking fixes again: the jump ages the latch out and nothing revives it. HF9e Android Auto with its disconnect
+      // LOST (the flag stays set), the 90 s TTL lapsed, then the clock moves back an hour: a negative TTL age is
+      // expired too (carAttached), so the walk is not shared as "attached". HF9c-0 / HF9e-0 = 90dd1484.
+      const clockCase = async (lpP: Promise<LP | null>, jump: "back" | "fwd") => {
+        const lp = await lpP; if (!lp) return null;
+        clock = utc(21, 40, 0); LOC_V.__store = {};
+        await lp.hydrateLocationPrivacy();
+        let p = north(SPOT, -1500);
+        for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+        const driveEnd = clock; const spotBefore = lp.carSpot();
+        clock += (jump === "back" ? -3600 : 3600) * S;
+        const live: string[] = [];
+        const direct: any = lp.shareablePosition({ ...north(p, 5), speed: 3.3, heading: 0 });
+        if (direct.share && direct.lat !== spotBefore?.lat) live.push("direct");
+        const walk = (n: number, tag: string) => { for (let i = 0; i < n; i++) { clock += S; p = north(p, 3.3); lp.noteFix(p.lat, p.lng, 3.3, null); const sh: any = lp.shareablePosition({ ...p, speed: 3.3, heading: 0 }); if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`${tag}+${i}`); } };
+        walk(30, "after");
+        if (jump === "fwd") { clock = driveEnd + 10 * S; walk(20, "back-to-normal"); }
+        const spotAfter = lp.carSpot();
+        return { live, spotMoved: !!spotBefore && !!spotAfter && (spotAfter.lat !== spotBefore.lat || spotAfter.lng !== spotBefore.lng), latch: lp.privacyDebug().latch, parked: lp.privacyDebug().parked };
+      };
+      const ttlCase = async (lpP: Promise<LP | null>) => {
+        const lp = await lpP; if (!lp) return null;
+        LOC_V.__os = "android"; LOC_V.__store = {}; clock = utc(22, 0, 0);
+        await lp.hydrateLocationPrivacy();
+        lp.noteCarConnected(true, "androidauto");               // …and its disconnect is never heard
+        let p = north(SPOT, -1500);
+        for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+        clock += 100 * S;                                        // the TTL lapsed
+        clock -= 3600 * S;                                       // then the clock moved back an hour
+        const w = north(p, 40); const sh: any = lp.shareablePosition({ ...w, speed: 1.4, heading: 0 });
+        LOC_V.__os = undefined;
+        return { live: !!(sh.share && sh.lat === w.lat && sh.lng === w.lng), sh };
+      };
+      const base = await lpAt("90dd1484");
+      if (base) {
+        const c0 = await clockCase(Promise.resolve(base.lp), "back");
+        ok("HF9c-0 NEGATIVE CONTROL (90dd1484): after the clock moves back, walking fixes renew the latch, are shared LIVE and move the car spot", !!c0 && c0.live.length > 0 && c0.spotMoved, JSON.stringify(c0 && { n: c0.live.length, first: c0.live[0], spotMoved: c0.spotMoved }));
+        rmSync(base.dir, { recursive: true, force: true });
+        const base2 = await lpAt("90dd1484");
+        const e0 = await ttlCase(Promise.resolve(base2!.lp));
+        ok("HF9e-0 NEGATIVE CONTROL (90dd1484): a lost Android Auto disconnect + the clock moved back → the walk is shared as attached", !!e0 && e0.live, JSON.stringify(e0));
+        rmSync(base2!.dir, { recursive: true, force: true });
+      } else console.log("  skip HF9c-0 / HF9e-0 negative controls: 90dd1484 unavailable");
+      const c = await clockCase(fresh(false), "back");
+      ok("HF9c after the clock moves back an hour: no direct live share, 30 s of walking fixes through noteFix never shared live, the car spot never moves",
+        !!c && c.live.length === 0 && !c.spotMoved && c.latch === false && c.parked === true, JSON.stringify(c));
+      const d = await clockCase(fresh(false), "fwd");
+      ok("HF9d a clock that jumps forward an hour and back: nothing shared live, the spot never moves, the latch stays expired",
+        !!d && d.live.length === 0 && !d.spotMoved && d.latch === false, JSON.stringify(d));
+      const e = await ttlCase(fresh(false));
+      ok("HF9e a lost Android Auto disconnect, the TTL lapsed, then the clock moved back: not shared as attached", !!e && !e.live, JSON.stringify(e));
+      // HF9f the latch is expired BEFORE anything reads it: a phone-only drive, 100 s with no fix, then ONE 26 km/h
+      // walking fix. It may arm the latch (the unwitnessed rule), but it may not be RECORDED as the car spot on the
+      // strength of the stale latch — the 08-29 arm-and-record rule (HF9f-0 = 90dd1484 moving the spot).
+      const staleFast = async (lpP: Promise<LP | null>) => {
+        const lp = await lpP; if (!lp) return null;
+        clock = utc(22, 20, 0); LOC_V.__store = {}; await lp.hydrateLocationPrivacy();
+        let p = north(SPOT, -1500);
+        for (let i = 0; i < 60; i++) { clock += S; p = north(p, 20); lp.noteFix(p.lat, p.lng, 20, 0); }
+        const before = lp.carSpot(); clock += 100 * S;
+        const w = north(p, 60); lp.noteFix(w.lat, w.lng, kmh(26), null);
+        const after = lp.carSpot();
+        return { moved: !!before && !!after && (after.lat !== before.lat || after.lng !== before.lng) };
+      };
+      const b4 = await lpAt("90dd1484");
+      if (b4) { const f0 = await staleFast(Promise.resolve(b4.lp)); ok("HF9f-0 NEGATIVE CONTROL (90dd1484): the first fast walking fix after a stale latch is recorded as the car spot", !!f0 && f0.moved, JSON.stringify(f0)); rmSync(b4.dir, { recursive: true, force: true }); }
+      const f = await staleFast(fresh(false));
+      ok("HF9f a stale latch is expired before noteFix reads it: one 26 km/h walking fix 100 s after the drive does not move the car spot", !!f && !f.moved, JSON.stringify(f));
     }
   }
   {

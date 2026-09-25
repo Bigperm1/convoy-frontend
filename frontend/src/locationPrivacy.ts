@@ -90,6 +90,14 @@ export const DRIVING_SPEED_MS = 2.5;          // ~9 km/h
 export const DRIVING_ENTER_SPEED_MS = 4.17;   // ~15 km/h
 // Hysteresis so a red light does not flap live<->parked mid-drive.
 export const DRIVING_HYSTERESIS_MS = 90_000;
+/** THE freshness rule for driving evidence — the ONE predicate every reader and writer of the latch uses (noteFix before
+ * it reads or renews anything, shareablePosition, isParked, the hydrate restore; Codex delta reviews 2 and 3,
+ * 2026-09-25). Fresh = recorded (> 0), NOT in the future (a clock that moved backwards makes the age negative: that is
+ * expired, never eternal), and younger than DRIVING_HYSTERESIS_MS. A clock that jumps forward only ages it. Pure. */
+export function drivingEvidenceFresh(lastDrivingAt: number, now: number): boolean {
+  const age = now - lastDrivingAt;
+  return lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS;
+}
 // ── THE HEAD-UNIT FLAG NOW EXPIRES (2026-08-15) ─────────────────────────
 // `connected` used to be a latch with no clock: whoever set it true owned the gate
 // until someone set it false, and on Android nobody ever did. Two ways that went
@@ -233,8 +241,7 @@ export function hydrateLocationPrivacy(): Promise<void> {
       _hydrateDone = true;
       // A latch left by fixes processed before this read (a head unit's, while reads failed) whose 90 s window ran out
       // with no fix to expire it is cleared here too (shareablePosition already ignores it — Codex delta review 2).
-      const age = Date.now() - _lastDrivingAt;
-      if (_drivingLatched && !(_lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS)) { _drivingLatched = false; _latchProvisional = false; }
+      if (_drivingLatched && !drivingEvidenceFresh(_lastDrivingAt, Date.now())) { _drivingLatched = false; _latchProvisional = false; }
       _signalHydrated();
     }
     if (why !== "late" && _hydrateRows < 5) { _hydrateRows += 1; try { logEventReliable(`priv-hydrate ok=${ok ? 1 : 0} why=${why}`); } catch {} }
@@ -339,21 +346,26 @@ async function _hydrateOnce(): Promise<string> {
     // bias, which is why Jeff force-quitting three times made it worse.
     //
     // Restored PROVISIONALLY: it cannot renew its own window (see noteFix), and
-    // `age >= 0` rejects a device whose clock moved backwards, which would otherwise make
-    // the expiry test on line ~320 permanently false and pin the latch on for the life of
-    // the process.
-    const age = Date.now() - _lastDrivingAt;
+    // drivingEvidenceFresh rejects a device whose clock moved backwards, which would otherwise
+    // pin the latch on for the life of the process.
     // …but NEVER over a witnessed park (privacy, 2026-09-25, Jeff: "it should not follow me when i discconect from car
     // play"). A spot persisted with hu=1 (adopted just above) proves the drive ended at a head-unit disconnect, and a
     // relaunch inside the 90 s window would otherwise hand shareablePosition's movingNow a latch the disconnect already
     // dropped (noteCarConnected) — sharing live at >= 9 km/h. Gate: park_rearm_test H2.
-    if (_lastDrivingAt > 0 && age >= 0 && age < DRIVING_HYSTERESIS_MS && !_parkWitnessed) {
+    if (drivingEvidenceFresh(_lastDrivingAt, Date.now()) && !_parkWitnessed) {
       _drivingLatched = true;
       _latchProvisional = true;
     }
     // 🔒 NAV-LOCK end priv-hydrate-latch-restore
   } catch { return "apply"; }
   return spotRaw ? "spot" : "empty";
+}
+
+/** The head-unit answer the PRIVACY GATE uses (TTL-bound on Android — carAttached), for callers that must not trust the
+ * raw flag: map.tsx's phone-watcher belt stops a background watcher when this is false (a lost Android Auto disconnect
+ * leaves headUnitAttachedRaw() true forever). */
+export function headUnitAttachedNow(): boolean {
+  return carAttached();
 }
 
 /** Head unit attached/detached, per SOURCE (see _huSources): carPlayBootstrap ('carplay', iOS), map.tsx ('map',
@@ -483,7 +495,10 @@ function carAttached(): boolean {
   // genuinely different guarantees about hearing a disconnect, and that asymmetry — not
   // tidiness — is what decides it.
   if (Platform.OS !== 'android') return true;
-  return Date.now() - _carConnectedAt < CAR_CONNECT_TTL_MS;
+  // A clock that moved BACKWARDS makes the age negative: expired, not attached for as long as the clock takes to catch
+  // up (Codex delta review 3 class audit — the same rule as drivingEvidenceFresh; park_rearm_test HF9e).
+  const huAge = Date.now() - _carConnectedAt;
+  return huAge >= 0 && huAge < CAR_CONNECT_TTL_MS;
   // 🔒 NAV-LOCK end priv-car-attached-ttl
 }
 
@@ -508,7 +523,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
     if (!carAttached()) {
       // A head unit's fixes may have armed the latch while hydration was failing; its 90 s window still runs out here
       // (Codex delta review: an Android TTL lapse would otherwise leave it armed until a read succeeded).
-      if (_lastDrivingAt > 0 && Date.now() - _lastDrivingAt >= DRIVING_HYSTERESIS_MS) _drivingLatched = false;
+      if (_drivingLatched && !drivingEvidenceFresh(_lastDrivingAt, Date.now())) { _drivingLatched = false; _latchProvisional = false; }
       return;
     }
   }
@@ -531,6 +546,11 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // horizontal accuracy, which is plumbed (coords.acc) but deliberately not gated yet —
   // we have never measured what testers' phones report, so a threshold today would be
   // invented. Measure `acc=` from draw-cmp first, then gate here.
+  // ── A STALE LATCH IS EXPIRED BEFORE ANYTHING READS OR RENEWS IT (Codex delta review 3, 2026-09-25) ──────────────
+  // It used to expire only on `age >= 90 s`, so after the clock moved BACKWARDS (a negative age) a 3.3 m/s walking fix
+  // found the drive's latch still armed, renewed `_lastDrivingAt` to the rolled-back now, wrote the car spot where he
+  // walked and was shared live (park_rearm_test HF9c-0 on 90dd1484). drivingEvidenceFresh is the one rule.
+  if (_drivingLatched && !drivingEvidenceFresh(_lastDrivingAt, now)) { _drivingLatched = false; _latchProvisional = false; }
   const latchedBefore = _drivingLatched;
   // ── A WITNESSED PARK IS NOT UNDONE BY ONE FAST FIX (privacy, 2026-09-25) ────────────────────────────────────────
   // Jeff, 2026-09-25: "it should not follow me when i discconect from car play... this is a privacy concern. fix it
@@ -548,7 +568,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   else _parkRearm.reset();
   // The latch: only a vehicular speed can ARM it; once armed, above-walking keeps it.
   if (spd >= DRIVING_ENTER_SPEED_MS && rearmOk) { _drivingLatched = true; _latchProvisional = false; }
-  else if (_lastDrivingAt > 0 && now - _lastDrivingAt >= DRIVING_HYSTERESIS_MS) _drivingLatched = false;
+  else if (!drivingEvidenceFresh(_lastDrivingAt, now)) _drivingLatched = false;
   const aboveWalking = spd >= DRIVING_SPEED_MS;
   const driving = _drivingLatched && aboveWalking && rearmOk;
   if (driving) {
@@ -660,7 +680,7 @@ export function privacyDebug(): { latch: boolean; parked: boolean; hu: boolean; 
 /** Parked = not attached to a head unit and not driving recently. */
 // 🔒 NAV-LOCK begin priv-is-parked — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
 export function isParked(): boolean {
-  return !carAttached() && Date.now() - _lastDrivingAt >= DRIVING_HYSTERESIS_MS;
+  return !carAttached() && !drivingEvidenceFresh(_lastDrivingAt, Date.now());
 }
 // 🔒 NAV-LOCK end priv-is-parked
 
@@ -709,8 +729,7 @@ export function shareablePosition(
   // only while its last genuine driving evidence (`_lastDrivingAt`, which noteFix refreshes on every driving fix and
   // which a restored latch carries from disk) is inside DRIVING_HYSTERESIS_MS of NOW — exactly the window noteFix
   // expires it on, so a live drive is unaffected. A clock that moved backwards counts as expired (fail-closed).
-  const latchAge = Date.now() - _lastDrivingAt;
-  const latchFresh = _drivingLatched && _lastDrivingAt > 0 && latchAge >= 0 && latchAge < DRIVING_HYSTERESIS_MS;
+  const latchFresh = _drivingLatched && drivingEvidenceFresh(_lastDrivingAt, Date.now());
   const movingNow = _hydrateDone && latchFresh && (live?.speed ?? 0) >= DRIVING_SPEED_MS;
   const inCar = carAttached() || movingNow;
   const status: "live" | "parked" = isParked() ? "parked" : "live";

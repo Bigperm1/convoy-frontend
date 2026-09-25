@@ -27,7 +27,7 @@
 //   J2 the same stretch densified to 1 Hz with EVERY fix at 29 km/h (worse than the data) → still pinned: the
 //      displacement rule refuses it however long the speed artifact lasts.
 //   V  the rule's values (src/parkRearm.ts, outside nav-lock) are pinned.
-//   R  a real drive-away after a witnessed park → re-arms once 15 s at >= 15 km/h AND 250 m are in (<= 35 s), live
+//   R  a real drive-away after a witnessed park → re-arms once 15 s at >= 15 km/h AND 300 m are in (<= 40 s), live
 //      after; a highway pull-away within 30 s.
 //   L  a 25 s red light mid-proof does not start it over (<= 20 s after pulling away again).
 //   E  stop-sign grids (100–160 m blocks) and stop-and-go traffic prove within ~60–75 s (v1 never did).
@@ -42,8 +42,8 @@
 //      without 3 m noise; the same jam then clearing goes live within 60 s (Q0 = round 4's slow path un-pins the jam).
 //   WK the fifth review's walkers on the real module: straight 1.4 m/s walks with 8 / 12 m GPS noise and 1 in 10
 //      single-fix 15–18 km/h readings at 1 Hz and Lite cadence (8 m filter), and a walk-then-sit — all pinned
-//      (WK0 = round 4 un-pins them); a moving-walkway concourse at 2 m / 500 ms cadence (WK6-0 = the rule without its
-//      10 s baseline check proves it). V5 isolates the real-Δt claim (V5c = the 2 s claim of round 4 proves it).
+//      (WK0 = round 4 un-pins them); a moving-walkway concourse at 2 m / 500 ms cadence (WK6-0 = round 4 un-pins it).
+//      V5 / V6 / V7 isolate the real-Δt claim, the 10 s baseline and the run check (V5c / V6c / V7c = each removed).
 //   K  the head-unit sources: an iOS COLD CarPlay disconnect is witnessed (K0 = the pre-fix cold path sharing live),
 //      a cold connect clears yesterday's witness (K2/K3), the map mirror cannot create or cancel a witness (K4), and
 //      with no session source the map mirror still works (K5).
@@ -220,7 +220,7 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
 {
   const R = await import(new URL("parkRearm.ts", SRC).href);
   const want = {
-    PARK_REARM_WINDOW_MS: 120_000, PARK_REARM_VEHICULAR_MS: 15_000, PARK_REARM_MIN_M: 250, PARK_REARM_MOVE_RATIO: 0.8,
+    PARK_REARM_WINDOW_MS: 120_000, PARK_REARM_VEHICULAR_MS: 15_000, PARK_REARM_MIN_M: 300, PARK_REARM_MOVE_RATIO: 0.8,
     PARK_REARM_FIX_CREDIT_MS: 2_000, PARK_REARM_BASELINE_MS: 10_000, PARK_REARM_JUMP_FACTOR: 2, PARK_REARM_JUMP_SLACK_M: 50,
     PARK_REARM_ROBUST_N: 5, PARK_REARM_CLAIM_MAX_MS: 3_000,
   };
@@ -249,11 +249,11 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
   const clean = run(drive);
   const withOut = run(drive.map((f, i) => (i === clean - 3 ? { ...f, p: north(f.p, 45) } : f)));
   ok("V4 one in-bound outlier cannot bring the proof forward by more than one fix (median of five)", clean > 0 && withOut >= clean - 1, `clean=${clean} withOutlier=${withOut}`);
-  // V5 CLAIM = speed × REAL Δt (review round 5). The Lite GPS watcher's 8 m filter on a phone moving 2.6 m/s: noise-free
-  // 8 m steps 3.08 s apart, EVERY fix reading 15.1 km/h. Its track covers 63 % of what 15 km/h claims over 3 s — no
-  // credit, never proves. With the claim capped at the 2 s credit cap (round 4) each step "covers" 95 % and it proves.
-  const lite = Array.from({ length: 80 }, (_, i) => ({ t: T + Math.round(i * 3077), p: north(SPOT, 30 + 8 * i), v: 4.2 }));
-  ok("V5 an 8 m-filter track 3.08 s apart reading 15 km/h on every fix never proves (claim = speed × real Δt)", run(lite) === -1, `proved at fix ${run(lite)}`);
+  // V5 CLAIM = speed × REAL Δt (review round 5). The Lite GPS watcher's 8 m filter on a phone moving 3.0 m/s: noise-free
+  // 8 m steps 2.67 s apart, EVERY fix reading 15.1 km/h. Its track covers 71 % of what 15 km/h claims over that time —
+  // no credit, never proves. With the claim capped at the 2 s credit cap (round 4) each step "covers" 95 % and it proves.
+  const lite = Array.from({ length: 90 }, (_, i) => ({ t: T + Math.round(i * 2667), p: north(SPOT, 30 + 8 * i), v: 4.2 }));
+  ok("V5 an 8 m-filter track 2.67 s apart reading 15 km/h on every fix never proves (claim = speed × real Δt)", run(lite) === -1, `proved at fix ${run(lite)}`);
   {
     const d = mkdtempSync(join(tmpdir(), "park-rearm-claim2-")); const f = join(d, "parkRearm.claim2.ts");
     const src = readFileSync(new URL("parkRearm.ts", SRC), "utf8");
@@ -262,6 +262,26 @@ const RECORDED: { t: number; p: { lat: number; lng: number }; v: number; src: st
     const r2 = R2.createParkRearm({ enterMs: DRIVING_ENTER }); let at = -1;
     for (let i = 0; i < lite.length && at < 0; i++) if (r2.note(lite[i].t, lite[i].p.lat, lite[i].p.lng, lite[i].v, SPOT)) at = i;
     ok("V5c NEGATIVE CONTROL (this module with round 4's claim, capped at the 2 s credit cap): the same track proves", at >= 0, `proved at fix ${at} (+${((lite[Math.max(0, at)].t - T) / S).toFixed(0)} s)`);
+    rmSync(d, { recursive: true, force: true });
+  }
+  // V6 the 10 s BASELINE check alone: a 10 km/h jog (2.8 m/s, 1 Hz) zig-zagging ±4 m, every OTHER fix reading 18 km/h.
+  // Each fast fix's one-step run covers its claim (the zig-zag makes every step 8.5 m); over 10 s the track covers 28 m
+  // of the 39 m the speeds claim (72 %) — no credit. V7 the RUN check alone: a 3.2 m/s jog in a straight line, 3 fixes
+  // of every 10 reading 18 km/h: the 10 s baseline covers 86 % of its claim, each fast run 64 % — no credit.
+  // Negative controls: this module with that one check removed proves each track.
+  const zig = Array.from({ length: 200 }, (_, i) => ({ t: T + i * S, p: { ...north(SPOT, 30 + 2.8 * i), lng: SPOT.lng + ((i % 2 ? 4 : -4) / (R_EARTH * Math.cos((SPOT.lat * Math.PI) / 180))) * (180 / Math.PI) }, v: i % 2 ? 5 : 2.8 }));
+  const runs = Array.from({ length: 300 }, (_, i) => ({ t: T + i * S, p: north(SPOT, 30 + 3.2 * i), v: (i % 10) >= 7 ? 5 : 3.2 }));
+  ok("V6 a zig-zag jog with every other fix reading 18 km/h never proves (the 10 s baseline)", run(zig) === -1, `proved at fix ${run(zig)}`);
+  ok("V7 a straight jog with 3-fix 18 km/h runs every 10 s never proves (the run check)", run(runs) === -1, `proved at fix ${run(runs)}`);
+  {
+    const src = readFileSync(new URL("parkRearm.ts", SRC), "utf8");
+    const anchor = "if (base >= 0 && covers(base) && covers(runBase)) credit";
+    const d = mkdtempSync(join(tmpdir(), "park-rearm-checks-"));
+    const variant = async (name: string, repl: string) => { const f = join(d, `parkRearm.${name}.ts`); writeFileSync(f, src.replace(anchor, repl)); return (await import(pathToFileURL(f).href)) as any; };
+    const firstProof = (M: any, fixes: typeof zig) => { const r = M.createParkRearm({ enterMs: DRIVING_ENTER }); for (let i = 0; i < fixes.length; i++) if (r.note(fixes[i].t, fixes[i].p.lat, fixes[i].p.lng, fixes[i].v, SPOT)) return i; return -1; };
+    const noBase = await variant("nobase", "if (base >= 0 && covers(runBase)) credit"), noRun = await variant("norun", "if (base >= 0 && covers(base)) credit");
+    ok("V6c NEGATIVE CONTROL (this rule without the 10 s baseline check): the zig-zag jog proves", src.includes(anchor) && firstProof(noBase, zig) >= 0, `proved at fix ${firstProof(noBase, zig)}`);
+    ok("V7c NEGATIVE CONTROL (this rule without the run check): the straight jog proves", src.includes(anchor) && firstProof(noRun, runs) >= 0, `proved at fix ${firstProof(noRun, runs)}`);
     rmSync(d, { recursive: true, force: true });
   }
 }
@@ -311,9 +331,9 @@ function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): numb
     if (firstVeh == null && v >= kmh(15)) firstVeh = clock;
     if (lp.privacyDebug().latch) armed = { s: i, sinceVeh: (clock - (firstVeh ?? clock)) / S, fromSpot: metres(SPOT, pos) };
   }
-  ok("R1 not re-armed before 15 s at >= 15 km/h and 250 m from the spot", !!armed && armed.sinceVeh >= 15 && armed.fromSpot >= 250, JSON.stringify(armed));
-  // v3 credits a fix only against a 10 s baseline, so the proof lands ~10 s after v2's (28 s): measured 31 s.
-  ok("R2 re-armed within 35 s of pulling away (1 m/s² to 40 km/h)", !!armed && armed.s <= 35, JSON.stringify(armed));
+  ok("R1 not re-armed before 15 s at >= 15 km/h and 300 m from the spot", !!armed && armed.sinceVeh >= 15 && armed.fromSpot >= 300, JSON.stringify(armed));
+  // Credit is judged against a 10 s baseline and the floor is 300 m (Jeff's privacy rule, 2026-09-25 round 5): measured 35 s.
+  ok("R2 re-armed within 40 s of pulling away (1 m/s² to 40 km/h)", !!armed && armed.s <= 40, JSON.stringify(armed));
   ok("R3 the witnessed park is cleared by the re-arm", lp.parkEndedByHeadUnit() === false);
   clock += S; pos = north(pos, 11); lp.noteFix(pos.lat, pos.lng, 11, 0);
   const sh = lp.shareablePosition({ ...pos, speed: 11, heading: 0 });
@@ -339,24 +359,25 @@ function stopAndGo(lp: LP, t0: number, vpk: number, P: number, maxS = 600): numb
   const resumeAt = t + S;
   let armedDt: number | null = null;
   for (let i = 0; i < 40 && armedDt == null; i++) { step(10); if (lp.privacyDebug().latch) armedDt = (t - resumeAt) / S; }
-  ok("L1 a 25 s red light mid-proof: armed within 20 s of pulling away again (measured 18; the red light starts nothing over)", armedDt != null && armedDt <= 20, `armed ${armedDt} s after resuming`);
+  ok("L1 a 25 s red light mid-proof: armed within 25 s of pulling away again (measured 22; the red light starts nothing over)", armedDt != null && armedDt <= 25, `armed ${armedDt} s after resuming`);
 }
 
 // ── E · stop-sign grids and stop-and-go traffic prove (v1 never did: review-priv/s_edges.mts) ────────────────────
 {
   const res: string[] = []; let allOk = true;
-  for (const [blocks, blockM, vk, limit] of [[20, 100, 30, 60], [20, 150, 30, 60], [20, 160, 30, 60], [20, 120, 40, 60], [20, 150, 50, 60], [3, 400, 50, 60]] as const) {
+  for (const [blocks, blockM, vk, limit] of [[20, 100, 30, 65], [20, 150, 30, 65], [20, 160, 30, 65], [20, 120, 40, 65], [20, 150, 50, 65], [3, 400, 50, 65]] as const) {
     const lp = await fresh(); parkWithCarPlay(lp);
     const s2 = grid(lp, utc(18, 0, 0), blocks, blockM, kmh(vk));
     if (s2 == null || s2 > limit) allOk = false;
     res.push(`${blocks}×${blockM}m@${vk}:${s2 ?? "PINNED"}s`);
   }
-  ok("E1 stop-sign grids (100–160 m blocks, 3 s stops) prove within 60 s", allOk, res.join(" "));
+  ok("E1 stop-sign grids (100–160 m blocks, 3 s stops) prove within 65 s (measured 28–59 s at the 300 m floor)", allOk, res.join(" "));
 }
 {
   const res: string[] = []; let allOk = true;
-  // 71 s is the computed bound for the slowest case (250 m at 2/π × 20 km/h = 3.5 m/s); 75 s allows the 2 Hz sampling.
-  for (const [vpk, P, limit] of [[20, 20, 75], [25, 30, 75], [30, 40, 60]] as const) {
+  // Computed bound = 300 m at the half-sine's mean speed 2/π × peak (85 / 68 / 57 s), + 6 s for the 2 Hz sampling and the
+  // median of five.
+  for (const [vpk, P, limit] of [[20, 20, 91], [25, 30, 74], [30, 40, 63]] as const) {
     const lp = await fresh(); parkWithCarPlay(lp);
     const s2 = stopAndGo(lp, utc(18, 30, 0), kmh(vpk), P);
     if (s2 == null || s2 > limit) allOk = false;
@@ -903,7 +924,7 @@ function canyonWalk(seed: number, walkMs: number, sigV: number, every: number, l
 }
 
 // ── Q · slow congestion after a witnessed park STAYS PINNED (round 5: the slow path is removed) ─────────────────────
-// The accepted cost (src/parkRearm.ts header, CARPLAY.md §6c): a phone-only drive in traffic averaging under 250 m per
+// The accepted cost (src/parkRearm.ts header, CARPLAY.md §6c): a phone-only drive in traffic averaging under 300 m per
 // 2 min keeps the shared position and the driver's own marker at the witnessed park until traffic averages above that
 // for ~2 min, or a head unit reconnects. The jam shapes are review-priv3/jam_lp.mts's; 1 Hz fixes while moving.
 {
@@ -1001,9 +1022,8 @@ function ouWalk(seed: number, sigma: number, filterM: number, sitAfterM = 0, pSi
     }
     ok(`WK${i + 1} walker ${name}: ${SEEDS.length} walks × 10 min → all pinned, nothing shared live`, un === 0, `un-pinned seeds ${which.join(",") || "none"}`);
   }
-  // WK6 the 10 s BASELINE check (review-priv4/attacks.mts A): an airport concourse — walking 1.4 m/s, on moving
-  // walkways at 2.15 m/s for 60 s of every 90 s — at the phone watcher's 2 m / 500 ms cadence, σ 8 m, 1 in 10 fixes
-  // reading 15–18 km/h. Each spike's own one-step run can "cover" its claim by noise; the baseline is what refuses it.
+  // WK6 an airport concourse (review-priv4/attacks.mts A): walking 1.4 m/s, on moving walkways at 2.15 m/s for 60 s of
+  // every 90 s — at the phone watcher's 2 m / 500 ms cadence, σ 8 m, 1 in 10 fixes reading 15–18 km/h.
   const walkway = (seed: number) => {
     let a = seed >>> 0;
     const u = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t2 = Math.imul(a ^ (a >>> 15), 1 | a); t2 = (t2 + Math.imul(t2 ^ (t2 >>> 7), 61 | t2)) ^ t2; return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296; };
@@ -1023,21 +1043,11 @@ function ouWalk(seed: number, sigma: number, filterM: number, sitAfterM = 0, pSi
   const W_SEEDS = Array.from({ length: 40 }, (_, i) => i + 1);
   let unW = 0; const whichW: number[] = [];
   for (const sd of W_SEEDS) { const r = await walkLive(fresh(), walkway(sd)); if (!r || r.live != null || r.hu !== true) { unW++; whichW.push(sd); } }
-  {
-    // NEGATIVE CONTROL: this module's rule with the baseline check removed (credit on the run check alone).
-    const d = mkdtempSync(join(tmpdir(), "park-rearm-nobase-")); const f = join(d, "parkRearm.nobase.ts");
-    const src = readFileSync(new URL("parkRearm.ts", SRC), "utf8");
-    const mut = src.replace("if (base >= 0 && covers(base) && covers(runBase)) credit", "if (base >= 0 && covers(runBase)) credit");
-    writeFileSync(f, mut);
-    const RB: any = await import(pathToFileURL(f).href);
-    let unB = 0;
-    for (const sd of W_SEEDS) {
-      const r = RB.createParkRearm({ enterMs: DRIVING_ENTER }); const t0 = utc(18, 0, 0);
-      for (const fx of walkway(sd)) if (r.note(t0 + Math.round(fx.s * S), fx.p.lat, fx.p.lng, fx.v, SPOT)) { unB++; break; }
-    }
-    ok("WK6-0 NEGATIVE CONTROL (this rule with the 10 s baseline check removed): the concourse walker proves on some of the same walks", mut !== src && unB > 0, `${unB}/${W_SEEDS.length} proved`);
-    rmSync(d, { recursive: true, force: true });
-  }
+  if (r4Dir) {
+    let un4 = 0;
+    for (const sd of W_SEEDS) { const r = await walkLive(freshR4(), walkway(sd)); if (r && (r.live != null || r.hu !== true)) un4++; }
+    ok("WK6-0 NEGATIVE CONTROL (round 4 pair, 8a6fa0aa): the concourse walker un-pins on some of the same walks", un4 > 0, `${un4}/${W_SEEDS.length} un-pinned`);
+  } else console.log("  skip WK6-0 negative control: 8a6fa0aa unavailable");
   ok(`WK6 moving-walkway concourse (2 m / 500 ms cadence, σ 8 m, 1 in 10 fast readings): ${W_SEEDS.length} walks × 10 min → all pinned`, unW === 0, `un-pinned seeds ${whichW.join(",") || "none"}`);
 }
 

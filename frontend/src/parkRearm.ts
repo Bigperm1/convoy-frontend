@@ -42,23 +42,23 @@
 // Auto drive is live from its first fix. With no witnessed park nothing here runs; every new witness resets it.
 //
 // MEASURED (tools/sim-qc/park_rearm_test.mts and the review scripts, all through this module; 3 m noise unless noted):
-//   proves at 1 Hz — highway pull-away 24–25 s; urban pull-away 31 s; stop-sign grids 51–71 s; stop-and-go 73 s
-//   (103 s with 10 s standing); 10–20 km/h crawls 63–68 s; Jeff's real 09-19 / 09-23 drive-aways 4 / 17 s past the
-//   250 m floor. At 0.5 Hz the same drives take 26–108 s, at 0.2 Hz 50–105 s (not the stop-and-go with standing).
+//   proves at 1 Hz — highway pull-away 24–25 s; urban pull-away 36 s (50 km/h with a red light every 400 m 67–68 s);
+//   stop-sign grids 64–87 s; stop-and-go 89 s; 10–20 km/h crawls 73–78 s; Jeff's real 09-19 / 09-23 drive-aways
+//   +109 / +146 s from the first recorded row, 6 / 9 s past the 300 m floor. At 0.5 Hz the same drives take 26–94 s,
+//   at 0.2 Hz 50–120 s. Stop-and-go with 10 s standing (2.36 m/s on average) no longer proves: it is congestion.
 //   stays pinned — every walker set 0 of 200: straight 1.4 m/s walkers with 8 / 10 / 12 m GPS noise and 1 in 10
 //   single-fix 15–18 km/h readings, delivered at 1 Hz, 2 Hz, 2 m filter and Lite (8 m filter); walk 350 m then sit;
-//   speed invalid except the spikes; Jeff's 09-25 and 08-29 walks (recorded, densified, 41 s stuck on the multipath
-//   point, 14–31 s of 16 km/h readings first); two consecutive / ping-pong 400 m outliers.
-// ⚠ WHAT IT COSTS: a phone-only drive (no head unit reconnects) in slow congestion — traffic averaging under 250 m per
-// 2 min (2.08 m/s, 7.5 km/h) — keeps the shared position AND the driver's own marker pinned at the witnessed park
-// until traffic averages above that for about 2 min, or a head unit reconnects. Jams averaging 0.6–1.3 m/s never
-// prove (30 min runs). That is the safe direction: the crew sees the car where it was parked, never the person.
+//   speed invalid except the spikes; a moving-walkway concourse; Jeff's 09-25 and 08-29 walks (recorded, densified,
+//   41 s stuck on the multipath point, 14–31 s of 16 km/h readings first); two consecutive / ping-pong 400 m outliers.
+// ⚠ WHAT IT COSTS: a phone-only drive (no head unit reconnects) in slow congestion — traffic averaging under 300 m per
+// 2 min (2.5 m/s, 9 km/h) — keeps the shared position AND the driver's own marker pinned at the witnessed park until
+// traffic averages above that for about 2 min, or a head unit reconnects. Jams averaging 0.6–1.3 m/s never prove
+// (30 min runs). That is the safe direction: the crew sees the car where it was parked, never the person.
 // ⚠ THE RESIDUAL, honestly: GPS alone cannot separate slow traffic from a walker whose reported position really moves
-// at car-like speed. Brisk 2.0 m/s walkers (240 m per 2 min, 10 m under the floor) or 1 m/s drift, with white 8–12 m
-// position noise, still un-pin 1–38 of 200 per set (scratch canyon_r5.mts); a moving-walkway concourse (1.9 m/s on
-// average) with 8 m noise and 1 in 5 fast readings 112 of 200 (review-priv4/attacks.mts A); drift σv 2–3 m/s
-// (240–360 m of wander) 6–499 of 500 (review-priv4/canyon.mts); runners at 15 km/h, cyclists, buses and trains un-pin
-// in 24–65 s (review-priv3/walkers.mts A6) and the car spot then follows them. The fix for that is not in GPS: the OS
+// at car-like speed. Brisk 2.0 m/s walkers or 1 m/s drift, with white 8–12 m position noise, still un-pin 0–20 of 200
+// per set (95 of 7,200 walks; scratch canyon_r5.mts); drift σv 2–3 m/s (240–360 m of wander) 2–499 of 500
+// (review-priv4/canyon.mts); runners at 15 km/h, cyclists, buses and trains un-pin in 24–77 s (review-priv3/walkers.mts
+// A6) and the car spot then follows them. The fix for that is not in GPS: the OS
 // motion classifier (iOS CMMotionActivity `automotive`, Android Activity Recognition IN_VEHICLE) — a NATIVE build-80
 // item (CARPLAY.md §6c) that would also let a jam prove — HYPOTHESIS until a bench receipt.
 //
@@ -70,9 +70,12 @@
 export const PARK_REARM_WINDOW_MS = 120_000;
 // 15 s credited at >= 15 km/h within the fast window (the rule's 15 s as specified 2026-09-25, accumulated).
 export const PARK_REARM_VEHICULAR_MS = 15_000;
-// 250 m, as net displacement inside the fast window and as distance from the witnessed spot: above the walking bound
-// (192 m, brisk 240 m) and 3.8× the largest spread of Jeff's recorded 09-25 walk (64.9 m).
-export const PARK_REARM_MIN_M = 250;
+// 300 m, as net displacement inside the fast window AND as distance from the witnessed spot (one value, both floors):
+// 60 m above a brisk 2.0 m/s walker's 240 m and 4.6× the largest spread of Jeff's recorded 09-25 walk (64.9 m). Raised
+// from 250 m in review round 5 — the architect's call under Jeff's privacy rule: walking away from a witnessed park
+// happens on every park, a phone-only drive-away after one is rare. Measured against 250 m: white-noise canyon walkers
+// un-pinned 329 → 95 of 7,200; a 50 km/h drive with a red light every 400 m proves in 67–68 s instead of 26–27 s.
+export const PARK_REARM_MIN_M = 300;
 // Covered >= 80 % of the claimed distance. Swept against the canyon model (200 seeds each, scratch sweep.mts): 0.7
 // un-pinned 86/200 brisk (2.0 m/s) walkers with 15–17 km/h spikes, 134/200 at 2.1 m/s and 199/200 1.4 m/s σv=2
 // "consistent" walkers; 0.8 → 0/200, 0/200 and 142/200. A car's Doppler speed and track agree to ~0.9+ over 10 s even
@@ -98,7 +101,7 @@ export const PARK_REARM_ROBUST_N = 5;
 // (review-priv4 walker_cadence / walker_compare / sit_after_walk / attacks, review-priv3 drivers, scratch canyon_r5;
 // 200 seeds): the walker sets are 0 un-pinned at every cap once the slow path is gone, but a cap of 5–10 s lets a fix
 // after an unreported stop claim the stop at driving speed — 0.5 Hz noise-free grids, 0.2 Hz grids and 0.1 Hz crawls
-// then never prove. 3 s keeps every round-4 fast-path proof (0.2 Hz grids 105–150 s).
+// then never prove. 3 s kept every round-4 fast-path proof at the 250 m floor (0.2 Hz grids 105–150 s).
 export const PARK_REARM_CLAIM_MAX_MS = 3_000;
 
 export type ParkRearm = {

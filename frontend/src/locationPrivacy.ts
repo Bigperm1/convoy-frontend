@@ -309,8 +309,8 @@ export function noteCarConnected(connected: boolean, source: HeadUnitSource = "m
   // (map.tsx, 2026-08-05) — but a disconnect is unambiguous, so it may bypass that gate.
   // Cleared by the next CONNECT and by a PROVEN drive-away (noteFix + src/parkRearm.ts — one fast fix no longer does
   // it). A head unit unplugged mid-drive therefore pins the unplug-point spot until that proof — measured at 1 Hz:
-  // 24–31 s pulling away, 51–71 s on stop-sign grids, 73–103 s in stop-and-go (src/parkRearm.ts header) — then the
-  // drive goes live again. In slow congestion (traffic averaging under 250 m per 2 min) it stays pinned until traffic
+  // 24–36 s pulling away, 64–87 s on stop-sign grids, 89 s in stop-and-go (src/parkRearm.ts header) — then the
+  // drive goes live again. In slow congestion (traffic averaging under 300 m per 2 min) it stays pinned until traffic
   // averages above that for ~2 min or a head unit reconnects (privacy-favouring; CARPLAY.md §6c).
   // ⚠ Transition-based on purpose: a writer repeating `false` (or `true`) is a no-op
   // here, so this stays correct even if a spurious repeat-writer ever returns.
@@ -468,7 +468,7 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
   // cleared the witness, so the marker and the shared position went live and the car spot moved to where he walked
   // (draw-cmp latch=0→1, hu=1→0, spotAge=59s at 17:14:14). While the witness stands, arming the latch and `driving`
   // (which clears the witness, refreshes the stamp and writes the spot) need src/parkRearm.ts's SUSTAINED proof: in
-  // the last 120 s, 15 s credited at >= 15 km/h, 250 m of robust net displacement, and 250 m from the car spot (passed
+  // the last 120 s, 15 s credited at >= 15 km/h, 300 m of robust net displacement, and 300 m from the car spot (passed
   // in). A head-unit reconnect still clears the witness at once (noteCarConnected). With no witnessed park `rearmOk`
   // is true and every line below is what it was.
   // Gate: tools/sim-qc/park_rearm_test.mts.

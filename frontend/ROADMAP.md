@@ -1066,6 +1066,14 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-CI `8bf9b86a` (code `68b52716`, 2026-09-26 ~09:05 PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "Ship it"
+  (for the privacy follow-up).** Codex's one OTA-CG finding (3 independent reproductions): a CarPlay / AA session that never got a
+  car spot kept the witnessed park only in memory, so a restart + one fast walking fix went live. The witness now has its own key
+  (`src/parkWitness.ts`, `convoy.parkWitness.v1`), written on every head-unit disconnect, read fail-closed at hydrate, cleared only
+  by a reconnect or the re-arm proof. park_rearm 162 ok (HF13–HF13e + negative controls). Relocked 3 regions + hash lock.
+  Field receipts: OTA-CG held overnight 09-25→26 (`parked=1 hu=1 gps=withheld` 14.3 h until the 08:27 connect) and both disconnects
+  (18:07, 08:50) released GPS with fgLive=0. Pre-existing gaps listed as follow-ups (lost AA disconnect after a >90 s drive; witness
+  write/remove failures not retried; iOS death while attached with no fix).
 - **✅ PUBLISHED in OTA-CH `3bd9745e` (code `9203b8a2`, 2026-09-25 evening PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "Ship it"
   (for "Ship the CarPlay zoom update tonight?").** CarPlay / Android Auto camera — Jeff 09-25: *"on carplay the crew button does not
   have the zoom in timer on it to zoom back in … the carplay zoomout seems like its capped at a distance and is not smooth"* → "It

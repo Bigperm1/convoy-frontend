@@ -191,8 +191,9 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   };
   const CP = scopeProxy(C, unresolved);
   for (const n of ["clampBias", "zoomLog", "zoomHoldRelease", "carCamJob", "getCam", "applyZoomNow", "applyZoomEased", "reassertAaFollow"]) C[n] = bind(liftVar(csf, "CarMapView", n), CP);
-  // Present since 2026-09-25 round 3 / round 10 (holdFly) — an older revision replayed as a negative control has no such closure.
-  for (const n of ["takeOverNativeCam", "ownerSetPose", "nativeTailUntil", "noteWriteInTail", "noteCamObserved", "holdFly"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
+  // Present since 2026-09-25 round 3 / round 10 (holdFly — removed in round 11; kept here so b68bda7e replays) / round 11
+  // (noteCamCall) — an older or newer revision replayed as a negative control lacks some of these closures.
+  for (const n of ["takeOverNativeCam", "ownerSetPose", "nativeTailUntil", "noteWriteInTail", "noteCamObserved", "holdFly", "noteCamCall"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
   // The render-time EFFECTS that write the camera (they run after a render whose deps changed):
   const layoutEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| mapW <= 0\) return;/.test(t)), CP);        // 🔒 car-zoom-apply-now
   const coldStartEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| !hasFix \|\| !cameraRef\.current\) return;/.test(t)), CP);   // 🔒 car-cam-coldstart-snap
@@ -218,6 +219,7 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
     // props (CarMapView JSX)
     cameraRef, getCam: C.getCam, readyRef: C.lockReadyRef, camHeadingOverrideRef: C.camHdgOverrideRef, camZoomOutRef: C.camZoomRef,
     camPitchOutRef: C.camPitchRef, returnFlyRef: C.returnFlyRef, camJob: C.carCamJob, camPoseOutRef: C.camWantRef, zoomSnapRef: C.zoomSnapRef, liveZoomRef: C.carLiveZoomRef,
+    camCallOut: C.noteCamCall,   // round 11 (`cam-lat`); undefined when replaying an older revision
     drawPosOutRef: ref(null), drawSinkRef: ref(null), onFirstCam: () => {}, mapRef: ref(null), speedMs: 0, probeRole: "car", sizePt: 50, lenUnits: 4.5,
     // internals
     render: ref({ lat: cam.lat, lng: cam.lng, heading: 90 }), anim: ref(null), raf: ref(null), rafIsTimer: ref(false), lastArmAt: ref(0), fastPumpRun: ref(0),

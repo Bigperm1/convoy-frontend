@@ -831,51 +831,81 @@ export function runDelayScenarios(src: Src): Result[] {
   }
 
   // ════ Round 10 (three verified findings against e492b0e1) — each reproduction, through the production code ════════
+  /** Every one-vsync zoom change above `thr` in [a, b] that no native animation made. */
+  const cutList = (h: HU, a: number, b: number, thr: number) => { const out: { t: number; dz: number }[] = []; for (let i = 1; i < h.frames.length; i++) { const f = h.frames[i]; if (f.t < a || f.t > b || f.animStep) continue; const dz = Math.abs(f.zoom - h.frames[i - 1].zoom); if (dz > thr) out.push({ t: f.t, dz }); } return out; };
   // LR — a repair try due on the tick the 15 s zoom hold LAPSES (verify_zoom_fight_1 race_trace / race.mts): parked,
   // 4 × −0.5 (held framing 14.8), one foreign write to z 16.0 or 12 made 140–195 ms before the lapse, 1 ms apart
   // (e492b0e1: the try flew to the old 14.8 while the release eased from under it, then cut 1.40 / 1.58 levels on
-  // landing — lost writes 151–166 ms before the lapse on iOS, 151–183 on Android). Expected: no one-vsync zoom change
-  // above CUT that no native animation made (the release's own ease-in-out peaks at ~0.10 for 4.8 levels) and home at 16.8.
+  // landing). Round 10's stand-down (a lapsed, unreleased hold is busy) is KEPT: no loop try at or after the lapse tick.
+  // ROUND 11 (the loop never flies): a lost write the loop catches BEFORE the lapse is restored by ONE instant push — a
+  // one-vsync cut of exactly the lost write's own size (|z − 14.8|), within a vsync of its `op=push` row — and the release
+  // then eases home from the restored framing. Any other cut above CUT, a second restore, or a try at/after the lapse fails.
   for (const android of [false, true]) for (const lostZ of [16.0, 12]) {
-    const bad: string[] = []; let worst = 0, n = 0;
+    const bad: string[] = []; let worst = 0, n = 0, restored = 0;
+    const own = Math.abs(lostZ - 14.8);
     for (let d = 140; d <= 195; d++) {
       const h = hPark(unit({ android }));
       for (let k = 0; k < 4; k++) { h.press(-0.5); h.advance(100); }
       const lapse = h.C.zoomHoldUntilRef.current - (h.abs - h.now);
       hAt(h, lapse - d); const tInj = h.now;
       native(h, { zoomLevel: lostZ }); h.advance(6000); n++;
-      const c = h.maxCut(tInj + 20, h.now);
-      worst = Math.max(worst, c.m);
-      if (c.m > CUT || Math.abs(h.cam.zoom - 16.8) > 0.01) bad.push(`−${d} ms: cut ${f3(c.m)} at lapse+${Math.round(c.at - lapse)}, end ${f3(h.cam.zoom)}`);
+      const tries = h.rows(/cam-repair surf=car op=push/).filter((r) => r.t >= tInj);
+      const lateTry = tries.find((r) => r.t >= lapse);
+      const cuts = cutList(h, tInj + 20, h.now, CUT);
+      const restore = tries.length === 1 && tries[0].t < lapse ? cuts.filter((c) => Math.abs(c.dz - own) < 0.01 && c.t - tries[0].t >= 0 && c.t - tries[0].t <= VS + 1) : [];
+      const other = cuts.filter((c) => !restore.includes(c));
+      if (restore.length) restored++;
+      worst = Math.max(worst, ...other.map((c) => c.dz));
+      if (lateTry || other.length || restore.length > 1 || Math.abs(h.cam.zoom - 16.8) > 0.01)
+        bad.push(`−${d} ms: ${lateTry ? `a try at lapse+${Math.round(lateTry.t - lapse)}; ` : ""}${other.length ? `cut ${f3(other[0].dz)} at lapse+${Math.round(other[0].t - lapse)}; ` : ""}end ${f3(h.cam.zoom)}`);
     }
-    ok(`LR${android ? 2 : 1}${lostZ === 12 ? "b" : "a"}`, `a foreign write to z ${lostZ} made 140–195 ms before the 15 s hold lapses (1 ms steps, ${n} runs), 4 × −0.5 held at 14.8, parked: no cut above ${CUT} and home at 16.8 — a try due on the lapse tick stands down (${android ? "Android" : "iOS"})`,
-      bad.length === 0, `(worst one-vsync zoom change outside a native animation ${f3(worst)}${bad.length ? `; ${bad.length} runs FAIL, e.g. ${bad.slice(0, 3).join("; ")}` : ""})`);
+    ok(`LR${android ? 2 : 1}${lostZ === 12 ? "b" : "a"}`, `a foreign write to z ${lostZ} made 140–195 ms before the 15 s hold lapses (1 ms steps, ${n} runs), 4 × −0.5 held at 14.8, parked: no loop try at or after the lapse (it stands down), no cut above ${CUT} but the loop's one instant restore of the lost write (${f3(own)}, before the lapse), home at 16.8 (${android ? "Android" : "iOS"})`,
+      bad.length === 0, `(restored before the lapse in ${restored} of ${n} runs — one-vsync cut ${f3(own)} each; worst other cut ${f3(worst)}${bad.length ? `; ${bad.length} runs FAIL, e.g. ${bad.slice(0, 3).join("; ")}` : ""})`);
   }
 
-  // FL — A FLY'S LANDING WAITS FOR THE MAP (verify_zoom_fight_1 fight3 T11): every head-unit fly — the loop's 280 ms
-  // repair fly, the Crew 1.8 s return, the return re-aimed by a '+', the short fly a recenter starts inside crewFit's
-  // easeTo — with its native start 0 / 150 / 300 / 600 ms late, parked. e492b0e1: Android cut 0.62 / 4.1 levels on the
-  // repair fly at 150 / 300 ms (the landing 'none' cancels a late fly), 0.29 / 1.46 on the Crew return at 300 / 600 ms;
-  // iOS cut 4.8 at 600 ms (a fly that has not started is cut to its end). Expected: no zoom change above STEP_BAR and no
-  // pitch / heading change above 1° that no native animation made; the flown framing held at the end.
+  // FL — round 10's "a fly's landing waits for the map" (camFlyHold) is GONE (round 11, the architect's decision C): an
+  // owner fly is owned until its JS deadline + RETURN_FLY_GRACE_MS again, as at e492b0e1, so a native fly that starts
+  // LATE is cut by its own landing push. That is a DOCUMENTED RESIDUAL (CARPLAY.md), PINNED here at the harness's numbers
+  // so any change is noticed (like the privacy suite's KF1) — HYPOTHESIS for a head unit: its real start delay is
+  // unmeasured (the `cam-lat` crumb measures it on the next drive). FL1/FL2 are no longer a fly at all: the loop never
+  // flies — its corrective write is ONE instant push, a one-vsync cut of exactly the lost write's size (4.80), pitch and
+  // heading untouched, no flyTo. Every case still ends on the flown / written pose.
   const flyKinds: [string, (h: HU) => void, number][] = [
-    ["the loop's 280 ms repair fly (a foreign write to z 12)", (h) => native(h, { zoomLevel: 12 }), 16.8],
+    ["the loop's repair of a foreign write to z 12 — ONE instant push, never a fly", (h) => native(h, { zoomLevel: 12 }), 16.8],
     ["the Crew 1.8 s return (wide crew)", (h) => h.crew(), 16.8],
     ["the Crew return re-aimed by a '+' 1.5 s into it", (h) => { h.crew(); h.advance(8500); h.press(0.5); }, 17.3],
     ["the short fly a recenter starts inside crewFit's easeTo (nearby crew)", (h) => { h.C.__peers = []; h.crew(); h.advance(300); h.gesture({ kind: "recenter" }); }, 16.8],
   ];
+  /** Per start delay 0 / 150 / 300 / 600 ms: [zoom levels, pitch °, heading °] of the largest one-vsync change no native
+   *  animation made (measured 2026-09-25 on this tree; FL3–FL8 identical at e492b0e1 — see the round-11 commit). */
+  const Z: [number, number, number] = [0, 0, 0];
+  const FL_PIN: [number, number, number][][] = [
+    [[4.8, 0, 0], [4.8, 0, 0], [4.8, 0, 0], [4.8, 0, 0]],                           // FL1 iOS: the loop's instant restore
+    [[4.8, 0, 0], [4.8, 0, 0], [4.8, 0, 0], [4.8, 0, 0]],                           // FL2 Android
+    [Z, Z, Z, Z],                                                                    // FL3 iOS Crew return
+    [Z, [0.029, 0.2, 0.4], [0.290, 1.8, 3.6], [1.455, 9.0, 18.0]],                   // FL4 Android Crew return
+    [Z, Z, Z, [4.244, 23.1, 46.2]],                                                  // FL5 iOS re-aimed return
+    [Z, [0.205, 0.9, 1.8], [1.962, 9.8, 19.5], [4.345, 23.7, 47.5]],                 // FL6 Android re-aimed return
+    [Z, Z, Z, Z],                                                                    // FL7 iOS short fly in the easeTo
+    [Z, [0.037, 0.9, 1.8], Z, Z],                                                    // FL8 Android short fly
+  ];
   let fi = 0;
   for (const [name, act, wz] of flyKinds) for (const android of [false, true]) {
+    const pin = FL_PIN[fi]; const id = `FL${++fi}`;
     const per: string[] = []; let pass = true;
-    for (const D of [0, 150, 300, 600]) {
+    [0, 150, 300, 600].forEach((D, k) => {
       const h = hPark(unit({ android, animStartDelayMs: D }));
       const t0 = h.now; act(h); h.advance(12000);
       const z = h.maxCut(t0 + 20, h.now), p = h.maxPitchCut(t0 + 20, h.now), hd = h.maxHeadingCut(t0 + 20, h.now);
-      const good = z.m <= STEP_BAR && p.m <= 1 && hd.m <= 1 && at3(h, wz, 45, 90);
+      const loop = h.rows(/cam-repair surf=car op=(push|fly)/).filter((r) => r.t >= t0).length, loopFly = h.rows(/cam-repair surf=car op=fly/).length;
+      const flyRows = h.rows(/cam-return-fly surf=car/).filter((r) => r.t >= t0).length;
+      const [pz, pp, ph] = pin[k];
+      const good = Math.abs(z.m - pz) <= 0.001 && Math.abs(p.m - pp) <= 0.051 && Math.abs(hd.m - ph) <= 0.051 && at3(h, wz, 45, 90) && loopFly === 0
+        && (fi > 2 || (loop === 1 && flyRows === 0));
       if (!good) pass = false;
-      per.push(`${D} ms: ${good ? "ok" : "FAIL"} zoom ${f3(z.m)} pitch ${p.m.toFixed(1)}° heading ${hd.m.toFixed(1)}°, end ${poseOf(h)}`);
-    }
-    ok(`FL${++fi}`, `${name}, native start 0 / 150 / 300 / 600 ms late, parked: the landing never cuts the fly (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
+      per.push(`${D} ms: ${good ? "as pinned" : `CHANGED (pinned ${pz}/${pp}°/${ph}°)`} zoom ${f3(z.m)} pitch ${p.m.toFixed(1)}° heading ${hd.m.toFixed(1)}°, end ${poseOf(h)}${fi <= 2 ? `, loop pushes ${loop}, flies ${flyRows}` : ""}`);
+    });
+    ok(id, `RESIDUAL (pinned): ${name}, native start 0 / 150 / 300 / 600 ms late, parked (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
   }
 
   // RN — a driver who taps again right after a repair is NOT rationed (verify_zoom_storm_1 ration3/4/5): Codex's lost
@@ -899,6 +929,232 @@ export function runDelayScenarios(src: Src): Result[] {
     const rr = repairRows(h, tl, h.now);
     ok(`RN${++ni}`, `Codex's lost write ×6, ${G} ms apart, each repair followed ${D} ms later by a second ${kind}; then a 7th lost write (150 ms native start delay, nearby crew, parked): the 7th is repaired, not rationed (${android ? "Android" : "iOS"})`,
       best <= 1000, `(${n2} second intents; 7th lost write → longest stretch off 16.8/45/90 ${Math.round(best)} ms; loop after it ${ops(rr)})`);
+  }
+
+  // ════ Round 11 (four confirmed mediums against b68bda7e + the rationing / measuring decisions) — through the production code
+  const M_PER_DEG_LNG = (lat: number) => 111320 * Math.cos((lat * Math.PI) / 180);
+  const flyCalls = (h: HU) => { const t: number[] = []; const o = h.C.cameraRef.current.setCamera; h.C.cameraRef.current.setCamera = (x: any) => { if (x.animationMode === "flyTo") t.push(h.now); return o(x); }; return t; };
+  /** A parked map whose nose lead-in lag has NOT converged: the car turned 90 → 130 just before it stopped, so the camera
+   *  heading written (the lag) ≠ the car's heading (verify_zoom_fight_1 hdg_delay.mts). */
+  const turnedThenParked = (h: HU) => {
+    const S = h.S, r = S.render.current;
+    S.anim.current = { fromLat: r.lat, fromLng: r.lng, fromHdg: 90, toLat: r.lat, toLng: r.lng + 1e-6, toHdg: 130, start: h.abs, dur: 1100, armedAt: h.abs, stepped: false };
+    if (S.raf.current == null) S.raf.current = S.requestAnimationFrame(S.step);
+    h.advance(5000);
+  };
+
+  // RH — THE RESTORE IS THE WRITTEN POSE, HEADING INCLUDED (b68 medium 1: the loop's repair fly flew to the CAR's heading,
+  // not the written one — a parked map turned ~20° toward the car). (a) a lost write (a foreign 'none' to z 12) on that
+  // parked map; (b) a spurious verdict: camera reports delivered 1.5 s late, one '+' press (hdg_delay.mts). Expected: the
+  // camera ends on the WRITTEN heading and zoom (≤ 0.05° / 0.002), never turned toward the car's 130°; no flyTo at all.
+  for (const [kind, rep] of [["a lost write (a foreign write to z 12)", 0], ["a spurious verdict (reports 1.5 s late) after a '+' press", 1500]] as const) for (const android of [false, true]) {
+    const h = hPark(unit({ android, reportDelayMs: rep }));
+    turnedThenParked(h);
+    const fl = flyCalls(h);
+    const t0 = h.now;
+    if (rep) { h.press(0.5); h.advance(600); } else native(h, { zoomLevel: 12 });
+    const w = h.C.camWantRef.current;
+    h.advance(5000);
+    const rr = repairRows(h, t0, h.now);
+    const hOff = angOff(h.cam.heading, w.heading), zOff = Math.abs(h.cam.zoom - w.zoom);
+    ok(`RH${rep ? 2 : 1}${android ? "a" : ""}`, `${kind}, parked, the nose lead-in not converged (written heading ≠ the car's 130°): the camera ends on the WRITTEN heading and zoom, no flyTo (${android ? "Android" : "iOS"})`,
+      hOff <= 0.05 && zOff <= 0.002 && fl.length === 0 && (rep ? true : rr.some((r) => / op=push /.test(r.row))),
+      `(written ${f3(w.zoom)} / ${w.heading.toFixed(2)}°, camera ${f3(h.cam.zoom)} / ${h.cam.heading.toFixed(2)}° — ${hOff.toFixed(2)}° off; car 130°; flyTo ${fl.length}; loop ${ops(rr)})`);
+  }
+
+  // RP — NO FREEZE, NO HOP FROM THE LOOP ON A MOVING CAR (b68 mediums 2 and 4). (a) Moving (15 m/s), Crew, its 1.8 s return
+  // fly, camera reports delivered 0 / 100 / 250 / 500 / 1000 ms late (verify_zoom_storm_2 movingland.mts — b68: the centre
+  // stood still up to 1082 ms after the fly and the landing hop grew 25.9 → 39.5 m with the delay): the centre never stands
+  // still > 100 ms and the landing hop does not depend on report timing (the 0 ms value ± 0.1 m). (b) A spurious corrective
+  // write (reports 1.5 s late + compass; a map reporting 0.5 off + the AppState re-assert), the car pulling away 50 / 300 /
+  // 700 ms after it (pullaway.mts — b68: a no-op corrective FLY held up to 1.34 s, an 18 m one-frame hop): no flyTo, the
+  // camera centre never still > 50 ms while driving, never > 0.5 m from the car.
+  for (const android of [false, true]) {
+    const per: string[] = []; let pass = true, hop0 = NaN;
+    for (const delay of [0, 100, 250, 500, 1000]) {
+      const h = unit({ android, reportDelayMs: delay });
+      const fl = flyCalls(h);
+      h.S.speedRef.current = 15; h.crew();
+      const tA = h.now; while (!fl.length && h.now - tA < 15000) h.advance(1);
+      h.advance(1700);
+      let still = 0, stillMax = 0, hopMax = 0, prevLng = h.cam.lng, prevFlying = h.animating;
+      for (let i = 0; i < 2500; i++) {
+        h.advance(1);
+        const hop = Math.abs(h.cam.lng - prevLng) * M_PER_DEG_LNG(h.cam.lat);
+        if (hop < 1e-6) { still++; stillMax = Math.max(stillMax, still); } else still = 0;
+        if (!h.animating && !prevFlying) hopMax = Math.max(hopMax, hop);
+        prevLng = h.cam.lng; prevFlying = h.animating;
+      }
+      if (delay === 0) hop0 = hopMax;
+      const good = fl.length === 1 && stillMax <= 100 && Math.abs(hopMax - hop0) <= 0.1;
+      if (!good) pass = false;
+      per.push(`+${delay} ms: still ${stillMax} ms, hop ${hopMax.toFixed(2)} m, flies ${fl.length}`);
+    }
+    ok(`RP1${android ? "a" : ""}`, `moving, the Crew return fly with camera reports delivered 0–1000 ms late: the centre never stands still > 100 ms after it and the landing hop does not grow with the report delay (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
+  }
+  for (const android of [false, true]) for (const [name, opts, act] of [["reports 1.5 s late + compass", { reportDelayMs: 1500 }, (h: HU) => h.gesture({ kind: "compass" })], ["a map reporting 0.5 off + the AppState re-assert", { reportZoomBias: 0.5 }, (h: HU) => h.reassert()]] as const) {
+    const per: string[] = []; let pass = true;
+    for (const D of [50, 300, 700]) {
+      const h = hPark(unit({ android, ...opts }));
+      h.advance(1500);
+      const fl = flyCalls(h);
+      const tA = h.now; act(h);
+      // (op=push|fly: an older revision's corrective write flew — replayed as a negative control, it must fail on the freeze)
+      while (!h.rows(/cam-repair surf=car op=(push|fly)/).some((r) => r.t >= tA) && h.now - tA < 10000) h.advance(1);
+      const tp = h.rows(/cam-repair surf=car op=(push|fly)/).find((r) => r.t >= tA)?.t;
+      if (tp == null) { per.push(`D ${D}: NO corrective write`); pass = false; continue; }
+      h.advance(D); h.setMoving(true);
+      let still = 0, stillMax = 0, gapMax = 0, prevLng = h.cam.lng;
+      for (let i = 0; i < 4000; i++) {
+        h.advance(1);
+        const r = h.S.render.current;
+        gapMax = Math.max(gapMax, Math.abs(h.cam.lng - r.lng) * M_PER_DEG_LNG(h.cam.lat));
+        const hop = Math.abs(h.cam.lng - prevLng) * M_PER_DEG_LNG(h.cam.lat);
+        if (hop < 1e-6) { still++; stillMax = Math.max(stillMax, still); } else still = 0;
+        prevLng = h.cam.lng;
+      }
+      const good = fl.length === 0 && stillMax <= 50 && gapMax <= 0.5;
+      if (!good) pass = false;
+      per.push(`pull away ${D} ms after the corrective write: flyTo ${fl.length}, still ${stillMax} ms, gap ≤ ${gapMax.toFixed(2)} m`);
+    }
+    ok(`RP2${android ? "a" : ""}${name.startsWith("a map") ? "b" : ""}`, `a spurious corrective write (${name}), then the car pulls away 50 / 300 / 700 ms later: no flyTo, the camera never freezes or lags the car (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
+  }
+
+  // RZ — NO FLY CHAIN FROM THE LOOP (b68 medium 3, verify_zoom_storm_2 chain.mts: one lost write, then an owner intent
+  // every 0.3–1.3 s re-aimed the loop's fly forever — 460–2000 flyTo / 10 min with as many uncapped cam-return-fly rows).
+  // One lost write (a foreign 'none' to 15 / 0 / 0), then an AppState re-assert / a relayout / a recenter every P ms for
+  // 30 s, parked: ZERO flyTo and zero cam-return-fly rows, ≤ 12 loop rows a minute, the camera home at 16.8 / 45.
+  let zi = 0;
+  for (const android of [false, true]) for (const [fn, f] of [["AppState re-assert", (h: HU) => h.reassert()], ["relayout", (h: HU, k: number) => h.relayout(16.8 + (k % 2) * 0.01)], ["recenter", (h: HU) => h.gesture({ kind: "recenter" })]] as const) {
+    const per: string[] = []; let pass = true;
+    for (const P of [300, 700, 1300]) {
+      const h = hPark(unit({ android }));
+      const fl = flyCalls(h);
+      const t0 = h.now, l0 = h.log.length;
+      native(h, { zoomLevel: 15, pitch: 0, heading: 0 });
+      h.advance(500);
+      let k = 0; while (h.now - t0 < 30000) { (f as any)(h, k++); h.advance(P); }
+      h.advance(2000);
+      const rf = h.log.slice(l0).filter((r) => r.split(" ")[1] === "cam-return-fly").length;
+      const rr = repairRows(h, t0, h.now);
+      const home = Math.abs(h.cam.zoom - 16.8) < 0.02 && Math.abs(h.cam.pitch - 45) < 0.5;
+      const good = fl.length === 0 && rf === 0 && perWindow(rr.map((r) => r.t), 60000) <= 12 && home;
+      if (!good) pass = false;
+      per.push(`P ${P}: flyTo ${fl.length}, cam-return-fly ${rf}, loop ${ops(rr)}, camera ${poseOf(h)}`);
+    }
+    ok(`RZ${++zi}`, `one lost write, then an ${fn} every 300 / 700 / 1300 ms for 30 s, parked: no fly chain — zero flyTo, zero cam-return-fly rows, the camera home (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
+  }
+
+  // RS — EVERY TRY RESOLVES (round 11 rationing): walking the cam-repair rows in order, every op=push is followed by
+  // op=ok | op=giveup | op=superseded, or by the same episode's next try (n + 1) — never left open at the end. A try an
+  // owner intent supersedes BEFORE its verdict is dropped (`counted=0`, never rationed); one already judged stays counted.
+  // Shapes: (1) Codex's lost write ×5, each repair followed 100 ms later by a recenter (RN1); (2) a map deaf for 8 s (GS);
+  // (3) a map that never agrees (0.1 off) for 3 min, then a recenter.
+  const resolves = (rr: { t: number; row: string }[]) => {
+    let open: number | null = null; const bad: string[] = [];
+    for (const r of rr) {
+      const op = / op=(\w+)/.exec(r.row)![1], n = Number(/ n=(\d+)/.exec(r.row)![1]);
+      if (op === "push") { if (open != null && n !== open + 1) bad.push(`push n=${n} at ${r.t} with n=${open} unresolved`); open = n; }
+      else if (op === "ok" || op === "giveup" || op === "superseded") open = null;
+    }
+    if (open != null) bad.push(`push n=${open} left unresolved at the end`);
+    return bad;
+  };
+  {
+    const cases: [string, () => { h: HU; t0: number }][] = [
+      ["Codex's lost write ×5, 6 s apart, a recenter 100 ms after each repair", () => {
+        const h = hPark(unit({ animStartDelayMs: 150 })); h.C.__peers = []; const t0 = h.now; let seen = 0;
+        const runUntil = (t: number) => { while (h.now < t) { h.advance(10); const n = h.rows(/cam-repair surf=car op=push/).length; if (n > seen) { seen = n; h.advance(100); h.gesture({ kind: "recenter" }); } } };
+        for (let k = 0; k < 5; k++) { runUntil(t0 + k * 6000); h.crew(); h.advance(720); h.gesture({ kind: "recenter" }); }
+        runUntil(t0 + 5 * 6000 + 10000); return { h, t0 };
+      }],
+      ["a map deaf to every write for 8 s", () => {
+        const h = hPark(unit()); const set0 = h.C.cameraRef.current.setCamera; let deafUntil = 0;
+        h.C.cameraRef.current.setCamera = (o: any) => { if (h.now < deafUntil) return; set0(o); };
+        const t0 = h.now; native(h, { zoomLevel: 12, pitch: 20 }); deafUntil = t0 + 8000; h.advance(40000); return { h, t0 };
+      }],
+      ["a map that never agrees (0.1 off) for 3 min, then a recenter", () => {
+        const h = hPark(unit({ reportZoomBias: 0.1 })); const t0 = h.now; h.advance(180000); h.gesture({ kind: "recenter" }); h.advance(100); return { h, t0 };
+      }],
+    ];
+    let si = 0;
+    for (const [name, run] of cases) {
+      const { h, t0 } = run();
+      const rr = repairRows(h, t0, h.now), bad = resolves(rr);
+      const sup0 = rr.filter((r) => / op=superseded .*counted=0/.test(r.row)).length, sup1 = rr.filter((r) => / op=superseded .*counted=1/.test(r.row)).length;
+      const drops = rr.reduce((a, r) => a + Number(/ drop=(\d+)/.exec(r.row)?.[1] ?? 0), 0);
+      const cw = rr.filter((r) => / op=push /.test(r.row)).map((r) => r.t);
+      const extra = si === 0 ? sup0 >= 1 && h.C.camRepairRef.current.unconfirmed.length === 0 : si === 1 ? rr.some((r) => / op=giveup/.test(r.row)) && rr.some((r) => / op=ok/.test(r.row)) : sup1 === 1;
+      ok(`RS${++si}`, `every try resolves (ok | giveup | superseded, or the same episode's next try): ${name}`, bad.length === 0 && drops === 0 && extra,
+        `(${ops(rr)}; superseded counted=0 ×${sup0}, counted=1 ×${sup1}; most corrective writes in a minute ${perWindow(cw, 60000)}; unconfirmed now ${h.C.camRepairRef.current.unconfirmed.length}; drop= ${drops}${bad.length ? `; UNRESOLVED: ${bad.slice(0, 3).join("; ")}` : ""})`);
+    }
+  }
+
+  // RR — THE BOUND WHEN EVERY TRY IS SUPERSEDED (round 11 rationing): a map (0.1 off) that then STOPS reporting, and an
+  // owner intent (a recenter) 0.5 s after every try — before the 1 s no-report verdict — for 2 min. Every try is dropped
+  // (`counted=0`), so the never-agree cap (6) never applies: the HARD ceiling does — ≤ 30 corrective writes a minute —
+  // and ≤ 12 rows a minute (the rest counted into `drop=`). Tries are detected from the loop's state (a row can be capped).
+  for (const android of [false, true]) {
+    const h = hPark(unit({ android, reportZoomBias: 0.1 })); h.advance(60000);   // the never-agree episode given up; a minute on
+    h.C.noteCamObserved = () => {};                                               // from here the map delivers no camera report
+    const t0 = h.now; const tries: number[] = []; let lastOpen = h.C.camRepairRef.current.open;
+    h.gesture({ kind: "recenter" });
+    while (h.now - t0 < 120000) {
+      h.advance(10);
+      const o = h.C.camRepairRef.current.open;
+      if (o !== 0 && o !== lastOpen) { tries.push(h.now); lastOpen = o; h.advance(500); h.gesture({ kind: "recenter" }); }
+    }
+    const rr = repairRows(h, t0, h.now), rowsT = rr.map((r) => r.t);
+    const drops = rr.reduce((a, r) => a + Number(/ drop=(\d+)/.exec(r.row)?.[1] ?? 0), 0);
+    // (the first recenter supersedes the given-up episode's last slow retry, judged before the reports stopped: counted=1)
+    const after = rr.filter((r) => r.t > t0);
+    const sup0 = after.filter((r) => / op=superseded .*counted=0/.test(r.row)).length, sup1 = after.filter((r) => / op=superseded .*counted=1/.test(r.row)).length;
+    const un = h.C.camRepairRef.current.unconfirmed.length;
+    ok(`RR1${android ? "a" : ""}`, `a map that stops reporting + a recenter 0.5 s after every try (none ever judged), 2 min: every try dropped, never counted; bounded by the hard ceiling (≤ 30 corrective writes a minute) and ≤ 12 rows a minute (the rest in drop=) (${android ? "Android" : "iOS"})`,
+      perWindow(tries, 60000) <= 30 && perWindow(tries, 60000) >= 20 && perWindow(rowsT, 60000) <= 12 && drops > 0 && sup1 === 0 && un <= 1,
+      `(tries ${tries.length} in 2 min, most in a minute ${perWindow(tries, 60000)}; rows ${ops(rr)} — most in a minute ${perWindow(rowsT, 60000)}, drop= ${drops}; after the first recenter: superseded counted=0 ×${sup0} / counted=1 ×${sup1}; unconfirmed now ${un})`);
+  }
+
+  // RL — THE LATENCY CRUMB through the production code (round 11: measure instead of modelling). Parked, Crew (wide crew):
+  // crewFit's 600 ms easeTo, then 7 s later the 1.8 s return fly — every native animation starting D = 0 / 150 / 300 /
+  // 600 ms late, camera reports delivered 0 or 100 ms late. Expected rows: `cam-lat surf=car kind=ease ms=600` and
+  // `kind=fly ms=1800`, each start ∈ [D, D + 2 vsync], end ∈ [D + ms + 50 (the idle), + 3 vsync], lag = the report delay;
+  // then a 10-minute moving drive (a press every 7 s, a Crew every 60 s): ≤ 20 rows for the session, ≥ 3 s apart.
+  const latRows = (h: HU) => h.rows(/ cam-lat surf=car/).map((r) => ({ t: r.t, row: r.row.slice(r.row.indexOf("cam-lat")) }));
+  const num = (row: string, k: string) => { const m = new RegExp(` ${k}=(-?\\d+|-)`).exec(row); return m && m[1] !== "-" ? Number(m[1]) : NaN; };
+  for (const android of [false, true]) for (const lagMs of [0, 100]) {
+    const per: string[] = []; let pass = true;
+    for (const D of [0, 150, 300, 600]) {
+      const h = hPark(unit({ android, animStartDelayMs: D, reportDelayMs: lagMs }));
+      const t0 = h.now; h.crew(); h.advance(12000);
+      const rows = latRows(h).filter((r) => r.t >= t0);
+      const pick = (k: string, ms: number) => rows.find((r) => new RegExp(` kind=${k} ms=${ms} `).test(r.row));
+      // The END is what the map did: on Android a fly that starts late is CANCELLED by its own landing push at its JS
+      // deadline + RETURN_FLY_GRACE_MS (the pinned FL residual), so its end reads that cut — end − start < ms.
+      const grace = (src.mods.RETURN_FLY_GRACE_MS as number) ?? 100;
+      const chk = (r: { row: string } | undefined, ms: number, cut: boolean) => {
+        if (!r) return false;
+        const st = num(r.row, "start"), en = num(r.row, "end"), lg = num(r.row, "lag");
+        const e0 = (cut ? Math.min(D, grace) : D) + ms + 50;
+        return st >= D && st <= D + 2 * VS + 1 && en >= e0 && en <= e0 + 3 * VS + 1 && lg === lagMs;
+      };
+      const e = pick("ease", 600), f = pick("fly", 1800);
+      const good = chk(e, 600, false) && chk(f, 1800, android);
+      if (!good) pass = false;
+      per.push(`D ${D}: ${e ? e.row.replace("cam-lat surf=car ", "") : "no ease row"} · ${f ? f.row.replace("cam-lat surf=car ", "") : "no fly row"}${good ? "" : " ✗"}`);
+    }
+    ok(`RL1${android ? "a" : ""}${lagMs ? "l" : ""}`, `the cam-lat crumb measures crewFit's easeTo and the return fly: start = the native start delay (+ ≤ 2 vsync), end = start + duration + the idle${android ? " (a late fly: cut at its JS deadline + grace — the residual, visible in the field as end − start < ms)" : ""}, lag = the report delay ${lagMs} ms (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
+  }
+  for (const android of [false, true]) {
+    const h = unit({ android, animStartDelayMs: 150, renderMs: 83 });
+    const t0 = h.now;
+    for (let k = 0; k < 86; k++) { h.advance(7000); if (k % 8 === 7) h.crew(); else h.press(k % 2 ? 0.5 : -0.5); }
+    const rows = latRows(h).filter((r) => r.t >= t0), gaps = rows.slice(1).map((r, i) => r.t - rows[i].t);
+    const well = rows.every((r) => /^cam-lat surf=car kind=(fly|ease|push) ms=\d+ start=(-?\d+|-) end=(-?\d+|-) lag=(-?\d+|-) n=\d+$/.test(r.row));
+    const kinds = rows.map((r) => /kind=(\w+)/.exec(r.row)![1]);
+    ok(`RL2${android ? "a" : ""}`, `a 10-minute moving drive (a press every 7 s, a Crew every 56 s): ≤ 20 cam-lat rows for the session, ≥ 3 s apart, ≤ 5 instant-write samples, every row well-formed, flies and eases measured (${android ? "Android" : "iOS"})`,
+      rows.length <= 20 && rows.length > 0 && gaps.every((g) => g >= 3000) && well && kinds.includes("fly") && kinds.includes("ease") && kinds.filter((k) => k === "push").length <= 5 && repairRows(h, t0, h.now).length === 0,
+      `(${rows.length} rows: ${kinds.join(",")}; smallest gap ${gaps.length ? Math.min(...gaps) : "-"} ms; e.g. ${rows.find((r) => / kind=fly /.test(r.row))?.row ?? "-"}; loop rows while moving ${repairRows(h, t0, h.now).length})`);
   }
 
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);

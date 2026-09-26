@@ -1235,7 +1235,7 @@ const SELF_MARKER_SLOT = undefined;
 /** Monotonic mount counter — see probeKeyRef inside SelfCarModel. */
 let _selfCarMountSeq = 0;
 
-export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, returnFlyRef, camJob, camPoseOutRef, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
+export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, readyRef, camHeadingOverrideRef, camZoomOutRef, camPitchOutRef, returnFlyRef, camJob, camPoseOutRef, camCallOut, scale, sizePt, lenUnits, mapRef, liveZoomRef, refreshRef, drawPosOutRef, drawSinkRef, onFirstCam, modelId = "convoyCar", headingOffset = CAR_MODEL_HEADING_OFFSET, pitchTilt = 0, sprite, spriteSize = 1, speedMs, opacity = 1, carFramePump = false, zoomSnapRef, probeRole = "phone" }: {
   lat: number; lng: number; heading: number; emissive: number;
   // Live ground speed (m/s). Below CREEP the marker POSITION freezes so parked
   // GPS jitter can't roam it (mirrors the heading freeze). undefined → treat as moving.
@@ -1282,6 +1282,10 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
   camJob?: () => boolean;
   // HEAD UNIT: the pose each push WROTE (zoom / pitch / heading + when) — CarMapView's closed loop (src/camRepair.ts).
   camPoseOutRef?: React.MutableRefObject<{ zoom: number; pitch: number | null; heading: number | null; at: number } | null>;
+  // HEAD UNIT: each camera CALL this model makes — its fly ('fly', the requested ms) and every instant write ('push') — with
+  // the JS time taken before the native call, for CarMapView's `cam-lat` latency crumb (src/camRepair.ts, round 11). The
+  // phone passes none: unchanged.
+  camCallOut?: (kind: 'fly' | 'push', ms: number, at: number) => void;
   // zoomCh (car only): the driver-zoom channel pushCam applies on every push (carZoomApply) — see src/carZoomStep.ts.
   getCam?: () => { zoomLevel: number; pitch: number; heading: number; padding: any; zoomCh?: CarZoomChannel };
   // Optional CAMERA-heading override (the MODEL keeps its real heading). Read live
@@ -1641,6 +1645,7 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
             animationMode: 'flyTo',
           });
         } catch {}
+        if (camCallOut) { try { camCallOut('fly', st.ms, now); } catch {} }   // head unit: `cam-lat` (the phone passes none)
         return;   // lastCamAt deliberately NOT refreshed: the per-tick size block sizes off the live zoom while a fly is active
       }
       returnFlyRef.current = st.next;   // 0 after a landing (this push lands the frame) or unchanged
@@ -1761,6 +1766,8 @@ export function SelfCarModel({ lat, lng, heading, emissive, cameraRef, getCam, r
       // Finite values only (round 9: a NaN heading made the loop disagree forever); a non-finite zoom publishes nothing.
       if (Number.isFinite(camZoom.current)) camPoseOutRef.current = { zoom: camZoom.current, pitch: Number.isFinite(camPitch.current) ? camPitch.current : null, heading: typeof wh === 'number' && Number.isFinite(wh) ? wh : null, at: now };
     }
+    // …and the call itself, for the head unit's `cam-lat` crumb (sampled there). The phone passes no camCallOut: unchanged.
+    if (camCallOut) { try { camCallOut('push', 0, now); } catch {} }
     // CAM-APPLY RECEIPT (2026-09-03): ask the map where it ACTUALLY is, ≤1 poll / 2 s, async.
     // Jeff's 09:22 roundabout: pushes were issued the whole time (heat-probe cam == tick) yet
     // the map sat still ~12 s while the car walked across it. This row tells a native

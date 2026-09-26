@@ -26,7 +26,7 @@ import {
 import { CREW_RETURN_MS, crewReturnEdge } from "../../src/crewReturn.ts";
 import { RETURN_FLY_MS, returnFlyStep, returnFlyReaim, returnFlyInFlight } from "../../src/returnFly.ts";
 import { glideStep, type GlideParams } from "../../src/camGlide.ts";
-import { camObserve, camWrote, camRepairStep, camRepairEpisode, camAngOff, newCamRepair, camFlyStart, camFlyHold, CAM_FLY_STILL_MS, CAM_FLY_LAND_MAX_MS, CAM_REPAIR_SETTLE_MS, CAM_REPAIR_BUDGET, CAM_REPAIR_BACKOFF, CAM_REPAIR_NOREPORT_MS, CAM_REPAIR_SLOW_MS, CAM_REPAIR_RATE_MAX, CAM_REPAIR_HARD_MAX, CAM_REPAIR_ROWS_MAX, CAM_REPAIR_RATE_WINDOW_MS, type CamObs, type CamRepair } from "../../src/camRepair.ts";
+import { camObserve, camWrote, camRepairStep, camRepairEpisode, camRepairRow, camAngOff, newCamRepair, newCamLat, camLatCall, camLatReport, camLatTick, CAM_LAT_ROWS_MAX, CAM_LAT_ROW_GAP_MS, CAM_LAT_OPEN_MAX_MS, CAM_LAT_PUSH_ROWS_MAX, CAM_LAT_PUSH_GAP_MS, CAM_REPAIR_SETTLE_MS, CAM_REPAIR_BUDGET, CAM_REPAIR_BACKOFF, CAM_REPAIR_NOREPORT_MS, CAM_REPAIR_SLOW_MS, CAM_REPAIR_RATE_MAX, CAM_REPAIR_HARD_MAX, CAM_REPAIR_ROWS_MAX, CAM_REPAIR_RATE_WINDOW_MS, type CamObs, type CamRepair } from "../../src/camRepair.ts";
 import { chaseZoomForSpeed } from "../../src/chaseZoom.ts";
 import { loadSrc, cameraWriteSites, cameraJsxProps, cameraMethodRefs, refEscapes, cameraJsxSpreads } from "./headunit_cam_harness.mts";
 import { runScenarios } from "./headunit_cam_scenarios.mts";
@@ -155,10 +155,10 @@ console.log("CL — the closed loop (src/camRepair.ts): what the map reports vs 
   const o3 = camObserve(o2, 16.8, 45, 90, false, t + 200, [-123.0001, 49])!;
   const o4 = camObserve(o3, 16.9, 45, 90, false, t + 300, [-123.0001, 49])!;
   const o5 = camObserve(o4, 16.9, 45, 90, false, t + 500, [-123.0001, 49], t + 450)!;
-  ok("CL1 a repeated report keeps its changedAt; a moved zoom — or a moved CENTRE alone — dates it; the native timestamp is the capture time (the receipt time when absent); no zoom = no report; movedStamp = the CAPTURE time of the last move (a repeat keeps it)",
+  ok("CL1 a repeated report keeps its changedAt; a moved zoom — or a moved CENTRE alone — dates it; the native timestamp is the capture time (the receipt time when absent); no zoom = no report",
     o2.changedAt === t && o3.changedAt === t + 200 && o4.changedAt === t + 300 && o1.stamp === t - 5 && o2.stamp === t + 100 && camObserve(o4, undefined, 1, 2, false, t + 400, null) === o4
-    && o1.movedStamp === t - 5 && o2.movedStamp === t - 5 && o3.movedStamp === t + 200 && o5.movedStamp === t + 300 && o5.stamp === t + 450);
-  const obsAt = (z: number, p: number, h: number, at: number, stamp = at): CamObs => ({ zoom: z, pitch: p, heading: h, lng: 0, lat: 0, gesture: false, at, changedAt: at, stamp, movedStamp: stamp });
+    && o5.changedAt === t + 300 && o5.stamp === t + 450);
+  const obsAt = (z: number, p: number, h: number, at: number, stamp = at): CamObs => ({ zoom: z, pitch: p, heading: h, lng: 0, lat: 0, gesture: false, at, changedAt: at, stamp });
   const want = camWrote(null, 16.8, 45, 90, t)!;
   const late = t + 10 * CAM_REPAIR_SETTLE_MS;
   const after = (z: number, p: number, h: number) => obsAt(z, p, h, t + 20);   // captured AFTER the write, then still
@@ -183,7 +183,7 @@ console.log("CL — the closed loop (src/camRepair.ts): what the map reports vs 
     // …unless the write drew no report at all: then the last report is judged after CAM_REPAIR_NOREPORT_MS.
     const b3 = camRepairStep(st, t + CAM_REPAIR_NOREPORT_MS, stale, want, false);
     ok("CL4 a stale report (captured before the write, delivered after it) is never judged against the write; with no report at all the last one is judged after the no-report timeout, rep < 0 on the row",
-      b1.act === "none" && b2.act === "none" && b3.act === "fly" && b3.rep === -50);
+      b1.act === "none" && b2.act === "none" && b3.act === "push" && b3.rep === -50);
   }
   {
     const st = newCamRepair(t);
@@ -197,10 +197,14 @@ console.log("CL — the closed loop (src/camRepair.ts): what the map reports vs 
     ok("CL5 within 0.05 zoom / 1° agrees; 1.5° of heading off → ONE push owed (asked again: still one); the next agreement confirms it once ('ok', n=1) and clears the count",
       inTol.act === "none" && v.act === "push" && owedOnce && again.act === "none" && okd.act === "ok" && okd.n === 1 && quiet.act === "none" && st.tries.length === 0 && typeof v.rep === "number" && v.rep === 20);
   }
-  ok("CL6 fly or push is chosen from the GAP (a visible jump flies, short), never from where the camera rests: a 0.3-level or 3° gap flies; a 0.1-level gap at z 12.5 is a push",
-    camRepairStep(newCamRepair(t), late, after(16.5, 45, 90), want, false).act === "fly"
-    && camRepairStep(newCamRepair(t), late, after(16.8, 42, 90), want, false).act === "fly"
-    && camRepairStep(newCamRepair(t), late, obsAt(12.6, 45, 90, t + 20), camWrote(null, 12.5, 45, 90, t)!, false).act === "push");
+  {
+    // Round 11: THE LOOP NEVER FLIES — whatever the gap (4.8 levels, 45° of pitch, 90° of heading, or 0.1 of a level),
+    // the corrective write is ONE instant push of the written pose (st.pending is only ever "push").
+    const gaps: [number, number, number][] = [[12, 45, 90], [16.5, 45, 90], [16.8, 0, 0], [16.8, 42, 90], [16.8, 45, 110], [16.9, 45, 90]];
+    const acts = gaps.map(([z, p, h]) => { const st = newCamRepair(t); const v = camRepairStep(st, late, after(z, p, h), want, false); return `${v.act}/${st.pending}`; });
+    ok("CL6 the loop never flies: a 4.8-level, 45°-pitch, 90°-heading, 20°-heading, 3° or 0.1-level gap each owes ONE instant push (round 9/10 flew when the gap exceeded 0.2 / 2°)",
+      acts.every((a) => a === "push/push"), `(${acts.join(" ")})`);
+  }
   // A map that NEVER agrees, 10 minutes, one episode: the corrective writes and rows it gets.
   const run = (st: CamRepair, from: number, ms: number, wantAt = t) => {
     const out: { at: number; act: string; log: boolean; drop: number }[] = [];
@@ -243,7 +247,7 @@ console.log("CL — the closed loop (src/camRepair.ts): what the map reports vs 
     camRepairEpisode(first, late + 20000);
     const fresh = camRepairStep(first, late + 20000 + 10 * CAM_REPAIR_SETTLE_MS, obsAt(15, 0, 0, late + 20020), camWrote(null, 16.8, 45, 90, late + 20000)!, false);
     ok(`CL8 a new owner intent is a fresh episode (a given-up loop tries again); 100 episodes 3 s apart on a map that never agrees: ≤ ${CAM_REPAIR_RATE_MAX} corrective writes in any ${CAM_REPAIR_RATE_WINDOW_MS / 1000} s`,
-      fresh.act === "fly" && worst <= CAM_REPAIR_RATE_MAX, `(most in a window: ${worst}; total ${writes.length})`);
+      fresh.act === "push" && worst <= CAM_REPAIR_RATE_MAX, `(most in a window: ${worst}; total ${writes.length})`);
   }
   {
     // A CONFIRMED repair is not rationed (a driver's taps): 20 lost writes in a minute, each repaired and confirmed → all
@@ -285,59 +289,94 @@ console.log("CL — the closed loop (src/camRepair.ts): what the map reports vs 
       g.act === "none" && unk.act === "none" && nan.act === "none" && camWrote(want, NaN, 1, 2, t + 1) === want && Math.abs(camAngOff(359, 1) - 2) < 1e-9);
   }
   {
-    // Round 10, finding 3 (verify_zoom_storm_1 ration4): an owner intent that lands before a try's verdict CARRIES it —
-    // the next agreement clears it from the never-agree count. A try already judged wrong stays counted; so does a carried
-    // try on a device that never agrees (the cap it exists for).
-    const repairThenIntent = (st: CamRepair, clock: number, agreeAfter: boolean, judgeFirst: boolean) => {
+    // Round 11 rationing (supersedes round 10's carry): a try an owner intent supersedes BEFORE it was judged is DROPPED —
+    // never counted as unconfirmed — and resolves in ONE `op=superseded counted=0` row. A try already judged wrong stays
+    // counted (`counted=1`). Every try's episode resolves in exactly one row: ok | giveup | superseded.
+    const repairThenIntent = (st: CamRepair, clock: number, judgeFirst: boolean) => {
       const w = camWrote(null, 16.8, 45, 90, clock)!;
       camRepairEpisode(st, clock);
       const v = camRepairStep(st, clock + 10 * CAM_REPAIR_SETTLE_MS, obsAt(15, 0, 0, clock + 20), w, false);   // lost → a try
       st.pending = null;
       const tw = clock + 10 * CAM_REPAIR_SETTLE_MS;
       if (judgeFirst) camRepairStep(st, tw + 200, obsAt(15, 0, 0, tw + 20), camWrote(null, 16.8, 45, 90, tw)!, false);   // judged wrong
-      camRepairEpisode(st, tw + 250);   // the driver taps again before (or after) the verdict
-      const w2 = camWrote(null, 16.8, 45, 90, tw + 250)!;
-      camRepairStep(st, tw + 250 + 10 * CAM_REPAIR_SETTLE_MS, agreeAfter ? obsAt(16.8, 45, 90, tw + 270) : obsAt(15, 0, 0, tw + 270), w2, false);
-      return v.act;
+      const row = camRepairEpisode(st, tw + 250);   // the driver taps again before (or after) the verdict
+      return { act: v.act, row };
     };
-    const a = newCamRepair(t); let acts = "";
-    for (let k = 0; k < 10; k++) acts += repairThenIntent(a, late + k * 5000, true, false)[0];
-    const b = newCamRepair(t); repairThenIntent(b, late, true, true);
-    const c = newCamRepair(t); repairThenIntent(c, late, false, false);
-    ok("CL12 a try an owner intent superseded before its verdict is CARRIED: the next agreement clears it (10 such in 50 s, all repaired, none left unconfirmed); a try judged wrong first stays counted; on a map that never agrees the carried try stays counted",
-      acts === "ffffffffff" && a.unconfirmed.length === 0 && a.carry.length === 0 && b.unconfirmed.length === 1 && c.unconfirmed.length >= 1,
-      `(tries ${acts}; unconfirmed after: superseded ${a.unconfirmed.length}, judged-first ${b.unconfirmed.length}, never-agree ${c.unconfirmed.length})`);
-    // …and the never-agree cap still holds when EVERY try is superseded by an intent before its verdict.
-    const st = newCamRepair(t); let clock = late; const tries: number[] = [];
-    for (let k = 0; k < 100; k++) {
-      camRepairEpisode(st, clock);
+    const a = newCamRepair(t); const rowsA: string[] = []; let acts = "";
+    for (let k = 0; k < 10; k++) { const r = repairThenIntent(a, late + k * 15000, false); acts += r.act[0]; if (r.row) rowsA.push(r.row); }
+    const b = newCamRepair(t); const rb = repairThenIntent(b, late, true);
+    ok("CL12 a try an owner intent supersedes before its verdict is DROPPED: 10 such in 150 s → none counted as unconfirmed, each resolved by ONE `op=superseded counted=0` row; a try judged wrong first stays counted (`counted=1`)",
+      acts === "pppppppppp" && a.unconfirmed.length === 0 && rowsA.length === 10 && rowsA.every((r) => /^cam-repair surf=car op=superseded n=1 dz=1\.80 dp=45 dh=90 rep=- ep=\d+ counted=0$/.test(r))
+      && b.unconfirmed.length === 1 && !!rb.row && / op=superseded n=1 .* counted=1$/.test(rb.row),
+      `(tries ${acts}; unconfirmed after ${a.unconfirmed.length}; e.g. "${rowsA[0]}"; judged-first: unconfirmed ${b.unconfirmed.length}, "${rb.row}")`);
+    // The bound when EVERY try is superseded before its verdict (a map that stops reporting + an intent < 1 s after each
+    // try): the never-agree cap does not apply (nothing was judged) — the HARD ceiling does, and the rows stay capped.
+    const st = newCamRepair(t); let clock = late; const tries: number[] = []; const rows: number[] = []; let drops = 0, sup = 0;
+    for (let k = 0; k < 200; k++) {
+      const r0 = camRepairEpisode(st, clock);
+      if (r0) { rows.push(clock); drops += Number(/ drop=(\d+)/.exec(r0)?.[1] ?? 0); if (/op=superseded/.test(r0)) sup++; }
       const w = camWrote(null, 16.8, 45, 90, clock)!;
+      const v = camRepairStep(st, clock + 500, obsAt(15, 0, 0, clock + 20), w, false);
       st.pending = null;
-      const v = camRepairStep(st, clock + 10 * CAM_REPAIR_SETTLE_MS, obsAt(15, 0, 0, clock + 20), w, false);
-      if (v.act === "fly" || v.act === "push") tries.push(clock);
-      clock += 3000;
+      if (v.act === "push") tries.push(clock);
+      const vr = camRepairRow(v); if (vr) rows.push(clock + 500);
+      clock += 1000;
     }
-    let worst = 0; for (let i = 0; i < tries.length; i++) { let n = 0; for (let k = i; k < tries.length && tries[k] - tries[i] < CAM_REPAIR_RATE_WINDOW_MS; k++) n++; worst = Math.max(worst, n); }
-    ok(`CL13 a never-agreeing map with an owner intent right after EVERY try (none ever judged): still ≤ ${CAM_REPAIR_RATE_MAX} corrective writes in any ${CAM_REPAIR_RATE_WINDOW_MS / 1000} s`, worst <= CAM_REPAIR_RATE_MAX && worst > 0, `(most in a window ${worst}; total ${tries.length})`);
+    { const r1 = camRepairEpisode(st, clock); if (r1) { rows.push(clock); if (/op=superseded/.test(r1)) sup++; } }   // the last try, superseded too
+    const win = (ts: number[]) => { let m = 0; for (let i = 0; i < ts.length; i++) { let n = 0; for (let k = i; k < ts.length && ts[k] - ts[i] < CAM_REPAIR_RATE_WINDOW_MS; k++) n++; m = Math.max(m, n); } return m; };
+    ok(`CL13 a map that stops reporting with an owner intent 0.5 s after EVERY try (none ever judged): each try dropped, bounded by the hard ceiling — ≤ ${CAM_REPAIR_HARD_MAX} corrective writes and ≤ ${CAM_REPAIR_ROWS_MAX} rows in any ${CAM_REPAIR_RATE_WINDOW_MS / 1000} s; the never-agree cap (${CAM_REPAIR_RATE_MAX}) applies only to judged tries`,
+      win(tries) === CAM_REPAIR_HARD_MAX && win(rows) <= CAM_REPAIR_ROWS_MAX && st.unconfirmed.length === 0 && sup > 0,
+      `(most corrective writes in a window ${win(tries)}; rows ${win(rows)} (+ drop= ${drops}); superseded rows written ${sup}; unconfirmed ${st.unconfirmed.length})`);
   }
   {
-    // Round 10, finding 2: A FLY'S LANDING WAITS FOR THE MAP. A fly called at t0 for 280 ms (JS deadline t0 + 280), grace G.
-    const G = 100, t0 = late, end = t0 + 280;
-    const st = newCamRepair(t); camFlyStart(st, t0, end);
-    const still = obsAt(12, 45, 90, t0 - 500);                  // last moved (and captured) before the call: not started
-    const run = { ...obsAt(14, 45, 90, end + G + 10), movedStamp: end + G + 5 };   // moving after the call
-    const done = { ...obsAt(16.8, 45, 90, end + G + 10), movedStamp: end + G + 5 };  // moved after the call, then still
-    const clock = camFlyHold(st, end, end + G - 1, still, G);
-    const ns = camFlyHold(st, end, end + G + 20, still, G);
-    const mv = camFlyHold(st, end, end + G + 20, run, G);
-    const land = camFlyHold(st, end, end + G + 10 + CAM_FLY_STILL_MS, done, G);
-    const cap = camFlyHold(st, end, end + G + CAM_FLY_LAND_MAX_MS, still, G);
-    const noObs = camFlyHold(st, end, end + G + 20, null, G);
-    const noRec = camFlyHold(newCamRepair(t), end, end + G + 20, still, G);
-    const idle = camFlyHold(st, 0, end + G + 20, still, G), armed = camFlyHold(st, -1, end + G + 20, still, G);
-    ok(`CL14 a fly's landing: the clock owns it until deadline + grace (unchanged); past it the fly stays in flight while the map shows it NOT STARTED (no move captured since the call) or MOVING (< ${CAM_FLY_STILL_MS} ms since the last change) — held ${CAM_FLY_STILL_MS} ms at a time; it lands once the map was still after moving, at the ${CAM_FLY_LAND_MAX_MS} ms cap, and with no report / no record (the clock, as before); idle and armed states untouched`,
-      clock === end && ns === end + G + 20 + CAM_FLY_STILL_MS - G && mv === end + G + 20 + CAM_FLY_STILL_MS - G && land === end && cap === end && noObs === end && noRec === end && idle === 0 && armed === -1,
-      `(clock ${clock - end}; not started → owned until +${ns + G - (end + G + 20)} ms; moving → +${mv + G - (end + G + 20)} ms; still → ${land === end ? "lands" : "held"}; cap → ${cap === end ? "lands" : "held"})`);
+    // Round 11: THE LATENCY CRUMB (cam-lat). A parked Crew return fly called at t (1800 ms): reports captured every 17 ms
+    // from +170 ms (the native start), each received 12 ms later; onMapIdle captured at +2020 ms.
+    const L = newCamLat(); const out: string[] = [];
+    const put = (r: string | null) => { if (r) out.push(r); };
+    const t0 = late;
+    put(camLatReport(L, t0 - 30, t0 - 40, false));                 // before any call: ignored
+    put(camLatCall(L, "fly", t0, 1800));
+    put(camLatReport(L, t0 + 60, t0 - 5, false));                  // captured before the call, delivered after: not its own
+    put(camLatReport(L, t0 + 60, t0 + 50, true));                  // an idle as the FIRST report after the call: an earlier motion's
+    let n = 0;
+    for (let c = 170; c <= 1990; c += 17) { put(camLatReport(L, t0 + c + 12, t0 + c, false)); n++; }
+    put(camLatReport(L, t0 + 2020 + 12, t0 + 2020, true)); n++;
+    ok("CL14 cam-lat: a fly's start = its first report captured after the call, end = the first onMapIdle after that, lag = the largest receipt − capture, n = its reports; a report captured before the call, or an idle first, is not its own; the row is written at once (the first of the session)",
+      out.length === 1 && out[0] === `cam-lat surf=car kind=fly ms=1800 start=170 end=2020 lag=12 n=${n}` && L.open === null && L.rows === 1, `(${out.join(" | ")})`);
+    // Caps: 60 flies 1 s apart, each started and idled → ≤ CAM_LAT_ROWS_MAX rows per session, ≥ CAM_LAT_ROW_GAP_MS apart.
+    const L2 = newCamLat(); const at2: number[] = [];
+    for (let k = 0; k < 60; k++) {
+      const c = late + k * 1000;
+      for (const r of [camLatCall(L2, "fly", c, 280), camLatReport(L2, c + 20, c + 17, false), camLatReport(L2, c + 400, c + 380, true), camLatTick(L2, c + 999)]) if (r) at2.push(c);
+    }
+    for (let u = 0; u < 20; u++) { if (camLatTick(L2, late + 60000 + u * 3000)) at2.push(late + 60000 + u * 3000); }
+    const gaps = at2.slice(1).map((x, i) => x - at2[i]);
+    ok(`CL15 cam-lat caps: 60 measured flies in 60 s (and 60 s of ticks after) → ${CAM_LAT_ROWS_MAX} rows for the session, never two within ${CAM_LAT_ROW_GAP_MS} ms`,
+      at2.length === CAM_LAT_ROWS_MAX && gaps.every((g) => g >= CAM_LAT_ROW_GAP_MS), `(${at2.length} rows; smallest gap ${Math.min(...gaps)} ms)`);
+    // A MOVING car for 10 min: a push every 16.7 ms, each reported at the next vsync (+8 ms, received +3 ms later), never
+    // idle. Instant writes are SAMPLED on their own quota (≤ CAM_LAT_PUSH_ROWS_MAX a session, ≥ CAM_LAT_PUSH_GAP_MS apart);
+    // the next push ends a sample whose report was seen (end=-). A fly every 45 s outranks a push sample and, never idle
+    // while moving, is written after CAM_LAT_OPEN_MAX_MS as it stands (end=-). The flies keep the rest of the session's rows.
+    const L3 = newCamLat(); const rows3: [number, string][] = [];
+    let nextFly = 7000, nFly = 0;
+    for (let c = 0; c < 600000; c += 1000 / 60) {
+      const tc = late + c;
+      const call = c >= nextFly ? ((nextFly += 45000), nFly++, camLatCall(L3, "fly", tc, 1800)) : camLatCall(L3, "push", tc, 0);
+      for (const r of [call, camLatReport(L3, tc + 11, tc + 8, false)]) if (r) rows3.push([c, r]);
+    }
+    const kinds = rows3.map(([, r]) => /kind=(\w+)/.exec(r)![1]);
+    const pushRows = rows3.filter(([, r]) => / kind=push /.test(r)), flyRows = rows3.filter(([, r]) => / kind=fly /.test(r));
+    const pushOk = pushRows.every(([, r]) => / start=8 end=- lag=3 n=1$/.test(r)) && pushRows.slice(1).every(([c], i) => c - pushRows[i][0] >= CAM_LAT_PUSH_GAP_MS - 1);
+    const g3 = rows3.slice(1).map(([c], i) => c - rows3[i][0]);
+    ok(`CL16 cam-lat while MOVING 10 min: instant writes sampled on their own quota (${CAM_LAT_PUSH_ROWS_MAX} a session, ≥ ${CAM_LAT_PUSH_GAP_MS / 1000} s apart; start = the next report, end=- — a moving map is never idle); a fly every 45 s outranks a sample and is written after CAM_LAT_OPEN_MAX_MS as it stands (end=-) — every fly measured; ≤ ${CAM_LAT_ROWS_MAX} rows for the session, ≥ 3 s apart`,
+      pushOk && pushRows.length === CAM_LAT_PUSH_ROWS_MAX && flyRows.length === nFly && flyRows.every(([, r]) => / ms=1800 start=8 end=- lag=3 n=\d+$/.test(r))
+      && rows3.length <= CAM_LAT_ROWS_MAX && g3.every((g) => g >= CAM_LAT_ROW_GAP_MS - 1),
+      `(${rows3.length} rows: ${kinds.join(",")} — every one of the ${nFly} flies measured; e.g. "${flyRows[0]?.[1]}"; smallest gap ${Math.round(Math.min(...g3))} ms)`);
+    // A write that draws no report at all (a no-op): written after CAM_LAT_OPEN_MAX_MS with start=- end=- n=0.
+    const L4 = newCamLat();
+    const r4a = camLatCall(L4, "push", late, 0), r4b = camLatTick(L4, late + CAM_LAT_OPEN_MAX_MS - 1), r4c = camLatTick(L4, late + CAM_LAT_OPEN_MAX_MS);
+    ok("CL17 cam-lat: a write that draws no report is written as it stands after CAM_LAT_OPEN_MAX_MS (start=- end=- n=0) — the no-report case the loop's 1 s fallback exists for, measured",
+      r4a === null && r4b === null && r4c === "cam-lat surf=car kind=push ms=0 start=- end=- lag=- n=0", `(${r4c})`);
   }
 }
 
@@ -458,32 +497,48 @@ console.log("S — static: the wiring the harness exercises");
     const setHdg = /heading: (\(camHeadingOverrideRef && typeof camHeadingOverrideRef\.current === 'number'\) \? camHeadingOverrideRef\.current : camHeading),/.exec(between(mbx, "NAV-LOCK begin mbx-pushcam-setcamera", "NAV-LOCK end mbx-pushcam-setcamera"))?.[1];
     const firstStmt = (name: string) => code(between(cmv, `const ${name} = (`, "\n  };")).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//"))[1] ?? "";
     const crewCase = code(between(cmv, "case 'crewFit': {", "NAV-LOCK end car-gesture-crewfit"));
-    ok("S26 the closed loop is wired: every owner (a fly armed / flying / landing, a JS ease, the Crew overview, a pinch, a reapply, a native tail) makes it stand down; getCam takes its owed write and RESTORES THE WRITTEN POSE (a 'push' seeds zoomSnapRef with it, a 'fly' is short and aimed at it); both instant writers record what they wrote, timed BEFORE the call; every owner intent opens an episode (takeOverNativeCam's first line, the +/- entry, Crew); onCameraChanged feeds it (with the native timestamp) before anything can return, outside the 🔒 region, and onMapIdle too; SelfCarModel publishes the pose it wrote — finite values only — with the setCamera's own heading expression; the JSX wires it",
+    const logsRow = (t: string, v: string) => new RegExp(`if \\(${v}\\) \\{ try \\{ logEvent\\(${v}\\); \\} catch \\{\\} \\}`).test(t);
+    ok("S26 the closed loop is wired: every owner (a fly armed / flying / landing, a JS ease or a lapsed zoom hold, the Crew overview, a pinch, a reapply, a native tail) makes it stand down; getCam takes its owed write and RESTORES THE WRITTEN POSE by seeding zoomSnapRef with it (an instant push — round 11: never a fly); both instant writers record what they wrote, timed BEFORE the call; every owner intent opens an episode and logs the row of a try it supersedes (takeOverNativeCam's first line, the +/- entry, Crew); onCameraChanged feeds it (with the native timestamp) before anything can return, outside the 🔒 region, and onMapIdle too (as idle); SelfCarModel publishes the pose it wrote — finite values only — with the setCamera's own heading expression; the JSX wires it",
       /const zoomOwed = carZoomJobOwed\(zoomChRef\.current, zoomHoldUntilRef\.current, now, pinchActiveRef\.current\);\s*const repairBusy = pinchActiveRef\.current \|\| zoomOwed \|\| returnFlyRef\.current !== 0 \|\| camHoldWasActiveRef\.current \|\|\s*now < camHoldUntilRef\.current \|\| reapplyAfterRef\.current !== 0 \|\| now < nativeTailUntil\(\);/.test(job26)
       && /\|\| repairDue \|\| zoomOwed;/.test(job26)
-      && /camRepairStep\(camRepairRef\.current, now, camObsRef\.current, camWantRef\.current, repairBusy\)/.test(job26) && /\|\| repairDue \|\|/.test(job26) && /if \(rv\.log\)/.test(job26) && / rep=\$\{/.test(job26) && / ep=\$\{/.test(job26)
-      && /if \(rw && rp === 'fly' && returnFlyRef\.current === 0\) \{ returnFlyRef\.current = -CAR_ZOOM_STEP_MS; zoomChRef\.current\.ease = null; repairAim = rw; \}/.test(gcHead26)
-      && /else if \(rw\) zoomSnapRef\.current = \{ zoom: rw\.zoom, pitch: rw\.pitch \?\? undefined, heading: typeof camHdgOverrideRef\.current === 'number' \? undefined : rw\.heading \?\? undefined \};/.test(gcHead26)
-      && /zoomLevel: repairAim \? repairAim\.zoom : carZoomDest\(/.test(cmv) && /pitch: repairAim && repairAim\.pitch != null \? repairAim\.pitch : fp,/.test(cmv)
+      && /camRepairStep\(camRepairRef\.current, now, camObsRef\.current, camWantRef\.current, repairBusy\)/.test(job26) && /const rr = camRepairRow\(rv\);/.test(job26) && logsRow(job26, "rr")
+      && /if \(camRepairRef\.current\.pending\) \{\s*camRepairRef\.current\.pending = null;\s*const rw = camWantRef\.current;\s*if \(rw\) zoomSnapRef\.current = \{ zoom: rw\.zoom, pitch: rw\.pitch \?\? undefined, heading: typeof camHdgOverrideRef\.current === 'number' \? undefined : rw\.heading \?\? undefined \};\s*\}/.test(gcHead26)
       && ["applyZoomNow", "ownerSetPose"].every((n) => /camWantRef\.current = camWrote\([^;]*, wroteAt\);/.test(body(n)) && body(n).indexOf("const wroteAt = Date.now();") >= 0 && body(n).indexOf("const wroteAt = Date.now();") < body(n).indexOf("setCamera(") && body(n).indexOf("camWrote(") > body(n).indexOf("setCamera(") && !/camRepairRearm/.test(body(n)))
-      && /^camRepairEpisode\(camRepairRef\.current, now\);$/.test(firstStmt("takeOverNativeCam")) && /camRepairEpisode\(camRepairRef\.current, now\);/.test(code(between(cmv, "const applyZoomEased = (", "\n  };"))) && /camRepairEpisode\(camRepairRef\.current, Date\.now\(\)\);/.test(crewCase)
+      && /^const sr = camRepairEpisode\(camRepairRef\.current, now\);$/.test(firstStmt("takeOverNativeCam")) && logsRow(body("takeOverNativeCam"), "sr")
+      && /const sr = camRepairEpisode\(camRepairRef\.current, now\);/.test(code(between(cmv, "const applyZoomEased = (", "\n  };"))) && logsRow(code(between(cmv, "const applyZoomEased = (", "\n  };")), "sr")
+      && /const sr = camRepairEpisode\(camRepairRef\.current, easeAt\);/.test(crewCase) && logsRow(crewCase, "sr")
       && /onCameraChanged=\{\(state: any\) => \{\s*\n\s*noteCamObserved\(state\);[^\n]*\n\s*\/\/ 🔒 NAV-LOCK begin car-selfcar-scale-refresh/.test(cmv) && /camObserve\([^;]*p\?\.center, state\?\.timestamp\);/.test(cmv)
-      && /onMapIdle=\{\(state: any\) => \{ noteCamObserved\(state\);/.test(cmv) && /camPoseOutRef=\{camWantRef\}/.test(cmv)
+      && /onMapIdle=\{\(state: any\) => \{ noteCamObserved\(state, true\);/.test(cmv) && /camPoseOutRef=\{camWantRef\}/.test(cmv)
       && !!setHdg && pub.includes(`const wh = ${setHdg};`) && /if \(Number\.isFinite\(camZoom\.current\)\) camPoseOutRef\.current = \{ zoom: camZoom\.current, pitch: Number\.isFinite\(camPitch\.current\) \? camPitch\.current : null, heading: typeof wh === 'number' && Number\.isFinite\(wh\) \? wh : null, at: now \};/.test(pub),
       `(setCamera heading expr ${setHdg ? "found" : "NOT FOUND"}; takeOverNativeCam first statement: ${firstStmt("takeOverNativeCam")})`);
     const cr = readFileSync(new URL("../../src/camRepair.ts", import.meta.url), "utf8");
     ok("S27 src/camRepair.ts is pure (no imports at all)", !/^\s*import\s/m.test(cr));
-    // S28 — round 10: every reader of the fly's deadline asks the map first (holdFly = camFlyHold), and getCam records the
-    // fly its push is about to start (camFlyStart) as its LAST statement before the return.
-    const hold = /^returnFlyRef\.current = camFlyHold\(camRepairRef\.current, returnFlyRef\.current, now, camObsRef\.current, RETURN_FLY_GRACE_MS\);$/.test(firstStmt("holdFly"));
-    const jobFirst = job26.indexOf("holdFly(now);"), jobEarly = job26.indexOf("if (returnFlyRef.current > 0 && now < returnFlyRef.current + RETURN_FLY_GRACE_MS) return false;");
+    // S28 — round 11: THE LOOP NEVER FLIES, and no fly's landing waits for the map (round 10's camFlyHold is gone: owner
+    // flies are owned until their JS deadline + RETURN_FLY_GRACE_MS, as at e492b0e1). The only fly getCam arms is the
+    // Crew way home (edge.fly → -1; edge.snap inside crewFit's easeTo → -CAR_ZOOM_STEP_MS); camRepair.ts owes only "push".
     const gcAll = code(between(cmv, "const getCam = useRef(() => {", "}).current;"));
-    const gcHold = gcAll.indexOf("holdFly(nowC);"), gcRet = gcAll.indexOf("return {"), gcStart = gcAll.indexOf("if (returnFlyRef.current < 0) camFlyStart(camRepairRef.current, nowC, returnFlyStep(returnFlyRef.current, nowC).next);");
-    const pinchB = code(between(cmv, "case 'zoomBegin':", "takeOverNativeCam(nowB);"));
-    ok("S28 a fly's landing asks the map first: holdFly runs before carCamJob's in-flight test, first in getCam (before pushCam's returnFlyStep), in takeOverNativeCam, the +/- entry and a pinch's start; getCam records the fly it arms (camFlyStart) after every change to returnFlyRef, just before its return",
-      hold && jobFirst >= 0 && jobFirst < jobEarly && gcHold >= 0 && gcHold < gcAll.indexOf("const rp = camRepairRef.current.pending") && gcStart > gcAll.lastIndexOf("returnFlyRef.current = ") && gcStart < gcRet
-      && /holdFly\(now\);/.test(body("takeOverNativeCam")) && /holdFly\(now\);/.test(code(between(cmv, "const applyZoomEased = (", "\n  };"))) && /holdFly\(nowB\);/.test(pinchB),
-      `(holdFly body ${hold ? "ok" : "CHANGED"}; carCamJob ${jobFirst}<${jobEarly}; getCam hold@${gcHold} start@${gcStart} return@${gcRet})`);
+    const arms = gcAll.match(/returnFlyRef\.current = -[^;]*;/g) ?? [];
+    ok("S28 the loop never flies and no landing waits for the map: no holdFly / camFlyHold / camFlyStart / repairAim anywhere; camRepair.ts's pending is only ever \"push\" (no fly act, no jump threshold); getCam arms exactly the two Crew-edge flies",
+      !/holdFly|camFlyHold|camFlyStart|repairAim/.test(cmv) && !/camFlyHold|camFlyStart|CAM_FLY_|CAM_REPAIR_JUMP_/.test(cr) && /pending: "push" \| null;/.test(cr)
+      && /export type CamRepairAct = "none" \| "ok" \| "push" \| "giveup" \| "superseded";/.test(cr) && !/fly/.test(code(between(cr, "export function camRepairStep(", "\n}\n")))
+      && arms.length === 2 && arms[0] === "returnFlyRef.current = -1;" && arms[1] === "returnFlyRef.current = -CAR_ZOOM_STEP_MS;",
+      `(getCam fly arms: ${arms.join(" | ")})`);
+    // S29 — round 11: the `cam-lat` crumb's wiring. Every head-unit camera call reaches camLatCall with the JS time taken
+    // BEFORE the native call: SelfCarModel's fly and every instant 'none' push (camCallOut — the car JSX passes
+    // noteCamCall; the phone's <SelfCarModel> passes none), both instant writers, crewFit's easeTo; every camera report
+    // reaches camLatReport (onMapIdle as idle); carCamJob ticks it; every returned row is logged.
+    const flyBlk = code(between(mbx, "if (st.action === 'fly') {", "return;   // lastCamAt"));
+    const phoneJsx = code(between(mbx, "<SelfCarModel", "/>"));
+    const obsBody = code(between(cmv, "const noteCamObserved = (", "\n  };"));
+    const callBody = code(between(cmv, "const noteCamCall = useRef(", "}).current;"));
+    ok("S29 the `cam-lat` crumb is wired: SelfCarModel reports its fly (st.ms) and every instant push to camCallOut with `now` (taken before the setCamera); CarMapView passes camCallOut={noteCamCall} (the phone JSX passes none); both instant writers and crewFit's easeTo call camLatCall with the time taken before the call; noteCamObserved feeds camLatReport (idle from onMapIdle); carCamJob ticks it; every row is logged",
+      /if \(camCallOut\) \{ try \{ camCallOut\('fly', st\.ms, now\); \} catch \{\} \}/.test(flyBlk) && /if \(camCallOut\) \{ try \{ camCallOut\('push', 0, now\); \} catch \{\} \}/.test(pub)
+      && /camCallOut=\{noteCamCall\}/.test(cmv) && !/camCallOut/.test(phoneJsx) && /const lr = camLatCall\(camRepairRef\.current\.lat, kind, at, ms\);/.test(callBody) && logsRow(callBody, "lr")
+      && ["applyZoomNow", "ownerSetPose"].every((n) => /const lr = camLatCall\(camRepairRef\.current\.lat, 'push', wroteAt, 0\);/.test(body(n)) && logsRow(body(n), "lr"))
+      && /const easeAt = Date\.now\(\);/.test(crewCase) && crewCase.indexOf("const easeAt = Date.now();") < crewCase.indexOf("setCamera(") && /const lr = camLatCall\(camRepairRef\.current\.lat, 'ease', easeAt, CREW_FIT_EASE_MS\);/.test(crewCase) && logsRow(crewCase, "lr")
+      && /const lr = camLatReport\(camRepairRef\.current\.lat, now, state\?\.timestamp, idle\);/.test(obsBody) && logsRow(obsBody, "lr")
+      && /const lt = camLatTick\(camRepairRef\.current\.lat, now\);/.test(job26) && logsRow(job26, "lt"),
+      `(phone JSX mentions camCallOut: ${/camCallOut/.test(phoneJsx)})`);
   }
   ok("S15 pushCam re-arms a due crew hold before its readiness bail (a moving car comes home on the first frame)", /if \(camJob && !\(readyRef\?\.current\)\) camJob\(\);\s*\n\s*if \(!cameraRef\?\.current \|\| !getCam \|\| !\(readyRef\?\.current\)\) return;/.test(mbx));
 }

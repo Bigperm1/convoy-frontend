@@ -322,7 +322,7 @@ the wall's forward step alone (CLK4). A wall clock that jumps forward more than 
 BACK by more than a second adds an hour, closing every window, and logs a bounded `priv-clock-back by=<s> n=<k>` row
 (5 per process; CLK2). An expiry is therefore irreversible until a NEW event
 (an assertion, a vehicular fix under the latch rules, a proven re-arm). The wall clock is kept only for what is written
-to disk (the spot's `t`, `LAST_DRIVING_KEY`), converted once at hydrate with future-dated or too-old stamps restoring
+to disk (the spot's `t`, `LAST_DRIVING_KEY`, the witness key's informational `t`), converted once at hydrate with future-dated or too-old stamps restoring
 nothing. The car-feed settle rule uses plain monotonic time (`carFeedOwner.settleNow`, and map.tsx's `subAt`), whose
 safe direction is "wait". Cost: a rollback expires the drive's latch (it re-arms on the next vehicular fix) and restarts
 a re-arm proof in progress (`park_rearm_test` PTd: +42 s instead of +35 s). Gates: `park_rearm_test` HF9g (Codex's
@@ -338,6 +338,25 @@ the process died mid-drive) restores it unless a head unit is attached now. It u
 older than 24 h (or a device clock moved a day forward) and any iOS process death mid-CarPlay came back unwitnessed and
 one 26 km/h walking fix shared the walk and wrote it as the spot (`park_rearm_test` HF10a–c; HF10a-0 / HF10c-0 =
 36c17f1e). Cost: after such a relaunch a phone-only drive pays the re-arm proof (HF10d: +35 s).
+
+**The witness is saved on its own, not only with the pin (round 13; Codex high on OTA-CG `4ef3b2d9`).** OTA-CG wrote
+`hu=1` only ON the spot record, and only `if (_carSpot)`: a head-unit session with no delivered fix (no signal,
+location denied, no adoptable spot, or a disconnect heard before the launch's storage read resolved) left no witness on
+disk, and after a restart Jeff's walk (5, 5, 10, 26, 12, 7, 12, 5 km/h, 4 s apart) went live at 26 km/h and the walker
+became the car spot. Every true→false head-unit transition now ALSO writes `convoy.parkWitness.v1` = `{hu:1, t}`
+(`src/parkWitness.ts` — the key only; `t` is informational, no rule reads it), spot or no spot, hydrated or not. Hydrate
+reads it in the same single-flight attempt (a rejected read fails the attempt: retried, fail-closed) and ANY value there
+restores the witnessed park unless a head unit is attached now — independent of the pin, its verdict and its age — and
+drops a racing latch like the spot-record rule above. The key is removed only where the in-memory witness ends — a head
+unit asserting, or the re-arm proof passing in `noteFix` — and hydrate never writes it (a disconnect heard while the
+read was in flight keeps its witness). `hu=1` stays on the spot record as before. What a spotless witnessed park
+shares is unchanged: nothing (`no-car-spot`) — absent beats exposed. Cost: a phone-only drive after such a restart
+pays the re-arm proof (HF13c-1: +35 s). "Reset app data" wipes the key with every other. Gates: `park_rearm_test`
+HF13 (HF13-0 = `4ef3b2d9` sharing the walk live), HF13b (the key's read rejecting twice), HF13c-1 / 2a / 2b (liveness:
+after the proof, or a reconnect in the same or a restarted process, the key is gone and a restart is not re-pinned — a
+real drive is live at +5 s), HF13d (a park with a spot: hydrate, walk and spot record identical to `4ef3b2d9`), HF13e
+(the disconnect during the launch's read; HF13e-0 = `4ef3b2d9`). The key's value is pinned by those gates (they name it
+literally); `src/parkWitness.ts` is outside `nav-lock.json` until a relock adds it.
 
 **Documented residuals (privacy, 2026-09-25 — anything later that is not a NEW class joins this list):**
 1. GPS alone cannot tell slow traffic from a noisy brisk walker or drift (0–20 / 200 per white-noise canyon set;

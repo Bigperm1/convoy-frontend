@@ -33,6 +33,7 @@ import { getAvatarMode, getSettings, ensureSettingsLoaded } from "./settings";
 import { createParkRearm } from "./parkRearm";
 import { logEventReliable } from "./crashBreadcrumb";
 import { privacyNow } from "./privacyClock";
+import { PARK_WITNESS_KEY } from "./parkWitness";
 
 // Same key map.tsx has always used, so an existing install keeps its car spot and there
 // is no migration to get wrong.
@@ -165,6 +166,10 @@ let _lastSpotMeta: { t: number; att: 0 | 1; mv: number; hu?: 1 } | null = null;
 // spot so hydrate can age it out — see SPOT_MAX_AGE_MS.
 let _carSpotAt = 0;
 let _parkWitnessed = false;   // see noteCarConnected / parkEndedByHeadUnit
+// Is the witness saved under its OWN key (src/parkWitness.ts)? null = not known yet (hydrate has not read it), so the
+// first clear must remove it; true/false after a read or a write. It only spares a disk write per re-assertion — a
+// head unit re-asserts on every fix — never decides what is shared.
+let _witnessOnDisk: boolean | null = null;
 let _spotDrop: string | null = null;   // why hydrate refused the persisted spot (carSpotTrust) — printed by draw-cmp
 let _spotSavedAt = 0;
 let _drivingSavedAt = 0;
@@ -222,8 +227,9 @@ export function subscribeHeadUnit(fn: (attached: boolean) => void): () => void {
  * witness was never adopted, the next >= 15 km/h walking fix armed the ordinary latch, the walk was shared LIVE and the
  * car spot on disk was overwritten (review-priv4/hydrate_attack.mts, reproduced on the real module). The plausible
  * trigger is HYPOTHESIS: iOS relaunching the app in the background before the first unlock after a reboot, when the
- * data-protected AsyncStorage manifest cannot be read (RNCAsyncStorage `_ensureSetup`). Now: success = both keys READ
- * (a missing key is a successful read of "nothing") and a present spot record that parses. A rejected read, a present
+ * data-protected AsyncStorage manifest cannot be read (RNCAsyncStorage `_ensureSetup`). Now: success = all three keys READ
+ * (spot, driving stamp, and the witness's own key since round 13 — a missing key is a successful read of "nothing")
+ * and a present spot record that parses. A rejected read, a present
  * record that is not JSON, or an exception while adopting it is a FAILURE: nothing is marked done, so noteFix stays
  * in its pre-hydration state (no latch armed, no spot written and nothing shared live on fix evidence — a head unit
  * asserted now still counts), and the next caller retries — no sooner than 5 s after the previous attempt started,
@@ -270,11 +276,14 @@ export function hydrateLocationPrivacy(): Promise<void> {
 /** One attempt. Returns "spot" / "empty" (or "late": a newer attempt already applied) on success, "read" / "parse" /
  * "apply" on failure — never throws. */
 async function _hydrateOnce(): Promise<string> {
-  let spotRaw: string | null = null, drivingRaw: string | null = null;
+  let spotRaw: string | null = null, drivingRaw: string | null = null, witnessRaw: string | null = null;
   try {
-    [spotRaw, drivingRaw] = await Promise.all([
+    // The witness's own key is read in the SAME attempt: a rejected read of any of the three fails the attempt (retried,
+    // fail-closed) — never "hydrated without the witness" (privacy round 13, src/parkWitness.ts).
+    [spotRaw, drivingRaw, witnessRaw] = await Promise.all([
       AsyncStorage.getItem(CAR_SPOT_KEY),
       AsyncStorage.getItem(LAST_DRIVING_KEY),
+      AsyncStorage.getItem(PARK_WITNESS_KEY),
     ]);
   } catch { return "read"; }
   if (_hydrateDone) return "late";   // an attempt that hung past its retry settled late: the newer one already applied
@@ -340,6 +349,23 @@ async function _hydrateOnce(): Promise<string> {
         _latchProvisional = false;
         _parkRearm.reset();
       }
+    }
+    // ── THE WITNESS HAS ITS OWN RECORD (privacy round 13, 2026-09-25) ─────────────────────────────────────────────────
+    // Jeff: "it should not follow me when i discconect from car play... fix it and lock it." The hu=1 above rides the
+    // SPOT record, which noteCarConnected writes only when there is a spot: a head-unit session with no delivered fix
+    // left no witness on disk, and after a restart Jeff's walk (a 26 km/h reading) went live and became the car spot
+    // (Codex high; park_rearm_test HF13-0). The disconnect now also saves the witness under src/parkWitness.ts's key,
+    // spot or no spot. ANY value there restores the witnessed park — independent of the spot, its verdict and its age,
+    // the same rule as above (never over a head unit attached now) — and a garbled value counts as present
+    // (fail-closed: it is cleared by a head unit or the re-arm proof, like any witness). This read never writes the key:
+    // a disconnect heard while it was in flight has already saved the witness, and this must not undo it.
+    // Gate: park_rearm_test HF13–HF13e.
+    if (_witnessOnDisk === null) _witnessOnDisk = witnessRaw != null;
+    if (witnessRaw != null && !_carConnected) {
+      _parkWitnessed = true;
+      _drivingLatched = false;
+      _latchProvisional = false;
+      _parkRearm.reset();
     }
     // 🔒 NAV-LOCK end priv-hydrate-spot-adopt
     // 🔒 NAV-LOCK begin priv-hydrate-latch-restore — Jeff's say-so required to change this (tools/sim-qc/nav_lock_test.mts)
@@ -424,7 +450,11 @@ export function noteCarConnected(connected: boolean, source: HeadUnitSource = "m
     _drivingLatched = false;
     _latchProvisional = false;
     _parkRearm.reset();   // a new witness proves from nothing (a proof left over from an earlier park must not count)
-    // Persisted with the spot so an app restart while parked still pins to the car.
+    // SAVED ON ITS OWN, ALWAYS (privacy round 13, 2026-09-25): spot or no spot, hydrated or not, so an app restart
+    // after a session that delivered no fix still restores the witness (src/parkWitness.ts; park_rearm_test HF13).
+    _witnessOnDisk = true;
+    void AsyncStorage.setItem(PARK_WITNESS_KEY, JSON.stringify({ hu: 1, t: Date.now() })).catch(() => {});
+    // …and still persisted with the spot (hu=1), so an app restart while parked pins to the car.
     // Every plain {lat,lng} writer of this key (noteFix, map.tsx's 15 s mirror) drops
     // the flag on the next drive — which is exactly when it should expire.
     if (_carSpot) void AsyncStorage.setItem(CAR_SPOT_KEY, JSON.stringify({ ..._carSpot, t: _carSpotAt || Date.now(), hu: 1 })).catch(() => {});
@@ -434,7 +464,12 @@ export function noteCarConnected(connected: boolean, source: HeadUnitSource = "m
     _lastSpotMeta = { t: _carSpotAt || Date.now(), att: 0, mv: 0, hu: 1 };
     if (_hdgTrack.obs) _hdgTrack = { ..._hdgTrack, frozen: true };
   }
-  if (next && asserted) { _parkWitnessed = false; _parkRearm.reset(); }
+  if (next && asserted) {
+    // A head unit ends the witness — on disk too (its own key: src/parkWitness.ts). Removed when one may be there (a
+    // witness now, or a disk not yet read), not on every re-assertion.
+    if (_parkWitnessed || _witnessOnDisk !== false) { _witnessOnDisk = false; void AsyncStorage.removeItem(PARK_WITNESS_KEY).catch(() => {}); }
+    _parkWitnessed = false; _parkRearm.reset();
+  }
   _carConnected = next;
   // Stamp on every assertion, clear outright on release. The stamp is what makes
   // this a claim that expires rather than a latch — see CAR_CONNECT_TTL_MS.
@@ -607,6 +642,8 @@ export function noteFix(lat: number, lng: number, speedMs?: number, courseDeg?: 
     // Driving expires a witnessed park: the car provably left the spot the head-unit
     // disconnect vouched for (covers CarPlay unplugged mid-drive — the crawl that
     // follows must fall back to the 75 m separation gate, not pin a stale spot).
+    // The witness's own key goes with it (src/parkWitness.ts) — only when one may be on disk, not on every driving fix.
+    if (_parkWitnessed || _witnessOnDisk !== false) { _witnessOnDisk = false; void AsyncStorage.removeItem(PARK_WITNESS_KEY).catch(() => {}); }
     _parkWitnessed = false;
     // Persisted so a suspended-app CLVisit can still tell parked from driving — throttled,
     // see DRIVING_SAVE_THROTTLE_MS.

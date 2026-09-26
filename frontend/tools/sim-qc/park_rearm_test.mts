@@ -79,6 +79,10 @@
 //      attachment stays expired when the device clock is set back into its window (HF9g-0 = b286ad9b); PT a property
 //      test — random device-clock jumps (±1 h, ±24 h, repeated) never produce a live walking share or a spot write
 //      after a witnessed or lost disconnect, and a real drive under the same jumps stays live on every fix.
+//      HF13 the witness saved on its own key (src/parkWitness.ts): a spotless CarPlay session then a restart — Jeff's
+//      walk never live (HF13-0 = 4ef3b2d9, OTA-CG, sharing it); HF13b its read failing; HF13c the key cleared by the
+//      proof and by a reconnect, a restart after either not re-pinned; HF13d a park with a spot identical to 4ef3b2d9;
+//      HF13e a disconnect during the launch's read (HF13e-0 = 4ef3b2d9).
 //   W  the drive's latch still inside its 90 s window at the disconnect: a 12 km/h and a 26 km/h fix share the car
 //      spot (the witness drops the latch); NEGATIVE CONTROL on the pre-fix module shares them LIVE.
 import { registerHooks } from "node:module";
@@ -1650,6 +1654,225 @@ async function relaunchWithFixesBeforeRead(lp: LP, nFast: number) {
       const C: any = await import(cur("v"));
       const v = { SLEEP_EXCESS_MS: C.SLEEP_EXCESS_MS, ROLLBACK_STEP_MS: C.ROLLBACK_STEP_MS, ROLLBACK_PENALTY_MS: C.ROLLBACK_PENALTY_MS, CLOCK_BACK_ROWS_MAX: C.CLOCK_BACK_ROWS_MAX };
       ok("CLK5 the privacy clock's constants are the approved values", JSON.stringify(v) === JSON.stringify({ SLEEP_EXCESS_MS: 1000, ROLLBACK_STEP_MS: 1000, ROLLBACK_PENALTY_MS: 3_600_000, CLOCK_BACK_ROWS_MAX: 5 }), JSON.stringify(v));
+    }
+  }
+  {
+    // ── HF13 · THE WITNESS IS SAVED ON ITS OWN (privacy round 13; Codex high on OTA-CG 4ef3b2d9) ──────────────────────
+    // OTA-CG saved the witnessed park (`hu=1`) only ON the car-spot record, and only `if (_carSpot)`: a CarPlay session
+    // that delivered NO fix (no signal, location denied, no adoptable spot) left nothing on disk; after a restart Jeff's
+    // walk (5, 5, 10, 26, 12, 7, 12, 5 km/h, 4 s apart) went live at 26 km/h and the walker became the car spot
+    // (scratchpad review_priv3/f5b.mts F5b, codex_check_privacy_0/repro.mts A/B/D). The witness now has its own key
+    // (src/parkWitness.ts), written at every disconnect.
+    //   HF13-0 NEGATIVE CONTROL: origin's module (4ef3b2d9, OTA-CG) — the restart forgets the witness, the walk is LIVE.
+    //   HF13   spotless session → restart +5 min → the walk: never live, the spot never the walker.
+    //   HF13b  the same restart with the witness key's READ rejecting twice: nothing live while it fails, a retry adopts
+    //          the witness, the key on disk intact, the rows name it.
+    //   HF13c  liveness: the key is REMOVED by (1) a real phone-only drive-away proof and (2) a CarPlay reconnect (in the
+    //          same process, and in a restarted one that had restored the witness); a restart after any of them is not
+    //          re-pinned — a real drive is live within 8 s (the proof, with a witness, takes longer: shown in (1)).
+    //   HF13d  a normal witnessed park WITH a spot: the same hydrate, walk and spot record (`hu=1` kept) as origin's.
+    //   HF13e  the disconnect lands while the launch's read is still in flight (it read no witness): the key the
+    //          disconnect wrote survives that read, and a restart is pinned (repro D: a fresh phone-only spot on disk).
+    //          HF13e-0 = origin sharing that walk live.
+    const WITNESS_KEY = "convoy.parkWitness.v1";
+    const ORIGIN = "4ef3b2d9";
+    const JEFF_WALK = [1.4, 1.4, 2.8, kmh(26), kmh(12), 1.9, kmh(12), 1.4];
+    const disk = () => ({ ...(LOC_V.__store as Record<string, string>) });
+    // Process A: a CarPlay session in which no fix reached noteFix, then the disconnect (heard).
+    const spotlessA = async (lp: LP) => {
+      LOC_V.__store = {}; LOC_V.__getItem = undefined; wallSkew = 0; clock += 3600 * S;
+      await lp.hydrateLocationPrivacy();
+      lp.noteCarConnected(true, "carplay");
+      clock += 60 * S;
+      lp.noteCarConnected(false, "carplay");
+      await tick();
+      return disk();
+    };
+    // Process A: a CarPlay drive that ends at SPOT (a spot exists), then the disconnect (heard).
+    const spotA = async (lp: LP) => {
+      LOC_V.__store = {}; LOC_V.__getItem = undefined; wallSkew = 0; clock += 3600 * S;
+      await lp.hydrateLocationPrivacy();
+      lp.noteCarConnected(true, "carplay");
+      for (let i = 0; i < 60; i++) { clock += S; const p = north(SPOT, -1200 + 20 * (i + 1)); lp.noteFix(p.lat, p.lng, 20, 0); }
+      for (let i = 0; i < 20; i++) { clock += S; lp.noteFix(SPOT.lat, SPOT.lng, 0, null); }
+      lp.noteCarConnected(false, "carplay");
+      await tick();
+      return disk();
+    };
+    // Process B: a cold start on A's disk, then Jeff's walk.
+    const walkB = async (lp: LP, d: Record<string, string>) => {
+      LOC_V.__store = { ...d }; LOC_V.__rows = [];
+      await lp.hydrateLocationPrivacy();
+      const hydrated = { hu: lp.parkEndedByHeadUnit(), pin: !!lp.carSpot() };
+      const spotDiskBefore = LOC_V.__store[SPOT_KEY] ?? null;
+      let p = north(SPOT, 20); const live: string[] = []; const spotWalker: string[] = [];
+      for (const v of JEFF_WALK) {
+        clock += 4 * S; p = north(p, 6);
+        lp.noteFix(p.lat, p.lng, v, null);
+        const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+        if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`${(v * 3.6).toFixed(0)}kmh`);
+        const sp = lp.carSpot(); if (sp && sp.lat === p.lat && sp.lng === p.lng) spotWalker.push(`${(v * 3.6).toFixed(0)}kmh`);
+      }
+      await tick();
+      return { hydrated, live, spotWalker, spotDiskUnchanged: (LOC_V.__store[SPOT_KEY] ?? null) === spotDiskBefore, witnessOnDisk: WITNESS_KEY in LOC_V.__store, lp };
+    };
+    // A real phone-only drive-away (1 m/s² to 40 km/h, 1 Hz): the first second its position is shared live, and whether
+    // a witness stood at any point.
+    const driveAway = (lp: LP, from: { lat: number; lng: number }, maxS = 60) => {
+      let pos = from; let liveAt: number | null = null; let rearmAt: number | null = null; let huSeen = false;
+      for (let i = 1; i <= maxS; i++) {
+        clock += S; const v = Math.min(i * 1.0, 11); pos = north(pos, v); lp.noteFix(pos.lat, pos.lng, v, 0);
+        const sh: any = lp.shareablePosition({ ...pos, speed: v, heading: 0 });
+        if (liveAt == null && sh.share && sh.lat === pos.lat && sh.lng === pos.lng) liveAt = i;
+        if (lp.parkEndedByHeadUnit()) huSeen = true; else if (rearmAt == null) rearmAt = i;
+      }
+      return { liveAt, rearmAt, huSeen, end: pos };
+    };
+    // HF13-0 / HF13 — the spotless session.
+    {
+      const a0 = await lpAt(ORIGIN), b0 = a0 && await lpAt(ORIGIN);
+      if (a0 && b0) {
+        const d = await spotlessA(a0.lp); clock += 300 * S;
+        const r0 = await walkB(b0.lp, d);
+        ok("HF13-0 NEGATIVE CONTROL (4ef3b2d9, OTA-CG): a spotless CarPlay session leaves no witness on disk — after a restart the walk is shared LIVE and the walker becomes the car spot",
+          Object.keys(d).length === 0 && r0.hydrated.hu === false && r0.live.length > 0 && r0.spotWalker.length > 0, JSON.stringify({ disk: d, h: r0.hydrated, live: r0.live, spotWalker: r0.spotWalker }));
+        rmSync(a0.dir, { recursive: true, force: true }); rmSync(b0.dir, { recursive: true, force: true });
+      } else console.log(`  skip HF13-0 negative control: ${ORIGIN} unavailable`);
+      const d = await spotlessA(await fresh()); clock += 300 * S;
+      const r = await walkB(await fresh(false), d);
+      ok("HF13 a spotless CarPlay session (connected 60 s, no fix), restart +5 min, Jeff's walk: the witness is restored from its own key, never live, the spot never the walker",
+        WITNESS_KEY in d && !(SPOT_KEY in d) && r.hydrated.hu === true && r.hydrated.pin === false && r.live.length === 0 && r.spotWalker.length === 0 && r.witnessOnDisk && r.spotDiskUnchanged,
+        JSON.stringify({ disk: d, h: r.hydrated, live: r.live, spotWalker: r.spotWalker, keyAfter: r.witnessOnDisk }));
+    }
+    // HF13b — the witness key's read fails at the restart.
+    {
+      const d = await spotlessA(await fresh()); clock += 300 * S;
+      const lp = await fresh(false);
+      LOC_V.__store = { ...d }; LOC_V.__rows = [];
+      let reads = 0;
+      LOC_V.__getItem = (k: string, store: Record<string, string>) => {
+        if (k === WITNESS_KEY && ++reads <= 2) return Promise.reject(new Error("storage unavailable"));
+        return Promise.resolve(store[k] ?? null);
+      };
+      void lp.hydrateLocationPrivacy();
+      await tick();
+      const live: string[] = []; let adoptedAt: number | null = null;
+      for (let i = 1; i <= 60; i++) {
+        clock += S;
+        const v = i === 3 || i === 30 ? kmh(26) : i === 4 || i === 31 ? kmh(29) : i === 5 ? kmh(12) : 1.4;
+        const p = north(SPOT, 30 + 1.4 * i);
+        lp.noteFix(p.lat, p.lng, v, null);
+        await tick(); await tick();
+        const sh: any = lp.shareablePosition({ ...p, speed: v, heading: 0 });
+        if (sh.share && sh.lat === p.lat && sh.lng === p.lng) live.push(`+${i}s@${(v * 3.6).toFixed(0)}`);
+        if (adoptedAt == null && lp.parkEndedByHeadUnit()) adoptedAt = i;
+      }
+      LOC_V.__getItem = undefined;
+      const rows = [...(LOC_V.__rows as string[])];
+      ok("HF13b the witness key's read rejects twice at the restart: nothing shared live while it fails, a retry adopts the witness, the key on disk intact, the rows name it",
+        reads >= 3 && live.length === 0 && adoptedAt != null && lp.parkEndedByHeadUnit() && !lp.privacyDebug().latch && lp.carSpot() == null
+          && LOC_V.__store[WITNESS_KEY] === d[WITNESS_KEY] && /priv-hydrate ok=0 why=read[\s\S]*priv-hydrate ok=0 why=read[\s\S]*priv-hydrate ok=1 why=empty/.test(rows.join("\n")) && rows.length <= 5,
+        JSON.stringify({ reads, live, adoptedAt, rows }));
+    }
+    // HF13c — the key is removed by the proof and by a reconnect; a restart after either is not re-pinned.
+    {
+      // (1) the re-arm proof, in the restarted process that restored the witness from the key.
+      const d = await spotlessA(await fresh()); clock += 300 * S;
+      const b = await fresh(false); LOC_V.__store = { ...d }; await b.hydrateLocationPrivacy();
+      const huB = b.parkEndedByHeadUnit();
+      const drive = driveAway(b, SPOT, 90); await tick();
+      const keyAfterProof = WITNESS_KEY in LOC_V.__store;
+      const dB = disk(); clock += 600 * S;
+      const c = await fresh(false); LOC_V.__store = { ...dB }; await c.hydrateLocationPrivacy();
+      const huC = c.parkEndedByHeadUnit();
+      const again = driveAway(c, drive.end, 30);
+      ok("HF13c-1 the re-arm proof removes the key (restored witness → real drive-away, re-armed in > 8 s); a restart after it is not re-pinned: the next real drive is live within 8 s",
+        huB && drive.rearmAt != null && drive.rearmAt > 8 && drive.rearmAt <= 40 && !keyAfterProof && !huC && again.liveAt != null && again.liveAt <= 8 && !again.huSeen,
+        JSON.stringify({ huB, rearmAt: drive.rearmAt, keyAfterProof, huC, liveAt: again.liveAt, huSeen: again.huSeen }));
+    }
+    {
+      // (2a) a reconnect in the SAME process, then the process dies attached (no fix, no disconnect heard).
+      const a = await fresh(); const d = await spotlessA(a);
+      a.noteCarConnected(true, "carplay"); await tick();
+      const keyAfterReconnect = WITNESS_KEY in LOC_V.__store;
+      const dA = disk(); clock += 300 * S;
+      const c = await fresh(false); LOC_V.__store = { ...dA }; await c.hydrateLocationPrivacy();
+      const huC = c.parkEndedByHeadUnit();
+      const again = driveAway(c, SPOT, 30);
+      ok("HF13c-2a a CarPlay reconnect removes the key (same process); a restart after it is not re-pinned: a real drive is live within 8 s",
+        WITNESS_KEY in d && !keyAfterReconnect && !huC && again.liveAt != null && again.liveAt <= 8 && !again.huSeen,
+        JSON.stringify({ keyBefore: WITNESS_KEY in d, keyAfterReconnect, huC, liveAt: again.liveAt, huSeen: again.huSeen }));
+    }
+    {
+      // (2b) a restart that restored the witness from the key, then a reconnect there, then that process dies attached.
+      const d = await spotlessA(await fresh()); clock += 300 * S;
+      const b = await fresh(false); LOC_V.__store = { ...d }; await b.hydrateLocationPrivacy();
+      const huB = b.parkEndedByHeadUnit();
+      clock += 60 * S; b.noteCarConnected(true, "carplay"); await tick();
+      const keyAfterReconnect = WITNESS_KEY in LOC_V.__store;
+      const dB = disk(); clock += 300 * S;
+      const c = await fresh(false); LOC_V.__store = { ...dB }; await c.hydrateLocationPrivacy();
+      const huC = c.parkEndedByHeadUnit();
+      const again = driveAway(c, SPOT, 30);
+      ok("HF13c-2b a reconnect in a restarted process (witness restored from the key) removes the key; a restart after it is not re-pinned: a real drive is live within 8 s",
+        huB && !keyAfterReconnect && !huC && again.liveAt != null && again.liveAt <= 8 && !again.huSeen,
+        JSON.stringify({ huB, keyAfterReconnect, huC, liveAt: again.liveAt, huSeen: again.huSeen }));
+    }
+    // HF13d — a normal witnessed park with a spot behaves as on origin (the spot record keeps hu=1).
+    {
+      const strip = (s: string | undefined) => { if (!s) return null; const o = JSON.parse(s); delete o.t; return JSON.stringify(o); };
+      const a0 = await lpAt(ORIGIN), b0 = a0 && await lpAt(ORIGIN);
+      const dNew = await spotA(await fresh()); clock += 300 * S;
+      const rNew = await walkB(await fresh(false), dNew);
+      const recNew = strip(dNew[SPOT_KEY]);
+      if (a0 && b0) {
+        const d0 = await spotA(a0.lp); clock += 300 * S;
+        const r0 = await walkB(b0.lp, d0);
+        const rec0 = strip(d0[SPOT_KEY]);
+        const same = JSON.stringify([rNew.hydrated, rNew.live, rNew.spotWalker, rNew.spotDiskUnchanged]) === JSON.stringify([r0.hydrated, r0.live, r0.spotWalker, r0.spotDiskUnchanged]) && recNew === rec0;
+        ok("HF13d a witnessed park WITH a spot, restart +5 min, Jeff's walk: identical to origin (4ef3b2d9) — witness and pin restored, never live, never the walker, spot record the same (hu=1)",
+          same && rNew.hydrated.hu && rNew.hydrated.pin && rNew.live.length === 0 && rNew.spotWalker.length === 0 && !!recNew && JSON.parse(recNew).hu === 1 && WITNESS_KEY in dNew,
+          JSON.stringify({ new: { h: rNew.hydrated, live: rNew.live, rec: recNew }, origin: { h: r0.hydrated, live: r0.live, rec: rec0 } }));
+        rmSync(a0.dir, { recursive: true, force: true }); rmSync(b0.dir, { recursive: true, force: true });
+      } else {
+        console.log(`  skip HF13d origin comparison: ${ORIGIN} unavailable`);
+        ok("HF13d a witnessed park WITH a spot, restart +5 min, Jeff's walk: witness and pin restored, never live, never the walker, spot record hu=1",
+          rNew.hydrated.hu && rNew.hydrated.pin && rNew.live.length === 0 && rNew.spotWalker.length === 0 && !!recNew && JSON.parse(recNew).hu === 1, JSON.stringify(rNew.hydrated));
+      }
+    }
+    // HF13e — the disconnect lands while the launch's read is in flight (the read saw no witness key).
+    {
+      const runE = async (lp: LP) => {
+        wallSkew = 0; clock += 3600 * S;
+        const rec = JSON.stringify({ lat: SPOT.lat, lng: SPOT.lng, t: Date.now() - 3600 * S, att: 0, mv: 0 });
+        LOC_V.__store = { [SPOT_KEY]: rec }; LOC_V.__rows = [];
+        let release: () => void = () => {};
+        const gate = new Promise<void>((r) => { release = r; });
+        // A read returns what was on disk when it was ISSUED (the disconnect's write lands after it).
+        LOC_V.__getItem = (k: string, store: Record<string, string>) => { const v = store[k] ?? null; return gate.then(() => v); };
+        void lp.hydrateLocationPrivacy(); await tick();
+        lp.noteCarConnected(true, "carplay");
+        clock += 60 * S;
+        lp.noteCarConnected(false, "carplay"); await tick();
+        const keyAtDisconnect = WITNESS_KEY in LOC_V.__store;
+        release(); await tick(); await tick(); await tick();
+        LOC_V.__getItem = undefined;
+        const afterRead = { key: WITNESS_KEY in LOC_V.__store, hu: lp.parkEndedByHeadUnit(), pin: !!lp.carSpot() };
+        const d = disk(); clock += 300 * S;
+        return { keyAtDisconnect, afterRead, d };
+      };
+      const a0 = await lpAt(ORIGIN), b0 = a0 && await lpAt(ORIGIN);
+      if (a0 && b0) {
+        const e0 = await runE(a0.lp); const r0 = await walkB(b0.lp, e0.d);
+        ok("HF13e-0 NEGATIVE CONTROL (4ef3b2d9): a disconnect before the launch's read resolves → the restart forgets the witness and shares the walk LIVE",
+          r0.hydrated.hu === false && r0.live.length > 0, JSON.stringify({ h: r0.hydrated, live: r0.live }));
+        rmSync(a0.dir, { recursive: true, force: true }); rmSync(b0.dir, { recursive: true, force: true });
+      } else console.log(`  skip HF13e-0 negative control: ${ORIGIN} unavailable`);
+      const e = await runE(await fresh(false));
+      const r = await walkB(await fresh(false), e.d);
+      ok("HF13e a disconnect while the launch's read is in flight: the key survives that read (witness kept), and a restart is pinned at the saved spot — never live, never the walker",
+        e.keyAtDisconnect && e.afterRead.key && e.afterRead.hu && e.afterRead.pin && r.hydrated.hu && r.hydrated.pin && r.live.length === 0 && r.spotWalker.length === 0,
+        JSON.stringify({ keyAtDisconnect: e.keyAtDisconnect, afterRead: e.afterRead, h: r.hydrated, live: r.live, spotWalker: r.spotWalker }));
     }
   }
 }

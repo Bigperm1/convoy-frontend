@@ -58,22 +58,64 @@ const Ctx = createContext<AuthCtx>({} as any);
 // the location task that drives the car surface. Rename here = rename there.
 const USER_KEY = "convoy_user";
 
-async function cacheUser(u: User | null): Promise<void> {
+// ── THE CACHED PROFILE IS BOUND TO ITS TOKEN (2026-09-25) ────────────────────────────────────────
+// Booting from the cache (below) SHOWS whoever is in USER_KEY before the server is asked. The token and
+// the profile are two separate AsyncStorage writes, and every helper here swallows its failures, so disk
+// can hold token B next to profile A (a crash between saveToken and cacheUser, or a remove that silently
+// failed) — and the gate would open the map as A until /auth/me answered for B (Codex, 2026-09-25;
+// scratchpad codex_check_auth_1 R1). So each profile write also writes a tag of (profile id, token), and
+// a cached profile is used only when the tag matches the token on disk right now. No tag, or a tag for
+// another token/id, = no cache: the plain no-cache path ("Connecting…" until the server answers).
+// A SEPARATE key on purpose: navNotification.ts and crashBreadcrumb.ts parse USER_KEY's JSON directly.
+// Written AFTER the profile, so a crash between the two leaves an old tag that no longer matches.
+// Not a secret: the token itself sits in plain AsyncStorage (api.ts TOKEN_KEY); this only has to tell
+// two tokens apart. An install from before this change has no tag, so its first boot is the no-cache
+// path once; the first /auth/me answer writes the tag.
+const USER_TAG_KEY = "convoy_user_tok";
+
+// cyrb53 (53-bit, public domain) — sync and dependency-free, enough to tell two tokens apart.
+function hash53(s: string): string {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+function userTag(id: string, token: string): string {
+  return `v1.${hash53(`${id}\n${token}`)}`;
+}
+
+// Profile + tag are written and cleared together. A profile without a token to bind to is not cached.
+async function cacheUser(u: User | null, token?: string | null): Promise<void> {
   try {
-    if (u) await AsyncStorage.setItem(USER_KEY, JSON.stringify(u));
-    else await AsyncStorage.removeItem(USER_KEY);
+    if (u && token) {
+      await AsyncStorage.setItem(USER_KEY, JSON.stringify(u));
+      await AsyncStorage.setItem(USER_TAG_KEY, userTag(u.id, token));
+    } else {
+      await AsyncStorage.removeItem(USER_TAG_KEY);
+      await AsyncStorage.removeItem(USER_KEY);
+    }
   } catch {}
 }
 
-async function readCachedUser(): Promise<User | null> {
+// The cached profile for THIS token, or null. `unbound` = a profile was on disk but its tag does not
+// match this token (or is missing) — carried on the auth-refresh crumb as `bind=miss`.
+async function readCachedUser(token: string): Promise<{ user: User | null; unbound: boolean }> {
   try {
     const raw = await AsyncStorage.getItem(USER_KEY);
     const u = raw ? JSON.parse(raw) : null;
     // Guard the shape: a half-written or schema-changed blob must not become a
     // "signed in" user with no id, which would break every screen downstream.
-    return (u && typeof u.id === "string") ? (u as User) : null;
+    if (!(u && typeof u.id === "string")) return { user: null, unbound: false };
+    const tag = await AsyncStorage.getItem(USER_TAG_KEY);
+    if (tag !== userTag(u.id, token)) return { user: null, unbound: true };
+    return { user: u as User, unbound: false };
   } catch {
-    return null;
+    return { user: null, unbound: false };
   }
 }
 
@@ -107,8 +149,9 @@ function sameUser(a: User | null | undefined, b: User): boolean {
 // with his token still stored ("Apple sign in failed" = he tapped it with no network). This file had
 // no crumbs, so which path put him there is NOT known (memory
 // field-2026-09-24-tester-chat-compass-poll-and-three-issues). The rules now:
-//   1. token + cached profile → the profile is shown the moment the cache is read, BEFORE any network;
-//      /auth/me confirms it afterwards (object identity kept when nothing changed, see sameUser).
+//   1. token + cached profile BOUND TO THAT TOKEN (USER_TAG_KEY above) → the profile is shown the moment
+//      the cache is read, BEFORE any network; /auth/me confirms it afterwards (object identity kept when
+//      nothing changed, see sameUser). A profile whose tag does not match is no cache at all (rule 2).
 //   2. token + NO cache + a reachability failure → `user` stays undefined and `connecting` is true:
 //      the gate shows "Connecting…" and retries every 15 s (+ on foreground). Never the login screen.
 //      Only a 401/403 FROM THE SERVER ends a session (unchanged).
@@ -117,8 +160,9 @@ function sameUser(a: User | null | undefined, b: User): boolean {
 //      case 2, not "signed out". The old `getToken().catch(() => null)` made it the login screen (and
 //      getToken() already swallowed the throw, so that catch never even ran).
 //   4. every outcome writes `auth-refresh why=<ok|no-token|rejected:<status>|net:<code>|storage-unreadable>
-//      cached=<0/1> ms=<t> src=<boot|fg|retry|manual>` with logEventReliable (plain logEvent drops rows
-//      published before the Supabase client exists — RULES.md §3).
+//      cached=<0/1> ms=<t> src=<boot|fg|retry|manual>` (+ ` bind=miss` when a profile was on disk but not
+//      bound to this token) with logEventReliable (plain logEvent drops rows published before the Supabase
+//      client exists — RULES.md §3).
 // 250 ms: one runloop's worth of settling for the AsyncStorage manifest read, short enough that a
 // signed-in launch still feels instant; Jeff's spec, 2026-09-24 ("retry getToken() once after 250 ms").
 const TOKEN_REREAD_MS = 250;
@@ -150,8 +194,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const epoch = ++epochRef.current;
     inFlightRef.current = epoch;
     const t0 = Date.now();
+    let bindMiss = false;
     const crumb = (why: string, cached: 0 | 1) => {
-      try { logEventReliable(`auth-refresh why=${why} cached=${cached} ms=${Date.now() - t0} src=${src}`); } catch {}
+      try { logEventReliable(`auth-refresh why=${why} cached=${cached} ms=${Date.now() - t0} src=${src}${bindMiss ? " bind=miss" : ""}`); } catch {}
     };
     try {
       let ts = await readTokenState();
@@ -179,7 +224,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setToken(t);
-      const cached = await readCachedUser();
+      const read = await readCachedUser(t);
+      const cached = read.user;
+      bindMiss = read.unbound;
       if (userRef.current === undefined) {
         if (cached) {
           // Render now — the index gate sends the driver to the map on this state — and confirm below.
@@ -199,7 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         staleRef.current = false;
         setUser((prev) => (sameUser(prev, data) ? prev : data));
         setConnecting(false);
-        void cacheUser(data);
+        void cacheUser(data, t);
         crumb("ok", cached ? 1 : 0);
       } catch (e: any) {
         if (epoch !== epochRef.current) { crumb("stale", cached ? 1 : 0); return; }
@@ -246,7 +293,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user);
+    void cacheUser(data.user, data.token);
   };
 
   const loginWithApple = async () => {
@@ -271,7 +318,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user);
+    void cacheUser(data.user, data.token);
   };
 
   // Returns true when signed in, false if the user cancelled the Google sheet.
@@ -284,7 +331,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user);
+    void cacheUser(data.user, data.token);
     return true;
   };
 
@@ -295,7 +342,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user);
+    void cacheUser(data.user, data.token);
   };
 
   const logout = async () => {

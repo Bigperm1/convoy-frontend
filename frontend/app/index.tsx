@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, ActivityIndicator, StyleSheet, Pressable, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../src/auth";
@@ -23,6 +23,13 @@ import { logEventReliable } from "../src/crashBreadcrumb";
 // "black screen, then sign-in" report can be read from crash_reports (src/auth.tsx has the matching
 // `auth-refresh` rows).
 const AUTH_RETRY_MS = 15_000; // Jeff's spec, 2026-09-24: "a retry every 15 s while there"
+// ...and a way out (2026-09-25, Codex on the unpublished auth commit): "Connecting…" alone has no exit —
+// a server that never answers (or a token store that never becomes readable) holds the driver here for
+// good. After ESCAPE_AFTER_MS on this screen, two controls appear under it: "Try again" (a refresh now)
+// and "Sign out" (an explicit logout, confirmed like Settings → Sign out). Nothing else changes: only a
+// 401/403 from the server signs anyone out on its own. 60 s = the axios budget of one /auth/me that
+// timed out, or four fast failures (boot + three 15 s retries).
+const ESCAPE_AFTER_MS = 60_000;
 
 function userTag(u: { id: string } | null | undefined): string {
   return u === undefined ? "undef" : u === null ? "null" : String(u.id);
@@ -30,12 +37,14 @@ function userTag(u: { id: string } | null | undefined): string {
 
 export default function Index() {
   const router = useRouter();
-  const { user, connecting, refresh } = useAuth();
+  const { user, connecting, refresh, logout } = useAuth();
   // onboarded === undefined → still reading from storage. We treat it as a
   // third "loading" state so the spinner stays up until we know.
   const [onboarded, setOnboarded] = useState<boolean | undefined>(undefined);
   const mountedAtRef = useRef(Date.now());
   const connectingLoggedRef = useRef(false);
+  const [escape, setEscape] = useState(false);   // "Try again" / "Sign out" are showing (sticky once shown)
+  const [trying, setTrying] = useState(false);   // a "Try again" refresh is in flight
 
   useEffect(() => {
     AsyncStorage.getItem(ONBOARDING_KEY)
@@ -64,18 +73,72 @@ export default function Index() {
       try { logEventReliable(`auth-gate to=connecting user=undef ms=${Date.now() - mountedAtRef.current}`); } catch {}
     }
     const id = setInterval(() => { void refresh("retry"); }, AUTH_RETRY_MS);
-    return () => clearInterval(id);
+    const esc = setTimeout(() => {
+      try { logEventReliable(`auth-gate escape=shown ms=${Date.now() - mountedAtRef.current}`); } catch {}
+      setEscape(true);
+    }, ESCAPE_AFTER_MS);
+    return () => { clearInterval(id); clearTimeout(esc); };
   }, [showConnecting, refresh]);
+
+  const tryAgain = useCallback(async () => {
+    if (trying) return;
+    try { logEventReliable(`auth-gate tap=try-again ms=${Date.now() - mountedAtRef.current}`); } catch {}
+    setTrying(true);
+    try { await refresh("manual"); } finally { setTrying(false); }
+  }, [trying, refresh]);
+
+  const signOut = useCallback(() => {
+    Alert.alert("Sign out", "Sign out of Hairpin on this device? You'll need a connection to sign back in.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Sign out", style: "destructive", onPress: () => {
+        try { logEventReliable(`auth-gate tap=sign-out ms=${Date.now() - mountedAtRef.current}`); } catch {}
+        void logout();
+      } },
+    ]);
+  }, [logout]);
 
   return (
     <View style={styles.c}>
-      <ActivityIndicator color={COLORS.primary} size="large" />
-      {showConnecting ? <Text style={styles.connecting}>Connecting…</Text> : null}
+      <View style={styles.col}>
+        <ActivityIndicator color={COLORS.primary} size="large" />
+        {showConnecting ? <Text style={styles.connecting}>Connecting…</Text> : null}
+        {/* Hung below the text, out of the flow, so the spinner and "Connecting…" do not jump when it appears. */}
+        {showConnecting && escape ? (
+          <View style={styles.row}>
+            <Pressable
+              onPress={tryAgain}
+              disabled={trying}
+              accessibilityRole="button"
+              accessibilityLabel="Try again"
+              style={({ pressed }) => [styles.btn, (pressed || trying) && styles.btnDown]}
+            >
+              <Text style={styles.btnText}>{trying ? "Trying…" : "Try again"}</Text>
+            </Pressable>
+            <Pressable
+              onPress={signOut}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out"
+              style={({ pressed }) => [styles.btn, pressed && styles.btnDown]}
+            >
+              <Text style={styles.btnText}>Sign out</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   c: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
+  col: { alignItems: "center" },
   connecting: { marginTop: 16, color: COLORS.textDim, fontSize: 15 },
+  row: { position: "absolute", top: "100%", alignSelf: "center", flexDirection: "row", gap: 12, marginTop: 24 },
+  // The Hairpin square (DESIGN.md § Shape): radius ≈ 28 % of height — 10 on 36.
+  btn: {
+    height: 36, minWidth: 112, paddingHorizontal: 16, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.surfaceSolid, borderWidth: 1, borderColor: COLORS.hairlineStrong,
+  },
+  btnDown: { opacity: 0.6 },
+  btnText: { color: COLORS.text, fontSize: 15, fontWeight: "600" },
 });

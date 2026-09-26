@@ -1066,6 +1066,18 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-CH `3bd9745e` (code `9203b8a2`, 2026-09-25 evening PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "Ship it"
+  (for "Ship the CarPlay zoom update tonight?").** CarPlay / Android Auto camera — Jeff 09-25: *"on carplay the crew button does not
+  have the zoom in timer on it to zoom back in … the carplay zoomout seems like its capped at a distance and is not smooth"* → "It
+  creeps back in". Crew returns after `CREW_RETURN_MS` 7 s like the phone; +/− are eased 280 ms steps with absolute framing during
+  the 15 s hold and a ~1.2 s eased release (also parked) (`src/carZoomStep.ts`); a closed loop (`src/camRepair.ts`) restores a
+  lost camera write with ONE instant push of the written pose — never a fly (rounds 8–10 flew and caused freezes, hops, rotation
+  and fly chains). Bounded `cam-lat surf=car …` rows now MEASURE native start/end latency instead of modelling it. 716
+  head-unit scenarios; 11 review rounds; Codex: 2 low findings (centre-only lost write in a narrow 2D north-up case; no fallback
+  when reports never arrive) → follow-ups. Residuals (CARPLAY.md): an owner fly that starts late is cut by its landing push; the
+  loop's restore is a one-frame cut (1.8/45/90 near crew, up to 7.3 levels on iOS leaving a spread overview early with late
+  reports). Relocked (10 regions + 2 hash locks). Field receipts owed: `cam-lat` rows (real start/end delays), Crew back at 7 s,
+  zero `cam-repair` storms.
 - **✅ PUBLISHED in OTA-CG `5ee233d9` (code `4ef3b2d9`, 2026-09-25 evening PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "SHIP IT
   WITHOUT CODEX" / "I AUTHORIZE YOU TO DO IT" (for the privacy fix; Codex 401 on its login).** Location stops following you after a
   CarPlay / Android Auto disconnect — Jeff 09-25: *"it should not follow me when i discconect from car play... fix it and lock it"* /

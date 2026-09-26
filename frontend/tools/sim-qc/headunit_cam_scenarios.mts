@@ -908,6 +908,55 @@ export function runDelayScenarios(src: Src): Result[] {
     ok(id, `RESIDUAL (pinned): ${name}, native start 0 / 150 / 300 / 600 ms late, parked (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
   }
 
+  // SN — RESIDUAL (pinned; round 11 review, fight [medium]): the loop's restore in its PRIMARY case is a one-frame cut of
+  // the whole lost write — the direct cost of "the loop never flies". Codex's stranded Crew overview (DL0's shape: nearby
+  // crew, Crew, recenter at +720 ms, native start 150 ms late, parked): on iOS the recenter's instant write loses to
+  // crewFit's easeTo (15/0/0 left on screen) and the loop's ONE instant push restores it — z 1.80 / pitch 45° / heading
+  // 90° in one vsync, ~214 ms after the recenter. e492b0e1 flew it (no cut). SN2 is the control: the SAME recenter with
+  // no native delay — its write not lost — is the owner's OWN instant cut of exactly that size at +30 ms, with no loop row
+  // (the near-overview exit is a snap by design, 🔒 car-getcam / crewReturnEdge: a fly only below CHASE_ZOOM): the restore
+  // makes the designed cut 184 ms late; it adds no new size. On Android the owner's 'none' write cancels the easeTo (no
+  // loss, no loop row) and its cut is the owner's (SN1a: 1.785 / 44.6° / 89.2° mid-ease). SN3: DL0 ×8, 2 s apart (BS8's
+  // shape) — one such restore per lost write on iOS, none on Android. A change to any number fails (like FL / KF1).
+  {
+    type SnPin = { z: number; p: number; h: number; loopPush: number };
+    const snOne = (android: boolean, D: number) => {
+      const h = hPark(unit({ android, animStartDelayMs: D }));
+      h.C.__peers = [];
+      const t0 = h.now; h.crew(); h.advance(720); const ta = h.now; h.gesture({ kind: "recenter" }); h.advance(20000);
+      const z = h.maxCut(ta, h.now), p = h.maxPitchCut(ta, h.now), hd = h.maxHeadingCut(ta, h.now);
+      const pushes = h.rows(/cam-repair surf=car op=push/).filter((r) => r.t >= t0);
+      // The cut's frame is the loop's push landing (next vsync after the row) or, with no loop push, the owner's write.
+      const byLoop = pushes.length > 0 && z.at >= pushes[0].t && z.at <= pushes[0].t + 2 * VS + 1;
+      return { h, ta, z, p, hd, pushes, byLoop, flies: h.rows(/cam-(return-fly|repair surf=car op=fly)/).filter((r) => r.t >= t0).length };
+    };
+    const snCase = (id: string, name: string, android: boolean, D: number, pin: SnPin, loopCut: boolean) => {
+      const r = snOne(android, D);
+      const good = Math.abs(r.z.m - pin.z) <= 0.001 && Math.abs(r.p.m - pin.p) <= 0.051 && Math.abs(r.hd.m - pin.h) <= 0.051 && r.pushes.length === pin.loopPush
+        && r.byLoop === loopCut && r.flies === 0 && at3(r.h, 16.8, 45, 90);
+      ok(id, `RESIDUAL (pinned): ${name} (${android ? "Android" : "iOS"})`, good,
+        `(${good ? "as pinned" : `CHANGED (pinned ${pin.z}/${pin.p}°/${pin.h}°, loop pushes ${pin.loopPush}, ${loopCut ? "the loop's" : "the owner's"} cut)`}: one-vsync cut zoom ${f3(r.z.m)} pitch ${r.p.m.toFixed(1)}° heading ${r.hd.m.toFixed(1)}° at +${Math.round(r.z.at - r.ta)} ms after the recenter — ${r.byLoop ? "the loop's instant push" : "the owner's own write"}; loop pushes ${r.pushes.length}, flies ${r.flies}; end ${poseOf(r.h)})`);
+    };
+    snCase("SN1", "Codex's stranded Crew overview (nearby crew, recenter at +720 ms, native start 150 ms late, parked) — the loop's ONE instant restore is a one-frame cut of the whole lost write", false, 150, { z: 1.8, p: 45, h: 90, loopPush: 1 }, true);
+    snCase("SN1a", "the same on Android — the owner's 'none' write cancels the easeTo mid-way (no loss, no loop): its own cut", true, 150, { z: 1.785, p: 44.614, h: 89.229, loopPush: 0 }, false);
+    snCase("SN2", "control — the same recenter with no native delay (its write not lost): the owner's own instant cut of the same size, no loop row", false, 0, { z: 1.8, p: 45, h: 90, loopPush: 0 }, false);
+    snCase("SN2a", "control — the same with no native delay", true, 0, { z: 1.8, p: 45, h: 90, loopPush: 0 }, false);
+    for (const android of [false, true]) {
+      const h = hPark(unit({ android, animStartDelayMs: 150 }));
+      h.C.__peers = [];
+      const t0 = h.now;
+      for (let k = 0; k < 8; k++) { hAt(h, t0 + k * 2000); h.crew(); h.advance(720); h.gesture({ kind: "recenter" }); }
+      h.advance(30000);
+      const pushes = h.rows(/cam-repair surf=car op=push/).filter((r) => r.t >= t0);
+      const cuts = pushes.map((r) => [h.maxCut(r.t, r.t + 2 * VS + 1).m, h.maxPitchCut(r.t, r.t + 2 * VS + 1).m, h.maxHeadingCut(r.t, r.t + 2 * VS + 1).m]);
+      const want = android ? 0 : 6;
+      const good = pushes.length === want && cuts.every(([z, p, hd]) => Math.abs(z - 1.8) <= 0.001 && Math.abs(p - 45) <= 0.051 && Math.abs(hd - 90) <= 0.051) && at3(h, 16.8, 45, 90)
+        && h.rows(/cam-repair surf=car op=(fly|giveup)/).filter((r) => r.t >= t0).length === 0;
+      ok(`SN3${android ? "a" : ""}`, `RESIDUAL (pinned): Codex's lost write ×8, 2 s apart (BS8's shape): ${want} loop restores, each a one-frame 1.80 / 45° / 90° cut (${android ? "Android" : "iOS"})`, good,
+        `(${good ? "as pinned" : `CHANGED (pinned ${want})`}: ${pushes.length} loop pushes${pushes.length ? ` over ${Math.round(pushes[pushes.length - 1].t - pushes[0].t)} ms` : ""}, cuts ${cuts.map(([z, p, hd]) => `${f3(z)}/${p.toFixed(0)}°/${hd.toFixed(0)}°`).join(" ") || "-"}; end ${poseOf(h)})`);
+    }
+  }
+
   // RN — a driver who taps again right after a repair is NOT rationed (verify_zoom_storm_1 ration3/4/5): Codex's lost
   // write (Crew, nearby crew, recenter at +720 ms, 150 ms native start delay) ×6, G ms apart, each corrective write
   // followed D ms later by a second owner intent; then a 7th lost write. e492b0e1 (iOS): the six superseded tries stayed
@@ -1150,11 +1199,34 @@ export function runDelayScenarios(src: Src): Result[] {
     const t0 = h.now;
     for (let k = 0; k < 86; k++) { h.advance(7000); if (k % 8 === 7) h.crew(); else h.press(k % 2 ? 0.5 : -0.5); }
     const rows = latRows(h).filter((r) => r.t >= t0), gaps = rows.slice(1).map((r, i) => r.t - rows[i].t);
-    const well = rows.every((r) => /^cam-lat surf=car kind=(fly|ease|push) ms=\d+ start=(-?\d+|-) end=(-?\d+|-) lag=(-?\d+|-) n=\d+$/.test(r.row));
+    const well = rows.every((r) => /^cam-lat surf=car kind=(fly|ease|push) ms=\d+ start=(-?\d+|-) end=(-?\d+|-) lag=(-?\d+|-) n=\d+( echo=\d+)?$/.test(r.row));
     const kinds = rows.map((r) => /kind=(\w+)/.exec(r.row)![1]);
     ok(`RL2${android ? "a" : ""}`, `a 10-minute moving drive (a press every 7 s, a Crew every 56 s): ≤ 20 cam-lat rows for the session, ≥ 3 s apart, ≤ 5 instant-write samples, every row well-formed, flies and eases measured (${android ? "Android" : "iOS"})`,
       rows.length <= 20 && rows.length > 0 && gaps.every((g) => g >= 3000) && well && kinds.includes("fly") && kinds.includes("ease") && kinds.filter((k) => k === "push").length <= 5 && repairRows(h, t0, h.now).length === 0,
       `(${rows.length} rows: ${kinds.join(",")}; smallest gap ${gaps.length ? Math.min(...gaps) : "-"} ms; e.g. ${rows.find((r) => / kind=fly /.test(r.row))?.row ?? "-"}; loop rows while moving ${repairRows(h, t0, h.now).length})`);
+  }
+
+  // RL3 — THE ECHO RULE (round 11 review, platform [medium]): on a MOVING car crewFit's easeTo is called a frame after the
+  // lockstep's last 'none' push, whose report is captured AFTER the call — it used to date the ease's start (start=1…17 ms
+  // at every native delay: "the easeTo starts at ~0 ms", the very number the crumb exists to measure). A report showing
+  // exactly a pose an instant write made in the CAM_LAT_ECHO_MS before the call is skipped (`echo=`). Moving, Crew at four
+  // phases after a vsync (+0 / 5 / 9 / 13 ms), native start D = 0 / 150 / 300 / 600 ms: the ease's start ∈ [D, D + 2 vsync],
+  // end ∈ [D + 600 + 50 (the idle), + 3 vsync], echo ≥ 1; the 1.8 s return fly (no push precedes it — the hold stands the
+  // lockstep down) starts ∈ [D, D + 2 vsync]. The parked rows (RL1) are unchanged by the rule.
+  for (const android of [false, true]) {
+    const per: string[] = []; let pass = true;
+    for (const D of [0, 150, 300, 600]) for (const off of [0, 5, 9, 13]) {
+      const h = unit({ android, animStartDelayMs: D });
+      h.advance(700 + off);
+      const t0 = h.now; h.crew(); h.advance(15000);
+      const rows = latRows(h).filter((r) => r.t >= t0);
+      const e = rows.find((r) => / kind=ease ms=600 /.test(r.row)), f = rows.find((r) => / kind=fly ms=1800 /.test(r.row));
+      const es = e ? num(e.row, "start") : NaN, ee = e ? num(e.row, "end") : NaN, ec = e ? Number(/ echo=(\d+)/.exec(e.row)?.[1] ?? 0) : 0, fs = f ? num(f.row, "start") : NaN;
+      const good = es >= D && es <= D + 2 * VS + 1 && ee >= D + 650 && ee <= D + 650 + 3 * VS + 1 && ec >= 1 && fs >= D && fs <= D + 2 * VS + 1;
+      if (!good) pass = false;
+      if (!good || off === 0) per.push(`D ${D} +${off}: ${e ? e.row.replace("cam-lat surf=car ", "") : "no ease row"} · fly start ${Number.isFinite(fs) ? fs : "-"}${good ? "" : " ✗"}`);
+    }
+    ok(`RL3${android ? "a" : ""}`, `the cam-lat crumb on a MOVING car: crewFit's easeTo start = the native start delay (+ ≤ 2 vsync), not the lockstep's last push's report (the echo rule, echo ≥ 1); end = start + 600 + the idle; the return fly's start likewise — 4 delays × 4 call phases (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
   }
 
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);

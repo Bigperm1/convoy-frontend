@@ -26,7 +26,7 @@ import {
 import { CREW_RETURN_MS, crewReturnEdge } from "../../src/crewReturn.ts";
 import { RETURN_FLY_MS, returnFlyStep, returnFlyReaim, returnFlyInFlight } from "../../src/returnFly.ts";
 import { glideStep, type GlideParams } from "../../src/camGlide.ts";
-import { camObserve, camWrote, camRepairStep, camRepairEpisode, camRepairRow, camAngOff, newCamRepair, newCamLat, camLatCall, camLatReport, camLatTick, CAM_LAT_ROWS_MAX, CAM_LAT_ROW_GAP_MS, CAM_LAT_OPEN_MAX_MS, CAM_LAT_PUSH_ROWS_MAX, CAM_LAT_PUSH_GAP_MS, CAM_REPAIR_SETTLE_MS, CAM_REPAIR_BUDGET, CAM_REPAIR_BACKOFF, CAM_REPAIR_NOREPORT_MS, CAM_REPAIR_SLOW_MS, CAM_REPAIR_RATE_MAX, CAM_REPAIR_HARD_MAX, CAM_REPAIR_ROWS_MAX, CAM_REPAIR_RATE_WINDOW_MS, type CamObs, type CamRepair } from "../../src/camRepair.ts";
+import { camObserve, camWrote, camRepairStep, camRepairEpisode, camRepairRow, camAngOff, newCamRepair, newCamLat, camLatCall, camLatReport, camLatTick, CAM_LAT_ROWS_MAX, CAM_LAT_ROW_GAP_MS, CAM_LAT_OPEN_MAX_MS, CAM_LAT_PUSH_ROWS_MAX, CAM_LAT_PUSH_GAP_MS, CAM_LAT_ECHO_MS, CAM_LAT_ECHO_MAX, CAM_REPAIR_SETTLE_MS, CAM_REPAIR_BUDGET, CAM_REPAIR_BACKOFF, CAM_REPAIR_NOREPORT_MS, CAM_REPAIR_SLOW_MS, CAM_REPAIR_RATE_MAX, CAM_REPAIR_HARD_MAX, CAM_REPAIR_ROWS_MAX, CAM_REPAIR_RATE_WINDOW_MS, type CamObs, type CamRepair } from "../../src/camRepair.ts";
 import { chaseZoomForSpeed } from "../../src/chaseZoom.ts";
 import { loadSrc, cameraWriteSites, cameraJsxProps, cameraMethodRefs, refEscapes, cameraJsxSpreads } from "./headunit_cam_harness.mts";
 import { runScenarios } from "./headunit_cam_scenarios.mts";
@@ -377,6 +377,46 @@ console.log("CL — the closed loop (src/camRepair.ts): what the map reports vs 
     const r4a = camLatCall(L4, "push", late, 0), r4b = camLatTick(L4, late + CAM_LAT_OPEN_MAX_MS - 1), r4c = camLatTick(L4, late + CAM_LAT_OPEN_MAX_MS);
     ok("CL17 cam-lat: a write that draws no report is written as it stands after CAM_LAT_OPEN_MAX_MS (start=- end=- n=0) — the no-report case the loop's 1 s fallback exists for, measured",
       r4a === null && r4b === null && r4c === "cam-lat surf=car kind=push ms=0 start=- end=- lag=- n=0", `(${r4c})`);
+    // CL18 — THE ECHO RULE (round 11 review, platform [medium]). A MOVING car: the lockstep pushes pose P every frame; Crew
+    // calls crewFit's easeTo 4 ms after the last push; that push's report is captured 8 ms AFTER the call (showing P), the
+    // native easeTo starts 150 ms late (its first frame shows P + a little), onMapIdle at +800. Round 11 dated the start
+    // from P's report (start=8 — "the easeTo starts at ~0 ms"). Also: a pose older than CAM_LAT_ECHO_MS is no echo; a
+    // sampled push's own pose is never one, but an EARLIER push's is; a report with no pose (or a non-finite zoom) is
+    // counted as before; the memory stays ≤ CAM_LAT_ECHO_MAX poses ≤ CAM_LAT_ECHO_MS old and a clock step back clears it.
+    const P = { zoom: 16.8, pitch: 45, heading: 90 }, P2 = { zoom: 16.8, pitch: 45, heading: 90.4 }, E1 = { zoom: 16.796, pitch: 44.9, heading: 89.8 };
+    const ease = (pushAgo: number, reportPose: unknown) => {
+      const L = newCamLat(); const out: string[] = [];
+      const put = (r: string | null) => { if (r) out.push(r); };
+      const t = late + 100000;
+      for (let k = 10; k >= 1; k--) put(camLatCall(L, "push", t - pushAgo - (k - 1) * 17, 0, P));
+      put(camLatCall(L, "ease", t, 600));
+      put(camLatReport(L, t + 8 + 3, t + 8, false, reportPose));          // the last push's own report, captured after the call
+      put(camLatReport(L, t + 150 + 3, t + 150, false, E1));             // the easeTo's first frame (150 ms late)
+      for (let c = 167; c <= 750; c += 17) put(camLatReport(L, t + c + 3, t + c, false, { zoom: 16, pitch: 20, heading: 40 }));
+      put(camLatReport(L, t + 800 + 3, t + 800, true, { zoom: 15, pitch: 0, heading: 0 }));
+      return out.join(" | ");
+    };
+    const a1 = ease(4, P), a2 = ease(CAM_LAT_ECHO_MS + 40, P), a3 = ease(4, undefined), a4 = ease(4, { zoom: NaN, pitch: 45, heading: 90 });
+    // A sampled push Q made 16 ms after push P: P's late report is an echo, Q's own is the start; Q identical to P: its own.
+    const samp = (Q: typeof P) => {
+      const L = newCamLat(), t = late + 200000; const out: string[] = []; const put = (r: string | null) => { if (r) out.push(r); };
+      camLatCall(L, "push", t - 16, 0, P); L.open = null;   // an earlier push (its own sample set aside: this checks the next one)
+      put(camLatCall(L, "push", t, 0, Q)); put(camLatReport(L, t + 5, t + 2, false, P)); put(camLatReport(L, t + 20, t + 17, false, Q));
+      put(camLatCall(L, "push", t + 33, 0, Q)); put(camLatTick(L, t + 40000));
+      return out.join(" | ");
+    };
+    const s1 = samp(P2), s2 = samp(P);
+    const Lm = newCamLat(); let ringOk = true;
+    for (let c = 0; c < 2000; c++) { camLatCall(Lm, "push", late + c * 17, 0, P); if (Lm.writes.length > CAM_LAT_ECHO_MAX || Lm.writes.some((w) => late + c * 17 - w.at > CAM_LAT_ECHO_MS)) ringOk = false; }
+    camLatCall(Lm, "push", late, 0, P); const afterBack = Lm.writes.length;
+    ok(`CL18 cam-lat's ECHO RULE: a report showing exactly a pose an instant write made ≤ ${CAM_LAT_ECHO_MS} ms before the call is that write's own, never the call's start (moving ease 150 ms late: start=150 echo=1, not start=8); an older pose is no echo; a sampled push's own pose is never one, even when an earlier push wrote it too (an earlier push's other pose is); no pose / a non-finite zoom → counted as before; memory ≤ ${CAM_LAT_ECHO_MAX} poses ≤ ${CAM_LAT_ECHO_MS} ms old, cleared by a clock step back`,
+      a1 === "cam-lat surf=car kind=ease ms=600 start=150 end=800 lag=3 n=37 echo=1"
+      && a2 === "cam-lat surf=car kind=ease ms=600 start=8 end=800 lag=3 n=38"
+      && a3 === a2 && a4 === a2
+      && s1 === "cam-lat surf=car kind=push ms=0 start=17 end=- lag=3 n=1 echo=1"
+      && s2 === "cam-lat surf=car kind=push ms=0 start=2 end=- lag=3 n=2"
+      && ringOk && afterBack === 1,
+      `(moving ease: "${a1}"; pose ${CAM_LAT_ECHO_MS + 40} ms old: "${a2}"; no pose: "${a3}"; NaN zoom: "${a4}"; sample after an earlier push: "${s1}"; sample = earlier pose: "${s2}"; ring ${ringOk ? "bounded" : "UNBOUNDED"}, after a clock step back ${afterBack})`);
   }
 }
 
@@ -531,12 +571,12 @@ console.log("S — static: the wiring the harness exercises");
     const phoneJsx = code(between(mbx, "<SelfCarModel", "/>"));
     const obsBody = code(between(cmv, "const noteCamObserved = (", "\n  };"));
     const callBody = code(between(cmv, "const noteCamCall = useRef(", "}).current;"));
-    ok("S29 the `cam-lat` crumb is wired: SelfCarModel reports its fly (st.ms) and every instant push to camCallOut with `now` (taken before the setCamera); CarMapView passes camCallOut={noteCamCall} (the phone JSX passes none); both instant writers and crewFit's easeTo call camLatCall with the time taken before the call; noteCamObserved feeds camLatReport (idle from onMapIdle); carCamJob ticks it; every row is logged",
+    ok("S29 the `cam-lat` crumb is wired: SelfCarModel reports its fly (st.ms) and every instant push to camCallOut with `now` (taken before the setCamera); CarMapView passes camCallOut={noteCamCall} (the phone JSX passes none); both instant writers and crewFit's easeTo call camLatCall with the time taken before the call, the instant writes with the pose they wrote (camWantRef, when it is this write's record); noteCamObserved feeds camLatReport the report's properties (the echo rule; idle from onMapIdle); carCamJob ticks it; every row is logged",
       /if \(camCallOut\) \{ try \{ camCallOut\('fly', st\.ms, now\); \} catch \{\} \}/.test(flyBlk) && /if \(camCallOut\) \{ try \{ camCallOut\('push', 0, now\); \} catch \{\} \}/.test(pub)
-      && /camCallOut=\{noteCamCall\}/.test(cmv) && !/camCallOut/.test(phoneJsx) && /const lr = camLatCall\(camRepairRef\.current\.lat, kind, at, ms\);/.test(callBody) && logsRow(callBody, "lr")
-      && ["applyZoomNow", "ownerSetPose"].every((n) => /const lr = camLatCall\(camRepairRef\.current\.lat, 'push', wroteAt, 0\);/.test(body(n)) && logsRow(body(n), "lr"))
+      && /camCallOut=\{noteCamCall\}/.test(cmv) && !/camCallOut/.test(phoneJsx) && /const lr = camLatCall\(camRepairRef\.current\.lat, kind, at, ms, kind === 'push' && camWantRef\.current\?\.at === at \? camWantRef\.current : null\);/.test(callBody) && logsRow(callBody, "lr")
+      && ["applyZoomNow", "ownerSetPose"].every((n) => /const lr = camLatCall\(camRepairRef\.current\.lat, 'push', wroteAt, 0, camWantRef\.current\?\.at === wroteAt \? camWantRef\.current : null\);/.test(body(n)) && logsRow(body(n), "lr"))
       && /const easeAt = Date\.now\(\);/.test(crewCase) && crewCase.indexOf("const easeAt = Date.now();") < crewCase.indexOf("setCamera(") && /const lr = camLatCall\(camRepairRef\.current\.lat, 'ease', easeAt, CREW_FIT_EASE_MS\);/.test(crewCase) && logsRow(crewCase, "lr")
-      && /const lr = camLatReport\(camRepairRef\.current\.lat, now, state\?\.timestamp, idle\);/.test(obsBody) && logsRow(obsBody, "lr")
+      && /const lr = camLatReport\(camRepairRef\.current\.lat, now, state\?\.timestamp, idle, p\);/.test(obsBody) && /const p = state\?\.properties, now = Date\.now\(\);/.test(obsBody) && logsRow(obsBody, "lr")
       && /const lt = camLatTick\(camRepairRef\.current\.lat, now\);/.test(job26) && logsRow(job26, "lt"),
       `(phone JSX mentions camCallOut: ${/camCallOut/.test(phoneJsx)})`);
   }

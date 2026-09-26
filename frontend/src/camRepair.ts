@@ -21,7 +21,12 @@
 // 2°) is gone, and with it the three findings it caused against round 10 (b68bda7e): it flew to the CAR's heading, not
 // the written one (a parked map rotated ~20°); its landing hold froze a moving car's camera and hopped up to 18 m; and
 // every owner intent inside it re-aimed it (460–1200 flyTo / 10 min). A repair is therefore a one-frame cut of exactly the
-// lost write's size — the price of never animating from a pose the loop cannot see being reached.
+// lost write's size — the price of never animating from a pose the loop cannot see being reached. In the loop's primary
+// case (Codex's stranded Crew overview: nearby crew, recenter 720 ms after Crew, iOS, native start 150 ms late) that is
+// z 1.80 / pitch 45° / heading 90° in one frame, 214 ms after the recenter — the SAME cut the recenter's own instant write
+// makes when it is not lost (native start 0 ms: 1.80 / 45° / 90° at +30 ms, no loop row, here and at e492b0e1). e492b0e1
+// flew it instead (no cut). Pinned by headunit_cam_delay SN1–SN3 (round 11 review, fight [medium]); only an animated
+// repair — ruled out by the round-11 decision — or an animated recenter from a near overview would remove it.
 //
 // Bounds (round 9 findings 1 and 3 — a budget for a device that NEVER agrees, not for a driver who taps several times):
 //   • EPISODES: every owner intent (a gesture, a system correction, a Crew press) starts one; an agreement confirmed after
@@ -50,6 +55,9 @@
 // lag (JS receipt − native capture, max over the window). Bounded: ≤ CAM_LAT_ROWS_MAX rows per session, ≥
 // CAM_LAT_ROW_GAP_MS apart; a fly / ease outranks an instant-write sample, and instant writes are sampled on their own
 // quota (≤ CAM_LAT_PUSH_ROWS_MAX a session, ≥ CAM_LAT_PUSH_GAP_MS apart) so the flies and eases keep the rest.
+// THE ECHO RULE (round 11 review): a report showing exactly a pose an instant write made just before the call is that
+// write's own report delivered after it, never the call's start (a moving car's crewFit easeTo read the lockstep's last
+// push: start=1 whatever the native delay). Such reports are skipped until the start is dated and counted in `echo=`.
 // Pure module: gated by tools/sim-qc/car_zoom_step_test.mts (CL*) and headunit_cam_delay_test.mts (the production code).
 
 /** The map must have been still this long (and the owner silent this long) before its report is trusted. */
@@ -89,6 +97,15 @@ export const CAM_LAT_OPEN_MAX_MS = 6000;
 export const CAM_LAT_PUSH_ROWS_MAX = 5;
 /** …at least this far apart. */
 export const CAM_LAT_PUSH_GAP_MS = 60000;
+/** THE ECHO RULE (round 11 review, platform [medium]): a report that shows EXACTLY a pose an instant write made in the
+ *  CAM_LAT_ECHO_MS before a measured call is that earlier write's own report, delivered after the call — never the call's
+ *  START. On a MOVING car crewFit's easeTo is called a frame after the lockstep's last 'none' push; that push's report is
+ *  captured after the call, and dated the ease's start at 1–17 ms whatever the native start delay (harness: 150 / 300 /
+ *  600 ms late → start=1). How long before a call a write can still be applied after it (HYPOTHESIS: the bridge delivers a
+ *  write within a few frames; not measured on a head unit)… */
+export const CAM_LAT_ECHO_MS = 250;
+/** …and how many recent instant writes' poses are kept for it (a moving car writes one a frame: 250 ms ≈ 15). */
+export const CAM_LAT_ECHO_MAX = 16;
 
 /** What the owner last wrote (heading/pitch null = not written / unknown). */
 export type CamPose = { zoom: number; pitch: number | null; heading: number | null; at: number };
@@ -96,11 +113,17 @@ export type CamPose = { zoom: number; pitch: number | null; heading: number | nu
  *  CAPTURED it (the native timestamp; the receipt time when the report carries none). */
 export type CamObs = { zoom: number; pitch: number | null; heading: number | null; lng: number | null; lat: number | null; gesture: boolean; at: number; changedAt: number; stamp: number };
 export type CamLatKind = "fly" | "ease" | "push";
-/** One latency measurement: the call (JS ms), its requested duration, and what the reports showed (ms after the call). */
-export type CamLatM = { kind: CamLatKind; at: number; ms: number; start: number | null; end: number | null; lag: number | null; n: number };
+/** A camera pose as an instant write wrote it or a report showed it (pitch / heading null = unknown). */
+export type CamLatPose = { zoom: number; pitch: number | null; heading: number | null };
+/** One latency measurement: the call (JS ms), its requested duration, and what the reports showed (ms after the call).
+ *  `not`: poses earlier instant writes made in the CAM_LAT_ECHO_MS before the call — a report showing one of them before
+ *  the start is dated is that write's echo, not this call's (`own`: a sampled push's own pose, which is never an echo);
+ *  `echo`: how many reports were skipped that way. */
+export type CamLatM = { kind: CamLatKind; at: number; ms: number; start: number | null; end: number | null; lag: number | null; n: number; not: CamLatPose[]; own: CamLatPose | null; echo: number };
 /** The crumb's per-session state: the open measurement, the row waiting for the gap, rows written, the last row's time,
- *  and the instant-write samples' own quota (rows written, the last one's time). */
-export type CamLat = { open: CamLatM | null; pend: CamLatM | null; rows: number; lastRowAt: number; pushRows: number; lastPushRowAt: number };
+ *  the instant-write samples' own quota (rows written, the last one's time), and the recent instant writes' poses
+ *  (≤ CAM_LAT_ECHO_MAX, ≤ CAM_LAT_ECHO_MS old — the echo rule). */
+export type CamLat = { open: CamLatM | null; pend: CamLatM | null; rows: number; lastRowAt: number; pushRows: number; lastPushRowAt: number; writes: { at: number; p: CamLatPose }[] };
 /** `judged`: the open try has been judged wrong since it was made (it stays counted even if an intent supersedes it).
  *  `gap`: the last judged gap (for the superseded row). `lat`: the latency crumb (it rides the loop's per-mount state). */
 export type CamRepair = {
@@ -115,7 +138,7 @@ export type CamRepairAct = "none" | "ok" | "push" | "giveup" | "superseded";
  *  timeout); `ep`: the episode's age (ms). `counted`: a superseded try stays counted (it was judged wrong first). */
 export type CamRepairVerdict = { act: CamRepairAct; dz: number; dp: number; dh: number; n: number; rep: number; ep: number; log: boolean; drop: number; counted: boolean };
 
-export function newCamLat(): CamLat { return { open: null, pend: null, rows: 0, lastRowAt: -Infinity, pushRows: 0, lastPushRowAt: -Infinity }; }
+export function newCamLat(): CamLat { return { open: null, pend: null, rows: 0, lastRowAt: -Infinity, pushRows: 0, lastPushRowAt: -Infinity, writes: [] }; }
 export function newCamRepair(now = 0): CamRepair {
   return { episodeAt: now, tries: [], gaveUp: false, giveupLogged: false, slow: 0, open: 0, judged: false, pending: null, gap: { dz: 0, dp: 0, dh: 0 }, writes: [], unconfirmed: [], rows: [], dropped: 0, lat: newCamLat() };
 }
@@ -248,10 +271,22 @@ function latClose(L: CamLat): void {
   L.open = null;
   if (m && (!L.pend || latRank(m) >= latRank(L.pend))) L.pend = m;
 }
-/** The `cam-lat` receipt for one measurement (ms, rounded; `-` = not seen). */
+/** The `cam-lat` receipt for one measurement (ms, rounded; `-` = not seen; `echo=` only when a report was skipped as an
+ *  earlier write's own). */
 export function camLatRow(m: CamLatM): string {
   const r = (x: number | null) => (x == null || !Number.isFinite(x) ? "-" : String(Math.round(x)));
-  return `cam-lat surf=car kind=${m.kind} ms=${Math.round(m.ms)} start=${r(m.start)} end=${r(m.end)} lag=${r(m.lag)} n=${m.n}`;
+  return `cam-lat surf=car kind=${m.kind} ms=${Math.round(m.ms)} start=${r(m.start)} end=${r(m.end)} lag=${r(m.lag)} n=${m.n}${m.echo ? ` echo=${m.echo}` : ""}`;
+}
+/** A finite pose from an owner write's record or a report's properties (null when its zoom is not finite). */
+function latPose(p: { zoom?: unknown; pitch?: unknown; heading?: unknown } | null | undefined): CamLatPose | null {
+  if (!p || !fin(p.zoom)) return null;
+  return { zoom: p.zoom, pitch: fin(p.pitch) ? p.pitch : null, heading: fin(p.heading) ? p.heading : null };
+}
+/** The same pose within the tolerances camObserve calls "not moved" (an unknown pitch / heading on either side matches). */
+function latSame(a: CamLatPose, b: CamLatPose): boolean {
+  return Math.abs(a.zoom - b.zoom) < 1e-4
+    && (a.pitch == null || b.pitch == null || Math.abs(a.pitch - b.pitch) < 0.01)
+    && (a.heading == null || b.heading == null || camAngOff(a.heading, b.heading) < 0.01);
 }
 /** Every tick / call / report: close a measurement open too long, then write the waiting row once the gap allows. Returns
  *  the row to log (null = nothing to write now). */
@@ -271,9 +306,11 @@ export function camLatTick(L: CamLat, now: number): string | null {
  * always opens a measurement (a push sample open is discarded; a fly / ease still open is written as it stands — it was
  * re-aimed or replaced). A push opens one only when nothing is open or waiting, the row gap has passed and the push quota
  * allows (CAM_LAT_PUSH_ROWS_MAX, CAM_LAT_PUSH_GAP_MS), and the next push ends a push sample whose first report was seen
- * (a moving car pushes every frame). Returns the row to log.
+ * (a moving car pushes every frame). `pose`: what an instant write wrote (its record — camWantRef); every push's pose is
+ * kept CAM_LAT_ECHO_MS for the echo rule, and a measurement opened now remembers the poses written before it. Returns the
+ * row to log.
  */
-export function camLatCall(L: CamLat, kind: CamLatKind, now: number, ms: number): string | null {
+export function camLatCall(L: CamLat, kind: CamLatKind, now: number, ms: number, pose?: { zoom?: unknown; pitch?: unknown; heading?: unknown } | null): string | null {
   if (!fin(now)) return null;
   const anim = kind !== "push";
   if (L.open) {
@@ -281,28 +318,43 @@ export function camLatCall(L: CamLat, kind: CamLatKind, now: number, ms: number)
     else if (L.open.kind === "push") L.open = null;
     else latClose(L);
   }
+  // The echo rule's memory: the recent instant writes, oldest dropped (a clock step backwards keeps nothing). In place — a
+  // moving car calls this every frame.
+  const W = L.writes;
+  if (W.length && W[W.length - 1].at > now) W.length = 0;
+  while (W.length && now - W[0].at > CAM_LAT_ECHO_MS) W.shift();
+  const own = !anim ? latPose(pose) : null;
   const room = L.rows + (L.pend ? 1 : 0) < CAM_LAT_ROWS_MAX;
   const pushOk = !L.pend && now - L.lastRowAt >= CAM_LAT_ROW_GAP_MS && L.pushRows < CAM_LAT_PUSH_ROWS_MAX && now - L.lastPushRowAt >= CAM_LAT_PUSH_GAP_MS;
   if (!L.open && room && (anim || pushOk)) {
-    L.open = { kind, at: now, ms: fin(ms) ? ms : 0, start: null, end: null, lag: null, n: 0 };
+    L.open = { kind, at: now, ms: fin(ms) ? ms : 0, start: null, end: null, lag: null, n: 0, not: L.writes.map((w) => w.p), own, echo: 0 };
   }
+  if (own) { L.writes.push({ at: now, p: own }); if (L.writes.length > CAM_LAT_ECHO_MAX) L.writes.shift(); }
   return camLatTick(L, now);
 }
 /**
  * A native camera REPORT (onCameraChanged, or onMapIdle with `idle`) received at `now`, captured at `stamp` (the native
- * epoch-ms timestamp; the receipt time when absent). A report captured before the open call is not its own. The first
- * one after the call dates the START; the first onMapIdle after that dates the END and closes it (an idle that comes
- * first is an earlier motion's). `lag` = the largest receipt − capture. Returns the row to log.
+ * epoch-ms timestamp; the receipt time when absent), showing `pose` (the report's properties: zoom / pitch / heading). A
+ * report captured before the open call is not its own. Until the START is dated, a report showing EXACTLY a pose an
+ * earlier instant write made (the echo rule — its own report, delivered after the call; a sampled push's own pose is
+ * never an echo) is skipped and counted in `echo`. The first other report after the call dates the START; the first
+ * onMapIdle after that dates the END and closes it (an idle that comes first is an earlier motion's). `lag` = the largest
+ * receipt − capture over the call's own reports. A report without a finite zoom is never an echo. Returns the row to log.
  */
-export function camLatReport(L: CamLat, now: number, stamp: unknown, idle: boolean): string | null {
+export function camLatReport(L: CamLat, now: number, stamp: unknown, idle: boolean, pose?: { zoom?: unknown; pitch?: unknown; heading?: unknown } | null): string | null {
   const m = L.open;
   if (m && fin(now)) {
     const s = fin(stamp) ? stamp : now;
     if (s >= m.at && !(idle && m.n === 0)) {
-      m.n++;
-      if (fin(stamp)) m.lag = m.lag == null ? now - stamp : Math.max(m.lag, now - stamp);
-      if (m.start == null) m.start = s - m.at;
-      if (idle) { m.end = s - m.at; latClose(L); }
+      // (An idle reaching here has its start dated already — the echo rule never applies to it.)
+      const p = m.start == null && m.not.length ? latPose(pose) : null;
+      if (p && m.not.some((q) => latSame(q, p)) && !(m.own && latSame(m.own, p))) m.echo++;
+      else {
+        m.n++;
+        if (fin(stamp)) m.lag = m.lag == null ? now - stamp : Math.max(m.lag, now - stamp);
+        if (m.start == null) m.start = s - m.at;
+        if (idle) { m.end = s - m.at; latClose(L); }
+      }
     }
   }
   return camLatTick(L, now);

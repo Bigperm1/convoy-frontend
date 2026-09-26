@@ -1437,17 +1437,20 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
   // captured it — iOS Date().timeIntervalSince1970, Android System.currentTimeMillis(), the same clock as Date.now()). Called first thing by onCameraChanged (every native camera change —
   // MapboxMap.onCameraChanged "is emitted whenever … the camera is modified by calling camera methods") and by onMapIdle.
   // `idle`: onMapIdle's report. Each report also feeds the `cam-lat` crumb (src/camRepair.ts camLatReport — round 11): the
-  // first one captured after a measured call dates its START, the next onMapIdle its END, receipt − capture its LAG.
+  // first one captured after a measured call dates its START — unless it shows exactly a pose an instant write made just
+  // before the call (that write's own report, delivered after it: the echo rule) — the next onMapIdle its END, receipt −
+  // capture its LAG.
   const noteCamObserved = (state: any, idle = false) => {
     const p = state?.properties, now = Date.now();
     camObsRef.current = camObserve(camObsRef.current, p?.zoom, p?.pitch, p?.heading, !!state?.gestures?.isGestureActive, now, p?.center, state?.timestamp);
-    const lr = camLatReport(camRepairRef.current.lat, now, state?.timestamp, idle);
+    const lr = camLatReport(camRepairRef.current.lat, now, state?.timestamp, idle, p);   // p: the pose it shows (the echo rule)
     if (lr) { try { logEvent(lr); } catch {} }
   };
   // SelfCarModel.pushCam's camera CALLS (its return / re-aimed fly and every instant 'none' write), timed before the native
   // call, for the `cam-lat` crumb. Stable identity (a ref), like carCamJob.
   const noteCamCall = useRef((kind: 'fly' | 'push', ms: number, at: number) => {
-    const lr = camLatCall(camRepairRef.current.lat, kind, at, ms);
+    // A push passes the pose it wrote (pushCam published it to camWantRef just before — the echo rule, src/camRepair.ts).
+    const lr = camLatCall(camRepairRef.current.lat, kind, at, ms, kind === 'push' && camWantRef.current?.at === at ? camWantRef.current : null);
     if (lr) { try { logEvent(lr); } catch {} }
   }).current;
   // ── ONE CAMERA OWNER, PARKED TOO (2026-09-25) ────────────────────────────────────────────────────────────────
@@ -1706,7 +1709,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       cameraRef.current?.setCamera({ zoomLevel: zoom, animationDuration: 0, animationMode: 'none' });
     } catch {}
     camWantRef.current = camWrote(camWantRef.current, zoom, null, null, wroteAt);   // the closed loop's reference
-    const lr = camLatCall(camRepairRef.current.lat, 'push', wroteAt, 0);   // a sampled instant write (`cam-lat`, round 11)
+    const lr = camLatCall(camRepairRef.current.lat, 'push', wroteAt, 0, camWantRef.current?.at === wroteAt ? camWantRef.current : null);   // a sampled instant write (`cam-lat`, round 11) + its pose (the echo rule)
     if (lr) { try { logEvent(lr); } catch {} }
     return true;
   };
@@ -1736,7 +1739,7 @@ export default function CarMapView({ onGLError, attempt = 0, surfaceW = 0, surfa
       } as any);
     } catch {}
     camWantRef.current = camWrote(camWantRef.current, zoom, pose.pitch, heading, wroteAt);   // the closed loop's reference
-    const lr = camLatCall(camRepairRef.current.lat, 'push', wroteAt, 0);   // a sampled instant write (`cam-lat`, round 11)
+    const lr = camLatCall(camRepairRef.current.lat, 'push', wroteAt, 0, camWantRef.current?.at === wroteAt ? camWantRef.current : null);   // a sampled instant write (`cam-lat`, round 11) + its pose (the echo rule)
     if (lr) { try { logEvent(lr); } catch {} }
     return true;
   };

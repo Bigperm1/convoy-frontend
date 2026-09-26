@@ -363,3 +363,17 @@ node --experimental-strip-types tools/sim-qc/panel_floor_test.mts
 - `panel_floor_test` — one floor (`src/panelFloor.ts`) for the weather card, the Report panel, the pin card and the category
   drop-down / More panel.
 Spec: `HAZARDS.md` §11.
+
+## Nav-start permissions gate (the real startNavBanner, in a vm) — 2026-09-06 / 25
+
+```bash
+node --experimental-strip-types tools/sim-qc/nav_start_permissions_test.mts
+```
+
+Lifts `startNavBanner` out of `src/navNotification.ts` with the TypeScript parser and runs it against fakes on iOS and
+Android × undetermined / denied / granted notifications: no permission prompt, `true`, one `"nav"` background-location
+hold, the overview polyline persisted, the Android channel created. `startNavBanner` swallows every error, so every
+`catch` is rewritten to record what it swallowed and each case asserts nothing was — a new module-scope call with no stub
+in the harness FAILS naming the identifier instead of reading as `return false` (section H proves it). Written by Codex
+2026-09-06 as a `.cjs`, which the `*_test.mts` gate loop never ran: it was red from 2026-09-09 (`resetColdDrive`) to
+2026-09-25 unseen. New call in `startNavBanner` → add its stub to the context in the test, never a `try` around it.

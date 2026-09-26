@@ -310,7 +310,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bind = read.bind;
       setToken(t);
       if (userRef.current === undefined) {
-        if (cached) {
+        // Only a profile TAGGED to this token renders before the server answers. An untagged (legacy) profile
+        // waits for the catch below — the shipped build's rule — so a disk the old build left as token B beside
+        // profile A never shows A while the server can still say who B is (auth_verify_r2 L1, 2026-09-25).
+        if (cached && bind === "ok") {
           // Render now — the index gate sends the driver to the map on this state — and confirm below.
           userRef.current = cached;
           setUser(cached);
@@ -343,8 +346,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           crumb(`rejected:${e?.response?.status}`, cached ? 1 : 0);
           return;
         }
-        // Could not reach the server. KEEP the token. A cached profile is already on screen; with none,
-        // `user` stays undefined and `connecting` keeps the gate on "Connecting…" with its retries.
+        // Could not reach the server. KEEP the token. A tagged cached profile is already on screen; an untagged
+        // (legacy) one is shown only now, exactly as the shipped build did; with none, `user` stays undefined and
+        // `connecting` keeps the gate on "Connecting…" with its retries.
+        if (cached && bind === "legacy" && userRef.current === undefined) {
+          userRef.current = cached;
+          setUser(cached);
+          setConnecting(false);
+        }
         staleRef.current = true;
         crumb(`net:${netCode(e)}`, cached ? 1 : 0);
       }

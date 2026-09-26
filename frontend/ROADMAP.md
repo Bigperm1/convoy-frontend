@@ -1066,6 +1066,18 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-CG `5ee233d9` (code `4ef3b2d9`, 2026-09-25 evening PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "SHIP IT
+  WITHOUT CODEX" / "I AUTHORIZE YOU TO DO IT" (for the privacy fix; Codex 401 on its login).** Location stops following you after a
+  CarPlay / Android Auto disconnect — Jeff 09-25: *"it should not follow me when i discconect from car play... fix it and lock it"* /
+  *"My icon moved on the map."* One owner for every car GPS watch (`src/carFeedOwner.ts`; the connect double-start orphaned one),
+  a cancellation-safe phone watcher, no raw car coords in telemetry after a disconnect, a witnessed park needs ≥ 15 s + ≥ 300 m of
+  vehicular fixes to re-arm (`src/parkRearm.ts`), the witness survives any record age or an iOS process death (the pin may not),
+  and every privacy window runs on `src/privacyClock.ts` (never backwards, counts sleeps, no drift). Relocked (10 regions +
+  3 new hash locks). Gates: `park_rearm_test` 153 ok, `car_feed_leak_test` 82 ok; four Claude adversarial reviews + a 3-lens
+  workflow stood in for Codex — every finding reproduced, then closed or documented (CARPLAY.md §6c residuals: lost-AA
+  liveness, paused-monotonic rollback in one sleep → build-80 boot-time clock, congestion stays pinned). Codex review still owed
+  after `codex login`. Field receipts owed: no `draw-cmp surf=car gps=` / `cam-apply surf=car` rows after a `carplay-disconnect`,
+  no live share on a walk after a park, `priv-clock-back` rows (expect ~0).
 - **✅ PUBLISHED in OTA-CF `c3635e02` (code `94af3581`, 2026-09-25 12:38 PDT; KEY_PRESENT=1 iOS + Android) — Jeff's go: "Ship it"
   (09-25, for "Publish bundle A (glyphs + hazard pill + crew-pill drop fix) as an OTA now?").** (1) Head units: the candy Hazards
   triangle recut smaller and centred on its circumcentre (0.795/0.790/0.790 of the half-canvas vs 0.72/0.98/0.98 — it touched

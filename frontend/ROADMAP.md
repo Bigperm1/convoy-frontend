@@ -1066,6 +1066,12 @@ HEAD via the ship-ota ritual (`env:exec preview` + `verify-bundle-key.py <group>
   (`RULES.md` §4). It runs in every OTA and cut ritual.
 - **OTA-AZ `01918fc9` (2026-09-17 evening):** the parked-heading fix, shipped on Jeff's "deploy the heading fix" — the lock's first
   real use (relock printed exactly the two expected locks). `thermal=` is OUT (Jeff). Supabase is on Pro.
+- **✅ PUBLISHED in OTA-CJ `a3d5df66` (code `858da96b`, 2026-09-26 ~12:00 PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "Ship it"
+  (auth fix).** Rodrigo's black screen / login bounce when Render is asleep: auth boots from the cached profile, now BOUND to its
+  token (`convoy_user_tok`; a legacy untagged profile is used only after the server can't be reached, = the old rule); no cache →
+  "Connecting…" (near-white) with Try again / Sign out after 60 s; sign-out removes token+profile+tag in one multiRemove and reads
+  back; Try again joins the request in flight; 5 s storage budgets. Codex 3 high + 2 medium → skeptics LOW; two hardening rounds;
+  identity fuzz wrong 0/1212. Not nav-locked. Field receipts: `auth-refresh … bind=` / `auth-gate escape=` rows.
 - **✅ PUBLISHED in OTA-CI `8bf9b86a` (code `68b52716`, 2026-09-26 ~09:05 PDT; KEY_PRESENT=1 iOS + Android) — Jeff: "Ship it"
   (for the privacy follow-up).** Codex's one OTA-CG finding (3 independent reproductions): a CarPlay / AA session that never got a
   car spot kept the witnessed park only in memory, so a restart + one fast walking fix went live. The witness now has its own key

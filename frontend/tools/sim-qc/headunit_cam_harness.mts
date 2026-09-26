@@ -191,8 +191,8 @@ export function makeHeadUnit(src: Src, o: Opts = {}) {
   };
   const CP = scopeProxy(C, unresolved);
   for (const n of ["clampBias", "zoomLog", "zoomHoldRelease", "carCamJob", "getCam", "applyZoomNow", "applyZoomEased", "reassertAaFollow"]) C[n] = bind(liftVar(csf, "CarMapView", n), CP);
-  // Present since 2026-09-25 round 3 (an older revision replayed as a negative control has no such closure).
-  for (const n of ["takeOverNativeCam", "ownerSetPose", "nativeTailUntil", "noteWriteInTail", "noteCamObserved"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
+  // Present since 2026-09-25 round 3 / round 10 (holdFly) — an older revision replayed as a negative control has no such closure.
+  for (const n of ["takeOverNativeCam", "ownerSetPose", "nativeTailUntil", "noteWriteInTail", "noteCamObserved", "holdFly"]) { try { C[n] = bind(liftVar(csf, "CarMapView", n), CP); } catch { /* absent in that revision */ } }
   // The render-time EFFECTS that write the camera (they run after a render whose deps changed):
   const layoutEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| mapW <= 0\) return;/.test(t)), CP);        // 🔒 car-zoom-apply-now
   const coldStartEffect = bind(liftCallArg(csf, "CarMapView", "useEffect", (t) => /if \(!painted \|\| !hasFix \|\| !cameraRef\.current\) return;/.test(t)), CP);   // 🔒 car-cam-coldstart-snap

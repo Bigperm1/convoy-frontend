@@ -830,6 +830,77 @@ export function runDelayScenarios(src: Src): Result[] {
       `(loop ${ops(rr)}; flies ${fl}; camera ${poseOf(h)} want ${z}/45/${hd})`);
   }
 
+  // ════ Round 10 (three verified findings against e492b0e1) — each reproduction, through the production code ════════
+  // LR — a repair try due on the tick the 15 s zoom hold LAPSES (verify_zoom_fight_1 race_trace / race.mts): parked,
+  // 4 × −0.5 (held framing 14.8), one foreign write to z 16.0 or 12 made 140–195 ms before the lapse, 1 ms apart
+  // (e492b0e1: the try flew to the old 14.8 while the release eased from under it, then cut 1.40 / 1.58 levels on
+  // landing — lost writes 151–166 ms before the lapse on iOS, 151–183 on Android). Expected: no one-vsync zoom change
+  // above CUT that no native animation made (the release's own ease-in-out peaks at ~0.10 for 4.8 levels) and home at 16.8.
+  for (const android of [false, true]) for (const lostZ of [16.0, 12]) {
+    const bad: string[] = []; let worst = 0, n = 0;
+    for (let d = 140; d <= 195; d++) {
+      const h = hPark(unit({ android }));
+      for (let k = 0; k < 4; k++) { h.press(-0.5); h.advance(100); }
+      const lapse = h.C.zoomHoldUntilRef.current - (h.abs - h.now);
+      hAt(h, lapse - d); const tInj = h.now;
+      native(h, { zoomLevel: lostZ }); h.advance(6000); n++;
+      const c = h.maxCut(tInj + 20, h.now);
+      worst = Math.max(worst, c.m);
+      if (c.m > CUT || Math.abs(h.cam.zoom - 16.8) > 0.01) bad.push(`−${d} ms: cut ${f3(c.m)} at lapse+${Math.round(c.at - lapse)}, end ${f3(h.cam.zoom)}`);
+    }
+    ok(`LR${android ? 2 : 1}${lostZ === 12 ? "b" : "a"}`, `a foreign write to z ${lostZ} made 140–195 ms before the 15 s hold lapses (1 ms steps, ${n} runs), 4 × −0.5 held at 14.8, parked: no cut above ${CUT} and home at 16.8 — a try due on the lapse tick stands down (${android ? "Android" : "iOS"})`,
+      bad.length === 0, `(worst one-vsync zoom change outside a native animation ${f3(worst)}${bad.length ? `; ${bad.length} runs FAIL, e.g. ${bad.slice(0, 3).join("; ")}` : ""})`);
+  }
+
+  // FL — A FLY'S LANDING WAITS FOR THE MAP (verify_zoom_fight_1 fight3 T11): every head-unit fly — the loop's 280 ms
+  // repair fly, the Crew 1.8 s return, the return re-aimed by a '+', the short fly a recenter starts inside crewFit's
+  // easeTo — with its native start 0 / 150 / 300 / 600 ms late, parked. e492b0e1: Android cut 0.62 / 4.1 levels on the
+  // repair fly at 150 / 300 ms (the landing 'none' cancels a late fly), 0.29 / 1.46 on the Crew return at 300 / 600 ms;
+  // iOS cut 4.8 at 600 ms (a fly that has not started is cut to its end). Expected: no zoom change above STEP_BAR and no
+  // pitch / heading change above 1° that no native animation made; the flown framing held at the end.
+  const flyKinds: [string, (h: HU) => void, number][] = [
+    ["the loop's 280 ms repair fly (a foreign write to z 12)", (h) => native(h, { zoomLevel: 12 }), 16.8],
+    ["the Crew 1.8 s return (wide crew)", (h) => h.crew(), 16.8],
+    ["the Crew return re-aimed by a '+' 1.5 s into it", (h) => { h.crew(); h.advance(8500); h.press(0.5); }, 17.3],
+    ["the short fly a recenter starts inside crewFit's easeTo (nearby crew)", (h) => { h.C.__peers = []; h.crew(); h.advance(300); h.gesture({ kind: "recenter" }); }, 16.8],
+  ];
+  let fi = 0;
+  for (const [name, act, wz] of flyKinds) for (const android of [false, true]) {
+    const per: string[] = []; let pass = true;
+    for (const D of [0, 150, 300, 600]) {
+      const h = hPark(unit({ android, animStartDelayMs: D }));
+      const t0 = h.now; act(h); h.advance(12000);
+      const z = h.maxCut(t0 + 20, h.now), p = h.maxPitchCut(t0 + 20, h.now), hd = h.maxHeadingCut(t0 + 20, h.now);
+      const good = z.m <= STEP_BAR && p.m <= 1 && hd.m <= 1 && at3(h, wz, 45, 90);
+      if (!good) pass = false;
+      per.push(`${D} ms: ${good ? "ok" : "FAIL"} zoom ${f3(z.m)} pitch ${p.m.toFixed(1)}° heading ${hd.m.toFixed(1)}°, end ${poseOf(h)}`);
+    }
+    ok(`FL${++fi}`, `${name}, native start 0 / 150 / 300 / 600 ms late, parked: the landing never cuts the fly (${android ? "Android" : "iOS"})`, pass, `(${per.join(" | ")})`);
+  }
+
+  // RN — a driver who taps again right after a repair is NOT rationed (verify_zoom_storm_1 ration3/4/5): Codex's lost
+  // write (Crew, nearby crew, recenter at +720 ms, 150 ms native start delay) ×6, G ms apart, each corrective write
+  // followed D ms later by a second owner intent; then a 7th lost write. e492b0e1 (iOS): the six superseded tries stayed
+  // "unconfirmed", the 7th was rationed — the camera left at the Crew pose 17–44 s. Expected: home within 1 s of the
+  // 7th's animations (the longest stretch off 16.8/45/90 after them ≤ 1000 ms).
+  let ni = 0;
+  for (const android of [false, true]) for (const [kind, D, G] of [["recenter", 100, 2500], ["recenter", 100, 4000], ["recenter", 550, 4000], ["recenter", 100, 7000], ["compass ×2", 200, 7000], ["AppState re-assert", 43, 7000]] as const) {
+    const h = hPark(unit({ android, animStartDelayMs: 150 }));
+    h.C.__peers = [];
+    const t0 = h.now; let seen = 0, n2 = 0;
+    const intent = () => { if (kind === "recenter") h.gesture({ kind: "recenter" }); else if (kind === "AppState re-assert") h.reassert(); else { h.gesture({ kind: "compass" }); h.advance(150); h.gesture({ kind: "compass" }); } n2++; };
+    const runUntil = (t: number) => { while (h.now < t) { h.advance(10); const tries = h.rows(/cam-repair surf=car op=(push|fly)/).length; if (tries > seen) { seen = tries; h.advance(D); intent(); } } };
+    for (let k = 0; k < 6; k++) { runUntil(t0 + k * G); h.crew(); h.advance(720); h.gesture({ kind: "recenter" }); }
+    runUntil(t0 + 6 * G);
+    h.crew(); h.advance(720); h.gesture({ kind: "recenter" }); const tl = h.now;
+    h.advance(70000);
+    let run = 0, best = 0, prev = -1;
+    for (const f of h.frames) { if (f.t < tl + 1500) continue; if (Math.abs(f.zoom - 16.8) > 0.05 || Math.abs(f.pitch - 45) > 1 || angOff(f.heading, 90) > 1) { run += prev < 0 ? 0 : f.t - prev; best = Math.max(best, run); } else run = 0; prev = f.t; }
+    const rr = repairRows(h, tl, h.now);
+    ok(`RN${++ni}`, `Codex's lost write ×6, ${G} ms apart, each repair followed ${D} ms later by a second ${kind}; then a 7th lost write (150 ms native start delay, nearby crew, parked): the 7th is repaired, not rationed (${android ? "Android" : "iOS"})`,
+      best <= 1000, `(${n2} second intents; 7th lost write → longest stretch off 16.8/45/90 ${Math.round(best)} ms; loop after it ${ops(rr)})`);
+  }
+
   const unres = new Set<string>(); for (const h of all) for (const u of h.unresolved) unres.add(u);
   ok("DLZ", "the lifted production code resolved every identifier it read", unres.size === 0, unres.size ? `(unresolved: ${[...unres].join(", ")})` : "");
   return R;

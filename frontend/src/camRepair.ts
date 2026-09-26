@@ -31,6 +31,18 @@
 // glide pump is off — camGlide.ts CAM_GLIDE_PUMP_ENABLED; nav start while stopped waits for the car to move). Comparing
 // with the target would move a parked map. A MOVING car is untouched: it pushes every frame, so `want` is never
 // CAM_REPAIR_SETTLE_MS old.
+// Round 10 (three verified findings against round 9, e492b0e1):
+//   • a superseded try is not "unconfirmed": an owner intent that lands before a try's verdict CARRIES the try, and the
+//     next agreement (any write the map shows) clears it — a driver who taps again right after a repair is not rationed
+//     into a 17–44 s stranded camera (verify_zoom_storm_1 ration4). A device that never agrees never clears it;
+//   • A FLY'S LANDING WAITS FOR THE MAP (camFlyHold): a native flyTo that starts late (unmeasured on a head unit) was cut
+//     by the landing push at its JS deadline + RETURN_FLY_GRACE_MS — on Android that 'none' cancels it (4.1 levels for
+//     the 280 ms repair fly at a 300 ms start delay), on iOS a fly not yet started is cut to its end and then jumps back.
+//     Past the clock, the fly still owns the camera while the map shows it NOT YET STARTED (no change captured since the
+//     call) or STILL MOVING (a change within CAM_FLY_STILL_MS), up to CAM_FLY_LAND_MAX_MS; with no latency the clock
+//     still decides, unchanged;
+//   • a lapsed 15 s zoom hold is busy for the loop (CarMapView): a try due on the lapse tick flew to the old held framing
+//     while the release eased from under it, then cut 1.4–1.6 levels when the fly landed.
 // Pure module: gated by tools/sim-qc/car_zoom_step_test.mts (CL*) and headunit_cam_delay_test.mts (the production code).
 
 /** The map must have been still this long (and the owner silent this long) before its report is trusted. */
@@ -63,16 +75,26 @@ export const CAM_REPAIR_RATE_WINDOW_MS = 60000;
 export const CAM_REPAIR_JUMP_ZOOM = 0.2;
 /** …or these degrees is a visible jump if cut: the corrective write flies (short) instead. */
 export const CAM_REPAIR_JUMP_DEG = 2;
+/** A fly past its JS deadline + grace still owns the camera while the map reported a change within this long (it is
+ *  still flying). 3 vsyncs at 60 Hz. HYPOTHESIS: a head unit reports a running native fly at ≥ 20 Hz — not measured. */
+export const CAM_FLY_STILL_MS = 50;
+/** …or showed no change since the call (it has not started), but never longer than this past the deadline + grace. */
+export const CAM_FLY_LAND_MAX_MS = 1000;
 
 /** What the owner last wrote (heading/pitch null = not written / unknown). */
 export type CamPose = { zoom: number; pitch: number | null; heading: number | null; at: number };
 /** What the map last reported. `changedAt`: when the reported pose last MOVED (JS receipt time). `stamp`: when the map
- *  CAPTURED it (the native timestamp; the receipt time when the report carries none). */
-export type CamObs = { zoom: number; pitch: number | null; heading: number | null; lng: number | null; lat: number | null; gesture: boolean; at: number; changedAt: number; stamp: number };
+ *  CAPTURED it (the native timestamp; the receipt time when the report carries none). `movedStamp`: when the map captured
+ *  the last MOVE (the capture-clock twin of changedAt — a fly's landing asks whether the map moved after the call). */
+export type CamObs = { zoom: number; pitch: number | null; heading: number | null; lng: number | null; lat: number | null; gesture: boolean; at: number; changedAt: number; stamp: number; movedStamp: number };
+/** `judged`: the open try has been judged wrong since it was made (it stays counted). `carry`: tries an owner intent
+ *  superseded before any verdict — the next agreement clears them from `unconfirmed`. `fly`: the head unit's current
+ *  native fly (called at, JS deadline) for its landing (camFlyHold). */
 export type CamRepair = {
-  episodeAt: number; tries: number[]; gaveUp: boolean; giveupLogged: boolean; slow: number; open: number;
+  episodeAt: number; tries: number[]; gaveUp: boolean; giveupLogged: boolean; slow: number; open: number; judged: boolean;
   pending: "push" | "fly" | null;
-  writes: number[]; unconfirmed: number[]; rows: number[]; dropped: number;
+  writes: number[]; unconfirmed: number[]; carry: number[]; rows: number[]; dropped: number;
+  fly: { at: number; end: number } | null;
 };
 export type CamRepairAct = "none" | "ok" | "push" | "fly" | "giveup";
 /** `log`: the caller may write this row (the row cap); `drop`: rows suppressed since the last one written. `rep`: the
@@ -81,7 +103,7 @@ export type CamRepairAct = "none" | "ok" | "push" | "fly" | "giveup";
 export type CamRepairVerdict = { act: CamRepairAct; dz: number; dp: number; dh: number; n: number; rep: number; ep: number; log: boolean; drop: number };
 
 export function newCamRepair(now = 0): CamRepair {
-  return { episodeAt: now, tries: [], gaveUp: false, giveupLogged: false, slow: 0, open: 0, pending: null, writes: [], unconfirmed: [], rows: [], dropped: 0 };
+  return { episodeAt: now, tries: [], gaveUp: false, giveupLogged: false, slow: 0, open: 0, judged: false, pending: null, writes: [], unconfirmed: [], carry: [], rows: [], dropped: 0, fly: null };
 }
 
 const fin = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
@@ -105,7 +127,8 @@ export function camObserve(prev: CamObs | null, zoom: unknown, pitch: unknown, h
     && (h == null || prev.heading == null || camAngOff(prev.heading, h) < 0.01)
     && (c == null || prev.lng == null || prev.lat == null || (Math.abs(prev.lng - lng!) < 1e-7 && Math.abs(prev.lat - lat!) < 1e-7))
     && prev.gesture === gesture;
-  return { zoom, pitch: p ?? prev?.pitch ?? null, heading: h ?? prev?.heading ?? null, lng, lat, gesture, at: now, changedAt: same ? prev!.changedAt : now, stamp: fin(stamp) ? stamp : now };
+  const st = fin(stamp) ? stamp : now;
+  return { zoom, pitch: p ?? prev?.pitch ?? null, heading: h ?? prev?.heading ?? null, lng, lat, gesture, at: now, changedAt: same ? prev!.changedAt : now, stamp: st, movedStamp: same ? (prev!.movedStamp ?? prev!.changedAt) : st };
 }
 
 /** Record an owner write: the fields it wrote replace the last ones, the rest carry over. Non-finite values are unknown. */
@@ -124,9 +147,12 @@ export function camGap(obs: CamObs, want: CamPose): { dz: number; dp: number; dh
 }
 
 /** A new owner intent (a gesture, a system correction, a Crew press): a fresh episode — its own tries, no giveup, no
- *  owed write. The time caps stand. */
+ *  owed write. The time caps stand. A try still waiting for its verdict is CARRIED, not left unconfirmed (round 10): the
+ *  intent superseded it, so it proves nothing about the device yet — the next agreement clears it; a device that never
+ *  agrees keeps it counted. */
 export function camRepairEpisode(st: CamRepair, now: number): void {
-  st.episodeAt = now; st.tries = []; st.gaveUp = false; st.giveupLogged = false; st.slow = 0; st.open = 0; st.pending = null;
+  if (st.open !== 0 && !st.judged && st.unconfirmed.includes(st.open) && !st.carry.includes(st.open)) st.carry.push(st.open);
+  st.episodeAt = now; st.tries = []; st.gaveUp = false; st.giveupLogged = false; st.slow = 0; st.open = 0; st.judged = false; st.pending = null;
 }
 
 /**
@@ -153,10 +179,13 @@ export function camRepairStep(st: CamRepair, now: number, obs: CamObs | null, wa
   if (g.dz <= CAM_REPAIR_ZOOM_TOL && g.dp <= CAM_REPAIR_DEG_TOL && g.dh <= CAM_REPAIR_DEG_TOL) {
     const confirmed = st.open !== 0;
     const v = confirmed ? verdict("ok", g) : verdict("none");
-    if (confirmed) st.unconfirmed = st.unconfirmed.filter((t) => t !== st.open);   // this try worked: not rationed
-    st.tries = []; st.gaveUp = false; st.slow = 0; st.open = 0;   // it agrees: nothing unconfirmed any more
+    // This try worked, and the map shows what was written: neither it nor a try an intent superseded is rationed.
+    if (confirmed || st.carry.length) { const done = new Set([st.open, ...st.carry]); st.unconfirmed = st.unconfirmed.filter((t) => !done.has(t)); }
+    st.carry = [];
+    st.tries = []; st.gaveUp = false; st.slow = 0; st.open = 0; st.judged = false;   // it agrees: nothing unconfirmed any more
     return v;
   }
+  if (st.open !== 0) st.judged = true;   // the open try is judged wrong: it stays counted even if an intent comes next
   const lastTry = st.tries.length ? st.tries[st.tries.length - 1] : -Infinity;
   if (st.gaveUp) {
     // Given up — but a camera left wrong must come back with nothing happening: slow retries, doubling.
@@ -169,9 +198,33 @@ export function camRepairStep(st: CamRepair, now: number, obs: CamObs | null, wa
   } else if (now - lastTry < CAM_REPAIR_SETTLE_MS * CAM_REPAIR_BACKOFF ** st.tries.length) return verdict("none");   // back off
   st.writes = st.writes.filter((t) => now - t < CAM_REPAIR_RATE_WINDOW_MS);
   st.unconfirmed = st.unconfirmed.filter((t) => now - t < CAM_REPAIR_RATE_WINDOW_MS);
+  st.carry = st.carry.filter((t) => now - t < CAM_REPAIR_RATE_WINDOW_MS);
   if (st.unconfirmed.length >= CAM_REPAIR_RATE_MAX || st.writes.length >= CAM_REPAIR_HARD_MAX) return verdict("none");   // the time caps
   if (st.gaveUp) st.slow++;
-  st.tries.push(now); st.writes.push(now); st.unconfirmed.push(now); st.open = now;
+  st.tries.push(now); st.writes.push(now); st.unconfirmed.push(now); st.open = now; st.judged = false;
   st.pending = g.dz > CAM_REPAIR_JUMP_ZOOM || g.dp > CAM_REPAIR_JUMP_DEG || g.dh > CAM_REPAIR_JUMP_DEG ? "fly" : "push";
   return verdict(st.pending, g);
+}
+
+/** The head unit's push that FLIES (CarMapView getCam, returnFlyRef armed): called now, JS deadline `end`. */
+export function camFlyStart(st: CamRepair, now: number, end: number): void {
+  st.fly = fin(now) && fin(end) ? { at: now, end } : null;
+}
+
+/**
+ * A FLY'S LANDING WAITS FOR THE MAP (round 10). `rf` = returnFlyRef (> 0: the fly's JS deadline). Every consumer —
+ * pushCam's returnFlyStep, carCamJob, a gesture's take-over — treats the fly as in flight while now < rf + graceMs, so
+ * this returns the deadline to carry: `rf` unchanged while the clock still owns it, when the map shows it over (it moved
+ * after the call, then was still for CAM_FLY_STILL_MS), when there is no report or no record of the fly, or once
+ * CAM_FLY_LAND_MAX_MS has passed since the clock's end; otherwise a deadline that keeps it in flight CAM_FLY_STILL_MS
+ * more (re-checked every tick), because the map shows the fly NOT YET STARTED or STILL MOVING — a landing push then
+ * would cut it (Android: the 'none' cancels it; iOS: a fly that has not started is cut to its end, then jumps back).
+ */
+export function camFlyHold(st: CamRepair, rf: number, now: number, obs: CamObs | null, graceMs: number): number {
+  const f = st.fly;
+  if (!(rf > 0) || !f || !obs || now < rf + graceMs) return rf;
+  if (now >= f.end + graceMs + CAM_FLY_LAND_MAX_MS) return rf;
+  const moved = fin(obs.movedStamp) ? obs.movedStamp : obs.changedAt;
+  const notStarted = moved <= f.at, moving = now - obs.changedAt < CAM_FLY_STILL_MS;
+  return notStarted || moving ? now + CAM_FLY_STILL_MS - graceMs : rf;
 }

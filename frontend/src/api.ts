@@ -37,7 +37,8 @@ const PROD_OPENWEATHER_KEY = "";
 export const OPENWEATHER_KEY =
   (process.env.EXPO_PUBLIC_OPENWEATHER_KEY as string) || PROD_OPENWEATHER_KEY;
 
-const TOKEN_KEY = "convoy_token";
+// Exported for src/auth.tsx's sign-out, which removes the token, the cached profile and its tag in ONE multiRemove.
+export const TOKEN_KEY = "convoy_token";
 
 export async function saveToken(token: string) {
   try { await AsyncStorage.setItem(TOKEN_KEY, token); } catch {}

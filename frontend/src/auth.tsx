@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
-import { AppState } from "react-native";
+import { AppState, Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api, saveToken, readTokenState, clearToken } from "./api";
+import { api, saveToken, readTokenState, clearToken, TOKEN_KEY, type TokenState } from "./api";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { signInWithGoogle } from "./googleAuth";
 import { setBreadcrumbHandle, logEventReliable } from "./crashBreadcrumb";
@@ -21,7 +21,9 @@ export type User = {
 };
 
 // Why a refresh ran — carried on the `auth-refresh` crumb so a boot row can be told from a retry.
-export type RefreshSrc = "boot" | "fg" | "retry" | "manual";
+// `tap` = the "Try again" button on the index gate's Connecting… screen: it JOINS a request already in flight
+// (a profile save's `manual` refresh still always asks afresh — it needs the answer from after its PUT).
+export type RefreshSrc = "boot" | "fg" | "retry" | "manual" | "tap";
 
 type AuthCtx = {
   user: User | null | undefined; // undefined = loading, null = signed out (CLAUDE.md: keep this three-state contract)
@@ -33,7 +35,9 @@ type AuthCtx = {
   loginWithApple: () => Promise<void>;
   loginWithGoogle: () => Promise<boolean>;
   register: (data: any) => Promise<void>;
-  logout: () => Promise<void>;
+  // true = signed out (the token is confirmed gone from disk). false = it could not be removed: the session is
+  // left exactly as it was and the driver is told ("Couldn't sign out") — never a login screen over a live token.
+  logout: () => Promise<boolean>;
   refresh: (src?: RefreshSrc) => Promise<void>;
 };
 
@@ -64,13 +68,17 @@ const USER_KEY = "convoy_user";
 // can hold token B next to profile A (a crash between saveToken and cacheUser, or a remove that silently
 // failed) — and the gate would open the map as A until /auth/me answered for B (Codex, 2026-09-25;
 // scratchpad codex_check_auth_1 R1). So each profile write also writes a tag of (profile id, token), and
-// a cached profile is used only when the tag matches the token on disk right now. No tag, or a tag for
-// another token/id, = no cache: the plain no-cache path ("Connecting…" until the server answers).
+// a cached profile is used only when the tag matches the token on disk right now. A tag for another
+// token/id = no cache: the plain no-cache path ("Connecting…" until the server answers).
+// NO tag at all = an install from before this change (round 2, 2026-09-25): its profile is used exactly as
+// the shipped build uses it — offline it opens the map, as it always did — and the first /auth/me answer
+// writes the tag (crumb ` bind=legacy`). For that to mean ONLY "from before the tag", this code must never
+// leave a profile without a tag: the tag is written FIRST and the profile only if the tag landed, and every
+// removal lists the profile before the tag (one multiRemove — atomic on both platforms: iOS writes the
+// manifest once, Android deletes in one SQL transaction; a store that stops part-way leaves the tag).
 // A SEPARATE key on purpose: navNotification.ts and crashBreadcrumb.ts parse USER_KEY's JSON directly.
-// Written AFTER the profile, so a crash between the two leaves an old tag that no longer matches.
 // Not a secret: the token itself sits in plain AsyncStorage (api.ts TOKEN_KEY); this only has to tell
-// two tokens apart. An install from before this change has no tag, so its first boot is the no-cache
-// path once; the first /auth/me answer writes the tag.
+// two tokens apart.
 const USER_TAG_KEY = "convoy_user_tok";
 
 // cyrb53 (53-bit, public domain) — sync and dependency-free, enough to tell two tokens apart.
@@ -90,33 +98,74 @@ function userTag(id: string, token: string): string {
 }
 
 // Profile + tag are written and cleared together. A profile without a token to bind to is not cached.
+// Tag first: a crash between the two leaves the NEW tag beside the old profile, which matches only if it is
+// the same account; a tag write that fails skips the profile write (the throw lands in the catch).
 async function cacheUser(u: User | null, token?: string | null): Promise<void> {
   try {
     if (u && token) {
-      await AsyncStorage.setItem(USER_KEY, JSON.stringify(u));
       await AsyncStorage.setItem(USER_TAG_KEY, userTag(u.id, token));
+      await AsyncStorage.setItem(USER_KEY, JSON.stringify(u));
     } else {
-      await AsyncStorage.removeItem(USER_TAG_KEY);
-      await AsyncStorage.removeItem(USER_KEY);
+      await AsyncStorage.multiRemove([USER_KEY, USER_TAG_KEY]);
     }
   } catch {}
 }
 
-// The cached profile for THIS token, or null. `unbound` = a profile was on disk but its tag does not
-// match this token (or is missing) — carried on the auth-refresh crumb as `bind=miss`.
-async function readCachedUser(token: string): Promise<{ user: User | null; unbound: boolean }> {
+// How the profile on disk relates to THIS token — carried on the auth-refresh crumb as ` bind=<…>` when not
+// plain: `miss` = a tag for another token/id (not used), `legacy` = no tag at all, an install from before the
+// tag (used, as shipped).
+type Bind = "ok" | "miss" | "legacy" | "none";
+async function readCachedUser(token: string): Promise<{ user: User | null; bind: Bind }> {
   try {
     const raw = await AsyncStorage.getItem(USER_KEY);
     const u = raw ? JSON.parse(raw) : null;
     // Guard the shape: a half-written or schema-changed blob must not become a
     // "signed in" user with no id, which would break every screen downstream.
-    if (!(u && typeof u.id === "string")) return { user: null, unbound: false };
+    if (!(u && typeof u.id === "string")) return { user: null, bind: "none" };
     const tag = await AsyncStorage.getItem(USER_TAG_KEY);
-    if (tag !== userTag(u.id, token)) return { user: null, unbound: true };
-    return { user: u as User, unbound: false };
+    if (tag === null) return { user: u as User, bind: "legacy" };
+    if (tag !== userTag(u.id, token)) return { user: null, bind: "miss" };
+    return { user: u as User, bind: "ok" };
   } catch {
-    return { user: null, unbound: false };
+    return { user: null, bind: "none" };
   }
+}
+
+// ── EVERY STORAGE WAIT HAS A BUDGET (round 2, 2026-09-25) ────────────────────────────────────────────
+// A storage call that never answers must not hold a refresh (or a sign-out) open for good: an open refresh
+// blocks the 15 s / foreground retries, and "Try again" now waits on it. 5 s is ~100× a normal read; a read
+// that runs out counts as unreadable — "Connecting…", never the login screen.
+const STORAGE_BUDGET_MS = 5_000;
+type Settled<T> = { ok: true; v: T } | { ok: false; why: "timeout" | "error" };
+function settle<T>(p: Promise<T>, ms = STORAGE_BUDGET_MS): Promise<Settled<T>> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve({ ok: false, why: "timeout" }), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve({ ok: true, v }); },
+      () => { clearTimeout(t); resolve({ ok: false, why: "error" }); },
+    );
+  });
+}
+async function readTokenWithin(): Promise<TokenState> {
+  const r = await settle(readTokenState());
+  return r.ok ? r.v : { token: null, state: "unreadable" };
+}
+
+// ── A SIGN-IN WRITES ITS TAG BEFORE ITS TOKEN (round 2, 2026-09-25) ──────────────────────────────────
+// With a tag-less profile now meaning "an install from before the tag" (used as shipped), a new token must never
+// land beside an old profile that no tag rules out. So: the new tag first (any older profile then mismatches);
+// if that write fails, remove the old profile + tag first; if THAT fails too, the new token is not persisted —
+// this launch stays signed in from memory, the next one finds the old account's own token + profile (never
+// someone else's). Then the token, then the profile (only beside the tag that binds it).
+// Receipt: the identity fuzz's pre-tag flows (auth_h/h1 fuzz.mts "legacy A -> …").
+async function persistSession(u: User, token: string): Promise<void> {
+  const tagged = await settle(AsyncStorage.setItem(USER_TAG_KEY, userTag(u.id, token)));
+  if (!tagged.ok) {
+    const cleared = await settle(AsyncStorage.multiRemove([USER_KEY, USER_TAG_KEY]));
+    if (!cleared.ok) return;
+  }
+  await settle(saveToken(token));
+  if (tagged.ok) await settle(AsyncStorage.setItem(USER_KEY, JSON.stringify(u)));
 }
 
 // Did the SERVER actively reject us, or did we simply never reach it? Only the
@@ -152,17 +201,19 @@ function sameUser(a: User | null | undefined, b: User): boolean {
 //   1. token + cached profile BOUND TO THAT TOKEN (USER_TAG_KEY above) → the profile is shown the moment
 //      the cache is read, BEFORE any network; /auth/me confirms it afterwards (object identity kept when
 //      nothing changed, see sameUser). A profile whose tag does not match is no cache at all (rule 2).
+//      A profile with NO tag (an install from before the tag) is used as the shipped build uses it.
 //   2. token + NO cache + a reachability failure → `user` stays undefined and `connecting` is true:
 //      the gate shows "Connecting…" and retries every 15 s (+ on foreground). Never the login screen.
 //      Only a 401/403 FROM THE SERVER ends a session (unchanged).
 //   3. the token store itself unreadable (iOS data protection before the first unlock, or a transient
-//      read failure — api.ts readTokenState) → re-read once after TOKEN_REREAD_MS; still unreadable is
-//      case 2, not "signed out". The old `getToken().catch(() => null)` made it the login screen (and
-//      getToken() already swallowed the throw, so that catch never even ran).
-//   4. every outcome writes `auth-refresh why=<ok|no-token|rejected:<status>|net:<code>|storage-unreadable>
-//      cached=<0/1> ms=<t> src=<boot|fg|retry|manual>` (+ ` bind=miss` when a profile was on disk but not
-//      bound to this token) with logEventReliable (plain logEvent drops rows published before the Supabase
-//      client exists — RULES.md §3).
+//      read failure — api.ts readTokenState — or a read that outlives STORAGE_BUDGET_MS) → re-read once
+//      after TOKEN_REREAD_MS; still unreadable is case 2, not "signed out". The old
+//      `getToken().catch(() => null)` made it the login screen (and getToken() already swallowed the throw,
+//      so that catch never even ran).
+//   4. every outcome writes `auth-refresh why=<ok|no-token|rejected:<status>|net:<code>|storage-unreadable|
+//      stale> cached=<0/1> ms=<t> src=<boot|fg|retry|manual|tap>` (+ ` bind=miss|legacy`, see Bind) with
+//      logEventReliable (plain logEvent drops rows published before the Supabase client exists — RULES.md §3).
+//      A "Try again" that joins a request already running writes `auth-refresh join src=tap in-flight=<src>`.
 // 250 ms: one runloop's worth of settling for the AsyncStorage manifest read, short enough that a
 // signed-in launch still feels instant; Jeff's spec, 2026-09-24 ("retry getToken() once after 250 ms").
 const TOKEN_REREAD_MS = 250;
@@ -180,29 +231,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // The refresh callback has no deps, so it reads the current user through this mirror.
   const userRef = useRef<User | null | undefined>(undefined);
   useEffect(() => { userRef.current = user; }, [user]);
-  // Every refresh, login and logout bumps the epoch; a /auth/me answer applies only if nothing newer
-  // happened while it was in flight. Without this a slow boot answer (the 60 s budget) could re-sign-in
-  // a driver who logged out at second 30, or overwrite a newer refresh's profile with an older one.
+  // Every new refresh, login and logout bumps the epoch; a refresh applies what it learned only if nothing
+  // newer happened while it waited (checked after EVERY wait, not just /auth/me). Without this a slow boot
+  // answer (the 60 s budget) could re-sign-in a driver who logged out at second 30, or overwrite a newer
+  // refresh's profile with an older one.
   const epochRef = useRef(0);
-  // The epoch of the request in flight, for the AUTOMATIC sources: a 15 s retry or a foreground retry
-  // must not stack a second request behind one still waiting out the 60 s budget.
-  const inFlightRef = useRef<number | null>(null);
+  // The request in flight and its promise. A 15 s retry or a foreground retry never stacks a second request
+  // behind it, and a "Try again" tap WAITS ON IT (round 2, 2026-09-25): starting over would throw away an
+  // answer that is already on its way (measured: tap at ~75 s → map at ~109 s instead of ~90 s).
+  const inFlightRef = useRef<{ epoch: number; src: RefreshSrc; p: Promise<void> } | null>(null);
+  // Set by logout() and held until a sign-in (or an explicit refresh — a Try again, a profile save): while it
+  // is set nothing AUTOMATIC (the 15 s retry, the foreground retry) may bring the session back in this
+  // process. It matters when a sign-out could not remove the token: the driver asked to leave and was told
+  // it failed; a retry quietly landing them on the map would be the session coming back behind their back.
+  const signOutRef = useRef(false);
 
-  const refresh = useCallback(async (srcArg: RefreshSrc = "manual") => {
+  const refresh = useCallback((srcArg: RefreshSrc = "manual"): Promise<void> => {
     const src: RefreshSrc = typeof srcArg === "string" ? srcArg : "manual"; // tolerate onPress={refresh}
-    if (inFlightRef.current !== null && (src === "retry" || src === "fg")) return;
+    if (signOutRef.current) {
+      if (src === "boot" || src === "retry" || src === "fg") return Promise.resolve();
+      signOutRef.current = false;   // the driver explicitly asked for the session
+    }
+    const cur = inFlightRef.current;
+    if (cur && cur.epoch === epochRef.current) {
+      if (src === "retry" || src === "fg") return cur.p;
+      if (src === "tap") {
+        try { logEventReliable(`auth-refresh join src=tap in-flight=${cur.src}`); } catch {}
+        return cur.p;
+      }
+    }
     const epoch = ++epochRef.current;
-    inFlightRef.current = epoch;
-    const t0 = Date.now();
-    let bindMiss = false;
-    const crumb = (why: string, cached: 0 | 1) => {
-      try { logEventReliable(`auth-refresh why=${why} cached=${cached} ms=${Date.now() - t0} src=${src}${bindMiss ? " bind=miss" : ""}`); } catch {}
-    };
-    try {
-      let ts = await readTokenState();
+    const p = runRefresh(epoch, src);
+    inFlightRef.current = { epoch, src, p };
+    const done = () => { if (inFlightRef.current?.epoch === epoch) inFlightRef.current = null; };
+    p.then(done, done);
+    return p;
+
+    async function runRefresh(epoch: number, src: RefreshSrc): Promise<void> {
+      const t0 = Date.now();
+      let bind: Bind = "none";
+      const crumb = (why: string, cached: 0 | 1) => {
+        const b = bind === "miss" || bind === "legacy" ? ` bind=${bind}` : "";
+        try { logEventReliable(`auth-refresh why=${why} cached=${cached} ms=${Date.now() - t0} src=${src}${b}`); } catch {}
+      };
+      // A login, a logout or a newer refresh happened while we waited: apply nothing.
+      const superseded = () => epoch !== epochRef.current;
+      let ts = await readTokenWithin();
+      if (superseded()) { crumb("stale", 0); return; }
       if (ts.state === "unreadable") {
         await new Promise<void>((r) => setTimeout(r, TOKEN_REREAD_MS));
-        ts = await readTokenState();
+        ts = await readTokenWithin();
+        if (superseded()) { crumb("stale", 0); return; }
       }
       if (ts.state === "unreadable") {
         // We cannot tell signed-in from signed-out: NOT a logout. Keep whatever is showing (undefined at
@@ -217,16 +296,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // No token at all is the one unambiguous signed-out state.
         staleRef.current = false;
         setConnecting(false);
-        await cacheUser(null);
+        await settle(cacheUser(null));
+        if (superseded()) { crumb("stale", 0); return; }
         setUser(null);
         setToken(null);
         crumb("no-token", 0);
         return;
       }
-      setToken(t);
-      const read = await readCachedUser(t);
+      const readR = await settle(readCachedUser(t));
+      if (superseded()) { crumb("stale", 0); return; }
+      const read = readR.ok ? readR.v : { user: null, bind: "none" as Bind };
       const cached = read.user;
-      bindMiss = read.unbound;
+      bind = read.bind;
+      setToken(t);
       if (userRef.current === undefined) {
         if (cached) {
           // Render now — the index gate sends the driver to the map on this state — and confirm below.
@@ -242,19 +324,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // The token goes on THIS request explicitly: the interceptor re-reads the store, and a read that
         // fails there would send the call unauthenticated — a 401 for a token that is perfectly good.
         const { data } = await api.get("/auth/me", { headers: { Authorization: `Bearer ${t}` } });
-        if (epoch !== epochRef.current) { crumb("stale", cached ? 1 : 0); return; } // a login/logout/newer refresh won
+        if (superseded()) { crumb("stale", cached ? 1 : 0); return; } // a login/logout/newer refresh won
         staleRef.current = false;
         setUser((prev) => (sameUser(prev, data) ? prev : data));
         setConnecting(false);
-        void cacheUser(data, t);
+        void cacheUser(data, t);   // (re)binds the profile to this token — the first one for a legacy cache
         crumb("ok", cached ? 1 : 0);
       } catch (e: any) {
-        if (epoch !== epochRef.current) { crumb("stale", cached ? 1 : 0); return; }
+        if (superseded()) { crumb("stale", cached ? 1 : 0); return; }
         if (isAuthRejection(e)) {
           // The server says this token is done — a real logout.
           staleRef.current = false;
-          await clearToken();
-          await cacheUser(null);
+          await settle(clearToken());
+          await settle(cacheUser(null));
           setUser(null);
           setToken(null);
           setConnecting(false);
@@ -266,8 +348,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         staleRef.current = true;
         crumb(`net:${netCode(e)}`, cached ? 1 : 0);
       }
-    } finally {
-      if (inFlightRef.current === epoch) inFlightRef.current = null;
     }
   }, []);
 
@@ -289,11 +369,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     const { data } = await api.post("/auth/login", { email, password });
     epochRef.current++;
-    await saveToken(data.token);
+    signOutRef.current = false;
+    await persistSession(data.user, data.token);
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user, data.token);
   };
 
   const loginWithApple = async () => {
@@ -314,11 +394,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       full_name: fullName,
     });
     epochRef.current++;
-    await saveToken(data.token);
+    signOutRef.current = false;
+    await persistSession(data.user, data.token);
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user, data.token);
   };
 
   // Returns true when signed in, false if the user cancelled the Google sheet.
@@ -327,31 +407,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!idToken) return false;
     const { data } = await api.post("/auth/google", { id_token: idToken });
     epochRef.current++;
-    await saveToken(data.token);
+    signOutRef.current = false;
+    await persistSession(data.user, data.token);
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user, data.token);
     return true;
   };
 
   const register = async (payload: any) => {
     const { data } = await api.post("/auth/register", payload);
     epochRef.current++;
-    await saveToken(data.token);
+    signOutRef.current = false;
+    await persistSession(data.user, data.token);
     setToken(data.token);
     setUser(data.user);
     setConnecting(false);
-    void cacheUser(data.user, data.token);
   };
 
-  const logout = async () => {
-    epochRef.current++;   // an /auth/me answer still in flight must not sign this driver back in
-    await clearToken();
-    await cacheUser(null);   // an explicit sign-out must not leave a profile behind
-    setToken(null);
-    setUser(null);
-    setConnecting(false);
+  // ── SIGN-OUT STICKS (round 2, 2026-09-25) ──────────────────────────────────────────────────────────
+  // Token, profile and tag go in ONE multiRemove (profile listed before its tag — see USER_TAG_KEY), then the
+  // token is read BACK. A sign-out = the store confirmed the remove AND the read-back does not find the token.
+  // A remove that threw or ran out of budget, or a token still there, leaves the session exactly as it was and
+  // says so. (A failed remove fails even if the read-back says "gone": iOS edits its in-memory manifest before
+  // the disk write, so after a failed write the read-back can say gone while the disk keeps the token —
+  // RNCAsyncStorage.mm multiRemove / _writeManifest. A confirmed remove whose read-back cannot answer counts:
+  // the store itself said it was done.) The old code swallowed the failure and showed the login screen over a
+  // live token, and the next foreground retry (staleRef was never reset) signed the driver straight back in
+  // (scratchpad auth_verify_contract repro2 / auth_verify_escape V3b, V7). Crumb: `auth-signout ok=<0|1>
+  // remove=<ok|error|timeout> token=<gone|present|unreadable> ms=`. ⚠ The Alert is a no-op on web
+  // (react-native-web); the web build is not in use.
+  const logout = async (): Promise<boolean> => {
+    epochRef.current++;          // an /auth/me answer still in flight must not sign this driver back in
+    staleRef.current = false;    // ...nor the foreground retry
+    signOutRef.current = true;   // ...nor any automatic retry, even if this fails (see signOutRef)
+    const t0 = Date.now();
+    const rm = await settle(AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY, USER_TAG_KEY]));
+    const back = await settle(AsyncStorage.getItem(TOKEN_KEY));
+    const tok = !back.ok ? "unreadable" : back.v == null ? "gone" : "present";
+    const ok = rm.ok && tok !== "present";
+    try { logEventReliable(`auth-signout ok=${ok ? 1 : 0} remove=${rm.ok ? "ok" : rm.why} token=${tok} ms=${Date.now() - t0}`); } catch {}
+    if (ok) {
+      setToken(null);
+      setUser(null);
+      setConnecting(false);
+      return true;
+    }
+    try {
+      Alert.alert("Couldn't sign out", "Hairpin couldn't clear the saved sign-in on this phone. Try again.");
+    } catch {}
+    return false;
   };
 
   return <Ctx.Provider value={{ user, token, connecting, login, loginWithApple, loginWithGoogle, register, logout, refresh }}>{children}</Ctx.Provider>;

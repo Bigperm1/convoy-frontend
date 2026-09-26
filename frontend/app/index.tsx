@@ -29,6 +29,10 @@ const AUTH_RETRY_MS = 15_000; // Jeff's spec, 2026-09-24: "a retry every 15 s wh
 // and "Sign out" (an explicit logout, confirmed like Settings → Sign out). Nothing else changes: only a
 // 401/403 from the server signs anyone out on its own. 60 s = the axios budget of one /auth/me that
 // timed out, or four fast failures (boot + three 15 s retries).
+// Round 2 (2026-09-25): the clock starts at MOUNT and runs while `user` is still undefined — not only once
+// `connecting` is true — so a stage that never finishes (a token read that never answers never sets
+// `connecting`) still ends on "Connecting…" + the two controls, not a bare spinner forever
+// (scratchpad auth_verify_escape V4). "Try again" now waits on a request already in flight (auth `tap`).
 const ESCAPE_AFTER_MS = 60_000;
 
 function userTag(u: { id: string } | null | undefined): string {
@@ -45,6 +49,8 @@ export default function Index() {
   const connectingLoggedRef = useRef(false);
   const [escape, setEscape] = useState(false);   // "Try again" / "Sign out" are showing (sticky once shown)
   const [trying, setTrying] = useState(false);   // a "Try again" refresh is in flight
+  const connectingRef = useRef(connecting);      // for the escape crumb: did it fire with `connecting` set?
+  useEffect(() => { connectingRef.current = connecting; }, [connecting]);
 
   useEffect(() => {
     AsyncStorage.getItem(ONBOARDING_KEY)
@@ -64,8 +70,10 @@ export default function Index() {
     else router.replace("/(auth)/login");
   }, [user, onboarded, router]);
 
-  // "Connecting…" — keep asking while we sit here with a token but nothing to show.
-  const showConnecting = user === undefined && connecting;
+  // "Connecting…" — keep asking while we sit here with a token but nothing to show. Past the escape it shows
+  // whenever `user` is still undefined, whatever stage is stuck.
+  const waiting = user === undefined;
+  const showConnecting = waiting && (connecting || escape);
   useEffect(() => {
     if (!showConnecting) return;
     if (!connectingLoggedRef.current) {
@@ -73,18 +81,22 @@ export default function Index() {
       try { logEventReliable(`auth-gate to=connecting user=undef ms=${Date.now() - mountedAtRef.current}`); } catch {}
     }
     const id = setInterval(() => { void refresh("retry"); }, AUTH_RETRY_MS);
+    return () => clearInterval(id);
+  }, [showConnecting, refresh]);
+  useEffect(() => {
+    if (!waiting) return;
     const esc = setTimeout(() => {
-      try { logEventReliable(`auth-gate escape=shown ms=${Date.now() - mountedAtRef.current}`); } catch {}
+      try { logEventReliable(`auth-gate escape=shown connecting=${connectingRef.current ? 1 : 0} ms=${Date.now() - mountedAtRef.current}`); } catch {}
       setEscape(true);
     }, ESCAPE_AFTER_MS);
-    return () => { clearInterval(id); clearTimeout(esc); };
-  }, [showConnecting, refresh]);
+    return () => clearTimeout(esc);
+  }, [waiting]);
 
   const tryAgain = useCallback(async () => {
     if (trying) return;
     try { logEventReliable(`auth-gate tap=try-again ms=${Date.now() - mountedAtRef.current}`); } catch {}
     setTrying(true);
-    try { await refresh("manual"); } finally { setTrying(false); }
+    try { await refresh("tap"); } finally { setTrying(false); }
   }, [trying, refresh]);
 
   const signOut = useCallback(() => {
@@ -92,7 +104,7 @@ export default function Index() {
       { text: "Cancel", style: "cancel" },
       { text: "Sign out", style: "destructive", onPress: () => {
         try { logEventReliable(`auth-gate tap=sign-out ms=${Date.now() - mountedAtRef.current}`); } catch {}
-        void logout();
+        void logout();   // on failure it alerts ("Couldn't sign out") and this screen stays as it is
       } },
     ]);
   }, [logout]);
@@ -132,7 +144,8 @@ export default function Index() {
 const styles = StyleSheet.create({
   c: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
   col: { alignItems: "center" },
-  connecting: { marginTop: 16, color: COLORS.textDim, fontSize: 15 },
+  // Near-white, never a grey, on the dark background (Jeff's standing rule; was textDim #98989F).
+  connecting: { marginTop: 16, color: COLORS.text, fontSize: 15 },
   row: { position: "absolute", top: "100%", alignSelf: "center", flexDirection: "row", gap: 12, marginTop: 24 },
   // The Hairpin square (DESIGN.md § Shape): radius ≈ 28 % of height — 10 on 36.
   btn: {

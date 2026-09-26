@@ -1,6 +1,6 @@
 {
   "approvedBy": "Jeff",
-  "approvedAt": "2026-09-24",
+  "approvedAt": "2026-09-25",
   "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
   "approvals": [
     {
@@ -350,6 +350,25 @@
         "src/carplay/carActions.ts:CAR_MAP_BUTTON_CONFIG { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, ], } → { mapButtons: [ { id: 'car-comms', image: CAR_ICON_MIC, focusedImage: CAR_ICON_MIC }, { id: HAZARD_BUTTON_ID, image: CAR_ICON_HAZARDS, focusedImage: CAR_ICON_HAZARDS }, { id: 'car-view', image: CAR_ICON_VIEW_2D, focusedImage: CAR_ICON_VIEW_2D }, { id: 'car-crew', image: CAR_ICON_CREW, focusedImage: CAR_ICON_CREW }, ], }",
         "src/carplay/carActions.ts:AA_MAP_BUTTONS [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, ] → [ { id: 'car-zoom-in', icon: CAR_ICON_ZOOM_IN, visibility: AA_PERSISTENT }, { id: 'car-zoom-out', icon: CAR_ICON_ZOOM_OUT, visibility: AA_PERSISTENT }, { id: HAZARD_BUTTON_ID, icon: CAR_ICON_HAZARDS, visibility: AA_PERSISTENT }, { id: 'car-crew', icon: CAR_ICON_CREW, visibility: AA_PERSISTENT }, ]"
       ]
+    },
+    {
+      "at": "2026-09-25",
+      "quote": "Jeff, 2026-09-25: \"i think the connection is following me after the carplay dissconnect. it should not follow me when i discconect from car play... this is a privacy concern. fix it and lock it.\" / \"My icon moved on the map.\" / \"SHIP IT WITHOUT CODEX\" / \"I AUTHORIZE YOU TO DO IT\"",
+      "changes": [
+        "src/carFeedOwner.ts: NEW FILE code-locked 50a29db9aff1",
+        "src/parkRearm.ts: NEW FILE code-locked fa57524fd608",
+        "src/privacyClock.ts: NEW FILE code-locked 1c1bb3c07951",
+        "src/navNotification.ts: code d241b275f379 → 2f3ff18d8d98",
+        "app/(app)/map.tsx#map-fgwatch-gate region fc6fa71b23f7 → e628af92c607",
+        "src/locationPrivacy.ts#priv-hydrate-spot-adopt region f3e64bbe68a5 → 5c2327e70858",
+        "src/locationPrivacy.ts#priv-hydrate-latch-restore region c7e11a4ee610 → 76bf0158252d",
+        "src/locationPrivacy.ts#priv-car-connected-transition region 4bba98d07a22 → 45b7db76cd93",
+        "src/locationPrivacy.ts#priv-car-attached-ttl region 05d2f6d49161 → 1e65e46176ff",
+        "src/locationPrivacy.ts#priv-notefix-driving-latch region 011d300a516b → fb9141be6b60",
+        "src/locationPrivacy.ts#priv-notefix-spot-write region 20d9661d1981 → 7eb0156ff790",
+        "src/locationPrivacy.ts#priv-is-parked region 770912e607a9 → 9105550fa36b",
+        "src/locationPrivacy.ts#priv-shareable-position region 135180f4bdde → 3ef46dd12cbc"
+      ]
     }
   ],
   "files": {
@@ -450,7 +469,7 @@
       "why": "pure drive-engine module: code-locked"
     },
     "src/navNotification.ts": {
-      "hash": "sha256:d241b275f37919dfe4f91694040325ff73b4ed012597fbd6ffba60f2dd2fddb9",
+      "hash": "sha256:2f3ff18d8d989b8b8a5a71a6c8a5fddbda7b288d987d0b8fa98b321cfa898ef9",
       "why": "pure drive-engine module: code-locked"
     },
     "src/speedLimit.ts": {
@@ -840,7 +859,7 @@
         "map-select-route-tap": "sha256:86155df7479d8487be29b12ce70a71f769b6b55e13ee49fe686983ce1eb8c990",
         "map-initial-fix-seed": "sha256:c4d014f206eab25407aa988ccca7da048ebdeb6c6f64732876522cf625e2cd0a",
         "map-foreground-refix": "sha256:62b3e69396b577b30dacfebf1fead78e5a91bf937e72751a079a5c5988b152e1",
-        "map-fgwatch-gate": "sha256:fc6fa71b23f714f819064deaafca7cd8325f6027ae348f8967baaf6268d0d92b",
+        "map-fgwatch-gate": "sha256:e628af92c607392064c99b67204bd0d59a498060f858f03a035cb28fddee424a",
         "map-fgwatch-fix-ingest": "sha256:6ba5bc5d62e5cf95c89809a6eb2e812f4db5cf38d80bd230d0436db68388d171",
         "map-speed-unit-border-detect": "sha256:76e3bee33c555378475b9621841a4337429fe9c5fa460b870d3b82cc2d993f76",
         "map-refresh-fix-into-coords": "sha256:1af81bcb14f048c7e3e323665d07c6ede8ead4a0012bf8e7e5df8a2e8e08a867",
@@ -916,16 +935,16 @@
         "DRIVING_SAVE_THROTTLE_MS": "15_000"
       },
       "regions": {
-        "priv-hydrate-spot-adopt": "sha256:f3e64bbe68a5c69ba9765eb79e22564d0466c1175bfe49cb935d8a3d97bcd247",
-        "priv-hydrate-latch-restore": "sha256:c7e11a4ee61029c062da3c56b295e06aebfd0659a255dfb0b859608edd9e5065",
-        "priv-car-connected-transition": "sha256:4bba98d07a22ea602cb2f7dbfb0388213617beb9338f9354d819e0791de0250f",
+        "priv-hydrate-spot-adopt": "sha256:5c2327e7085805a9a5a008597d12a6c4d8050ad1ae46230d27b584f058ede6dd",
+        "priv-hydrate-latch-restore": "sha256:76bf0158252d1615232acbd4c5e5c8f62f7813fb1fb98343568e78a74c500842",
+        "priv-car-connected-transition": "sha256:45b7db76cd93fe0cc9e2e396e1e70fe3bdef46211b7908a3eb6e2c792cf34345",
         "priv-head-unit-raw": "sha256:887f2c2ddfd20d3740aba7d06b2027caab912bdeb4a4db27e1b3eac5271d8f6a",
-        "priv-car-attached-ttl": "sha256:05d2f6d49161e54d77991fcd11810f791b7d4291c6b043efb3223911e15ab87f",
-        "priv-notefix-driving-latch": "sha256:011d300a516b4f338c6460bb1ff767bd50ba9ea8b8e3c0091f6ca3d1b02bb890",
-        "priv-notefix-spot-write": "sha256:20d9661d19816b9c0e54d5e54987d537c42d57c60fe4106baa3766fb6aa407b9",
+        "priv-car-attached-ttl": "sha256:1e65e46176ff573c1ceadb8f3281ee784d233ca0cf13fb525c449eca4dd93914",
+        "priv-notefix-driving-latch": "sha256:fb9141be6b6070b56aaa72695dc36a46d58f05ecb86b1120395f04e2ea4070ed",
+        "priv-notefix-spot-write": "sha256:7eb0156ff79042987e0dc3d787097a33e2e7a69a91b0207124b248aa69911866",
         "priv-car-spot-getter": "sha256:43253936187ae12872384f1d3f8b2a95e9fa5e1446ff75eb67d57210d88231c9",
-        "priv-is-parked": "sha256:770912e607a9e6c4461b498604013b94e255e8f62c2880b831ee026f8b3cd552",
-        "priv-shareable-position": "sha256:135180f4bdde3ebc9f00508032f126a6eacc027e76771d4d8ade0d4001cd11ff"
+        "priv-is-parked": "sha256:9105550fa36bab204cf3e57e55da36109d728d37e468c2ad6f34935059b5db52",
+        "priv-shareable-position": "sha256:3ef46dd12cbceaa505cdde6bda71596951b7b38bb855fea15e34cad1d77de55e"
       },
       "ignored": [],
       "watchNew": true,
@@ -1013,6 +1032,18 @@
     "src/speedLimitCover.ts": {
       "hash": "sha256:d2e0860d56c6d3d02798c2e5721e926e0baad6a51daa845c2a25c632dd49494f",
       "why": "pure drive-engine module: code-locked (posted-limit cache cover + continue rule, 2026-09-22, Jeff: do 1-3)"
+    },
+    "src/carFeedOwner.ts": {
+      "hash": "sha256:50a29db9aff1949d6777f11a949686006cd212d9a9bef32aeb3bcb1cd8c5dac4",
+      "why": "pure drive-engine module: code-locked (added via --add-hash)"
+    },
+    "src/parkRearm.ts": {
+      "hash": "sha256:fa57524fd608b2342f57b740b913326214b36aa443084ea8a905f5a8cc12da79",
+      "why": "pure drive-engine module: code-locked (added via --add-hash)"
+    },
+    "src/privacyClock.ts": {
+      "hash": "sha256:1c1bb3c079516298c948928b36f3bd4dafae7b96ddf86dc2a1f3bb3ec7e2bb87",
+      "why": "pure drive-engine module: code-locked (added via --add-hash)"
     }
   }
 }

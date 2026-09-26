@@ -1,6 +1,6 @@
 {
   "approvedBy": "Jeff",
-  "approvedAt": "2026-09-25",
+  "approvedAt": "2026-09-26",
   "note": "THE NAVIGATION LOCK — see tools/sim-qc/nav_lock_test.mts and RULES.md §4. Edit only via --relock with Jeff's words.",
   "approvals": [
     {
@@ -386,6 +386,16 @@
         "src/carplay/CarMapView.tsx#car-aa-follow-reassert region d2b57d34353c → 5f50580d0994",
         "src/carplay/CarMapView.tsx#car-cam-style-load-seed region 5970f89e831a → 45965baa902e",
         "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region c62f85728b3c → d71b5ab35bd5"
+      ]
+    },
+    {
+      "at": "2026-09-26",
+      "quote": "Jeff, 2026-09-26: \"it should not follow me when i discconect from car play... this is a privacy concern. fix it and lock it.\" / \"Ship it\" (privacy follow-up: the witnessed park is saved on its own)",
+      "changes": [
+        "src/parkWitness.ts: NEW FILE code-locked e0aa8957ac27",
+        "src/locationPrivacy.ts#priv-hydrate-spot-adopt region 5c2327e70858 → 494abe2922cd",
+        "src/locationPrivacy.ts#priv-car-connected-transition region 45b7db76cd93 → 7e152450a994",
+        "src/locationPrivacy.ts#priv-notefix-driving-latch region fb9141be6b60 → a751208c9b12"
       ]
     }
   ],
@@ -953,12 +963,12 @@
         "DRIVING_SAVE_THROTTLE_MS": "15_000"
       },
       "regions": {
-        "priv-hydrate-spot-adopt": "sha256:5c2327e7085805a9a5a008597d12a6c4d8050ad1ae46230d27b584f058ede6dd",
+        "priv-hydrate-spot-adopt": "sha256:494abe2922cd46d2ac6b0a6472052c9e8e817db169ec1fce8df69fde5715af67",
         "priv-hydrate-latch-restore": "sha256:76bf0158252d1615232acbd4c5e5c8f62f7813fb1fb98343568e78a74c500842",
-        "priv-car-connected-transition": "sha256:45b7db76cd93fe0cc9e2e396e1e70fe3bdef46211b7908a3eb6e2c792cf34345",
+        "priv-car-connected-transition": "sha256:7e152450a994d1db38bbc30605a4655c463d54c0f1d4d8fb95194a165a2dac31",
         "priv-head-unit-raw": "sha256:887f2c2ddfd20d3740aba7d06b2027caab912bdeb4a4db27e1b3eac5271d8f6a",
         "priv-car-attached-ttl": "sha256:1e65e46176ff573c1ceadb8f3281ee784d233ca0cf13fb525c449eca4dd93914",
-        "priv-notefix-driving-latch": "sha256:fb9141be6b6070b56aaa72695dc36a46d58f05ecb86b1120395f04e2ea4070ed",
+        "priv-notefix-driving-latch": "sha256:a751208c9b120195d21b3d74bee1818412bd295cdd73ae6fe56bf32f61dde78e",
         "priv-notefix-spot-write": "sha256:7eb0156ff79042987e0dc3d787097a33e2e7a69a91b0207124b248aa69911866",
         "priv-car-spot-getter": "sha256:43253936187ae12872384f1d3f8b2a95e9fa5e1446ff75eb67d57210d88231c9",
         "priv-is-parked": "sha256:9105550fa36bab204cf3e57e55da36109d728d37e468c2ad6f34935059b5db52",
@@ -1069,6 +1079,10 @@
     },
     "src/carZoomStep.ts": {
       "hash": "sha256:4693b30ffeac389da5346540290ed2c42e78f471215ff5bb67365aff45984d13",
+      "why": "pure drive-engine module: code-locked (added via --add-hash)"
+    },
+    "src/parkWitness.ts": {
+      "hash": "sha256:e0aa8957ac27be72fdb18615a8bd3962d98f6fcd50706d88fbd65156bed83385",
       "why": "pure drive-engine module: code-locked (added via --add-hash)"
     }
   }

@@ -369,6 +369,24 @@
         "src/locationPrivacy.ts#priv-is-parked region 770912e607a9 → 9105550fa36b",
         "src/locationPrivacy.ts#priv-shareable-position region 135180f4bdde → 3ef46dd12cbc"
       ]
+    },
+    {
+      "at": "2026-09-25",
+      "quote": "Jeff, 2026-09-25: \"on carplay the crew button does not have the zoom in timer on it to zoom back in, we did touch this last night. also the carplay zoomout seems like its capped at a distance and is not smooth.\" / \"It creeps back in\" / \"Finish round 11\" / \"Ship it\"",
+      "changes": [
+        "src/camRepair.ts: NEW FILE code-locked 1332c895fdf5",
+        "src/carZoomStep.ts: NEW FILE code-locked 4693b30ffeac",
+        "src/ConvoyMapbox.tsx#mbx-cam-glide-pending region 43084c468933 → 26f11469369a",
+        "src/ConvoyMapbox.tsx#mbx-pushcam-glide-noselead region 20d6db8f2977 → be8224fdbe8b",
+        "src/carplay/CarMapView.tsx#car-getcam region 44b6419d6ed5 → 73c599236ac2",
+        "src/carplay/CarMapView.tsx#car-cam-coldstart-snap region 98c29111cec4 → c476b8825321",
+        "src/carplay/CarMapView.tsx#car-zoom-apply-now region 2f942f43965f → 3ef050183afe",
+        "src/carplay/CarMapView.tsx#car-gesture-zoom-compass region b15273b67edd → 7df9d8878692",
+        "src/carplay/CarMapView.tsx#car-gesture-crewfit region b148710d078a → dac6adc31a21",
+        "src/carplay/CarMapView.tsx#car-aa-follow-reassert region d2b57d34353c → 5f50580d0994",
+        "src/carplay/CarMapView.tsx#car-cam-style-load-seed region 5970f89e831a → 45965baa902e",
+        "src/carplay/CarMapView.tsx#car-jsx-selfcar-model region c62f85728b3c → d71b5ab35bd5"
+      ]
     }
   ],
   "files": {
@@ -606,8 +624,8 @@
         "mbx-selfcar-refresh-hook": "sha256:725d0a933b2a0307f9faef8592212edd548157db2c191c8ffae71bb8ca56c12c",
         "mbx-selfcar-lift-query": "sha256:0c50093772499faaca34681f6c7df2260574d629df4a02e171ae0734f4444d72",
         "mbx-selfcar-angdelta": "sha256:f3fac890a6555edce00adc3a152151946b51026b2e09fd4db41192df8be99761",
-        "mbx-cam-glide-pending": "sha256:43084c4689333780235fe668b28b2b439c60b879a304d09dd05414e33e1c37d6",
-        "mbx-pushcam-glide-noselead": "sha256:20d6db8f2977dfde8326d87eecb603609f177dcb31834b805cb09db90fbf9586",
+        "mbx-cam-glide-pending": "sha256:26f11469369a70d38dd2862e08fa5306da6ac45322da536dc8b2ee9f430df52c",
+        "mbx-pushcam-glide-noselead": "sha256:be8224fdbe8bd52ff5ddc862d00454204bd6eb091c0989100dab2854f485f37c",
         "mbx-pushcam-setcamera": "sha256:d1b136789e761bb69be9188a4e7a1514f8a40aed92eb445ed0021980aa75c6bd",
         "mbx-selfcar-bgtick": "sha256:d09c739f75ab5b31435ce0a291bc4cdb430720cb5d88dcb6dc48052681f95481",
         "mbx-car-frame-pump": "sha256:346b94255999305006afb788d45ec9438efbe076c6da75c5b6c5077ae4dc3c4a",
@@ -716,12 +734,12 @@
         "car-roadsnap-query-loop": "sha256:ccc2b23fc5954ffa2faf8a12d20484f3a2cbe84f88de9ac4719df9c41c82d75b",
         "car-zoom-bias-clamp": "sha256:c612d432cd5f32c05309e315ea874a25a176a206a9aa2243d1b525962fdc7e7b",
         "car-trim-ease-ticker": "sha256:44abb723506b13035836f40df2e1de799786db501ece97a1e3a11d851eb1c89b",
-        "car-getcam": "sha256:44b6419d6ed5170b15f4e2aabcfb1f6e180637df468b7fe06f58c4fe7c1fe610",
-        "car-cam-coldstart-snap": "sha256:98c29111cec4c2c002d0005b5855bec0d9da81829baea8c6fa485d8b52179f45",
-        "car-zoom-apply-now": "sha256:2f942f43965f7da0533ff6ed8ab7504e44e7d0e8c6870cb7215af546789d9326",
-        "car-gesture-zoom-compass": "sha256:b15273b67edd3fb4c5bc3113b2f09b6ebaff5e1a21dcc6f0ac95f164fd8e8532",
-        "car-gesture-crewfit": "sha256:b148710d078a16befa7c94b47f713917f547e0fd06edbc4dedac3241ce7ff372",
-        "car-aa-follow-reassert": "sha256:d2b57d34353c040358080757129c00a04941270f73e28053a06e5f71366167b5",
+        "car-getcam": "sha256:73c599236ac2c1d727b078ef446e4b0b8a6fe2aa9d68bf0d5882563ce7ff0504",
+        "car-cam-coldstart-snap": "sha256:c476b88253212d771f789a3e3e91a8c21cee237a06e3a320bbe4ea4bf386979b",
+        "car-zoom-apply-now": "sha256:3ef050183afe9337c6bfe1365206328a92a1fc0e6403881a2b887506f703b80c",
+        "car-gesture-zoom-compass": "sha256:7df9d887869236161f6a2891208ce61d4c5ec430582335bca34bbff42d766d4a",
+        "car-gesture-crewfit": "sha256:dac6adc31a2175636b40bdc8fc8d71483ad060e7d4424aa049d697ebae6db75d",
+        "car-aa-follow-reassert": "sha256:5f50580d09940ab36677e6c8bac398e76f247c7dd3523276008b98840976f8c7",
         "car-ribbon-partition": "sha256:a7bfe36b255714fc3c01430e32924335ee53b879eedb8a64d1e1b0bbfd117e5c",
         "car-route-proj-trim-lead": "sha256:16c09a9dae8d265218aa7019f8545a6e1737608643eb2e07bf6613d99e485330",
         "car-ribbon-cut-ease-anchor": "sha256:71598fb7f8b84bd766f386091d273b43294e7982815de188508be83678e979b9",
@@ -733,10 +751,10 @@
         "car-preview-cong-gradient": "sha256:e9b26b8f5901519f9045d0b917bb4f334f24ab291405bbc8b02dd51fb610bb8b",
         "car-preview-routes-fc": "sha256:ff4d6ada7dc6fa3a139f70a880bee7982fa3c8bd87bd0833f4f5ad480bab0a57",
         "car-selfcar-scale-refresh": "sha256:6548b3839dfdeda040362c36e38f7ab8d5a826c64758246dfdc965482aa64ac1",
-        "car-cam-style-load-seed": "sha256:5970f89e831afc8791bbb2d0f379d691b6814a55c99cda765f87b00f6f1ec4dd",
+        "car-cam-style-load-seed": "sha256:45965baa902e838205d578b2dbbfeac19b5a663903548f989b23797a0958cec9",
         "car-jsx-road-query-layers": "sha256:b60491f8d86c5396ac33dfed1f38da75c1b693405aea52cce3689daaf38ba0ff",
         "car-jsx-camera": "sha256:9f7bf5a288d8f29441df1ecd8519b33db62031ab76180734c8579dd03039adcd",
-        "car-jsx-selfcar-model": "sha256:c62f85728b3ca79f94e78ccd3eddd6a9fbc2b0b37531ae7a1b910318134dd8a7",
+        "car-jsx-selfcar-model": "sha256:d71b5ab35bd5920c7f4ec3777f0a58e9adb6969a5bf146d772dc41b276aa5e79",
         "car-jsx-preview-route-layers": "sha256:9b374172cf200330c424feb4e7f274cfe51a6a79f23831c30daa2e21e6d9b7c9",
         "car-jsx-nav-ribbon-layers": "sha256:db7ab9a97374f6782263c20a966af1994f3bacb01054c39ed19d2895fbedfd8b",
         "car-jsx-preview-congestion": "sha256:87c2a860ddb0a7f79fd8f03da4a8e4ebbb178dd4265f8bf64a64cf3a5eeae014"
@@ -1043,6 +1061,14 @@
     },
     "src/privacyClock.ts": {
       "hash": "sha256:1c1bb3c079516298c948928b36f3bd4dafae7b96ddf86dc2a1f3bb3ec7e2bb87",
+      "why": "pure drive-engine module: code-locked (added via --add-hash)"
+    },
+    "src/camRepair.ts": {
+      "hash": "sha256:1332c895fdf5e5d0562edf5914c76991275e79a3e10dc308e5c90667959b741f",
+      "why": "pure drive-engine module: code-locked (added via --add-hash)"
+    },
+    "src/carZoomStep.ts": {
+      "hash": "sha256:4693b30ffeac389da5346540290ed2c42e78f471215ff5bb67365aff45984d13",
       "why": "pure drive-engine module: code-locked (added via --add-hash)"
     }
   }
